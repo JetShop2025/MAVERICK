@@ -1,0 +1,125 @@
+import { MapContainer, TileLayer, Marker, Popup } from 'react-leaflet'
+import './App.css'
+import { useEffect, useState } from 'react'
+
+function App() {
+    const [apiStatus, setApiStatus] = useState('Checking...')
+
+  useEffect(() => {
+    fetch('http://localhost:3000')
+      .then((res) => res.json())
+      .then((data) => {
+        setApiStatus(data.status)
+      })
+      .catch(() => {
+        setApiStatus('offline')
+      })
+  }, [])
+  return (
+    <div className="app">
+      <aside className="sidebar">
+        <h1>Maverick Tracking System</h1>
+
+        <nav>
+          <button className="active">Dashboard</button>
+          <button>Trailers</button>
+          <button>Dispatch</button>
+          <button>Alerts</button>
+          <button>Reports</button>
+        </nav>
+      </aside>
+
+      <main className="main">
+        <header className="topbar">
+          <div>
+            <h2>Fleet Dashboard</h2>
+            <p>Live trailer location and temperature monitoring</p>
+          </div>
+
+          <div className="status">
+            <span className="dot"></span>
+            System {apiStatus}
+          </div>
+        </header>
+
+        <section className="cards">
+          <div className="card">
+            <p>Active Trailers</p>
+            <strong>12</strong>
+          </div>
+
+          <div className="card">
+            <p>Moving</p>
+            <strong>8</strong>
+          </div>
+
+          <div className="card">
+            <p>Temperature Alerts</p>
+            <strong>2</strong>
+          </div>
+
+          <div className="card">
+            <p>Offline Devices</p>
+            <strong>1</strong>
+          </div>
+        </section>
+
+        <section className="content-grid">
+          <div className="panel map-panel">
+            <h3>Live Fleet Map</h3>
+            <MapContainer
+              center={[36.320755, -121.249853]}
+              zoom={13}
+              style={{ height: '420px', width: '100%', borderRadius: '12px' }}
+>
+             <TileLayer
+              attribution='&copy; OpenStreetMap contributors'
+              url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+      />
+
+  <Marker position={[36.320755, -121.249853]}>
+    <Popup>
+      <strong>Trailer de prueba</strong>
+      <br />
+      Temperatura: 27.9 °C
+      <br />
+      SIM7080G
+    </Popup>
+  </Marker>
+</MapContainer>
+          </div>
+
+          <div className="panel">
+            <h3>Trailer Status</h3>
+
+            <div className="trailer-row">
+              <div>
+                <strong>Trailer 1042</strong>
+                <p>En route · Fresno, CA</p>
+              </div>
+              <span>34.8°F</span>
+            </div>
+
+            <div className="trailer-row">
+              <div>
+                <strong>Trailer 1078</strong>
+                <p>Loading · Salinas, CA</p>
+              </div>
+              <span>36.2°F</span>
+            </div>
+
+            <div className="trailer-row alert">
+              <div>
+                <strong>Trailer 1115</strong>
+                <p>Temperature alert</p>
+              </div>
+              <span>44.9°F</span>
+            </div>
+          </div>
+        </section>
+      </main>
+    </div>
+  )
+}
+
+export default App

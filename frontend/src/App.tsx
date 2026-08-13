@@ -4,17 +4,35 @@ import { useEffect, useState } from 'react'
 
 function App() {
     const [apiStatus, setApiStatus] = useState('Checking...')
+    const [telemetry, setTelemetry] = useState<any>(null)
 
   useEffect(() => {
-    fetch('http://localhost:3000')
+  const cargarTelemetria = () => {
+    fetch('https://maverick-1z64.onrender.com/api/telemetry/latest')
       .then((res) => res.json())
       .then((data) => {
-        setApiStatus(data.status)
+        if (data.ok) {
+          setTelemetry(data.telemetry)
+          setApiStatus('online')
+        } else {
+          setApiStatus('offline')
+        }
       })
       .catch(() => {
         setApiStatus('offline')
       })
-  }, [])
+  }
+
+  cargarTelemetria()
+
+  const intervalo = setInterval(
+    cargarTelemetria,
+    5000
+  )
+
+  return () => clearInterval(intervalo)
+}, [])
+
   return (
     <div className="app">
       <aside className="sidebar">
@@ -77,16 +95,26 @@ function App() {
               url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
       />
 
-  <Marker position={[36.320755, -121.249853]}>
+ {telemetry && (
+  <Marker
+    position={[
+      telemetry.latitude,
+      telemetry.longitude
+    ]}
+  >
     <Popup>
-      <strong>Trailer de prueba</strong>
+      <strong>{telemetry.deviceId}</strong>
       <br />
-      Temperatura: 27.9 °C
+      Temperature: {((telemetry.temperature * 9) / 5 + 32).toFixed(1)} °F
       <br />
-      SIM7080G
+      Lat: {telemetry.latitude}
+      <br />
+      Lon: {telemetry.longitude}
     </Popup>
   </Marker>
-</MapContainer>
+)}
+
+            </MapContainer>
           </div>
 
           <div className="panel">

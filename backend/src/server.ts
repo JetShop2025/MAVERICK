@@ -24,6 +24,8 @@ app.get('/health', (_req, res) => {
   })
 })
 
+let latestTelemetry: any = null;
+
 app.post('/api/telemetry', (req, res) => {
   const {
     deviceId,
@@ -32,6 +34,15 @@ app.post('/api/telemetry', (req, res) => {
     longitude,
     altitude
   } = req.body
+
+  latestTelemetry = {
+  deviceId,
+  temperature,
+  latitude,
+  longitude,
+  altitude,
+  receivedAt: new Date().toISOString()
+};
 
   console.log('Telemetry received:', {
     deviceId,
@@ -46,6 +57,21 @@ app.post('/api/telemetry', (req, res) => {
     message: 'Telemetry received'
   })
 })
+
+app.get('/api/telemetry/latest', (req, res) => {
+
+  if (!latestTelemetry) {
+    return res.status(404).json({
+      ok: false,
+      message: 'No telemetry available'
+    });
+  }
+
+  res.json({
+    ok: true,
+    telemetry: latestTelemetry
+  });
+});
 
 app.listen(PORT, () => {
   console.log(`Maverick API running on http://localhost:${PORT}`)

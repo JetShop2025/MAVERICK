@@ -44,13 +44,18 @@ app.post('/api/telemetry', (req, res) => {
   receivedAt: new Date().toISOString()
 };
 
-  console.log('Telemetry received:', {
-    deviceId,
-    temperature,
-    latitude,
-    longitude,
-    altitude
-  })
+const temperatureF =
+  (temperature * 9) / 5 + 32
+
+console.log('Telemetry received:', {
+  deviceId,
+  temperatureF: Number(
+    temperatureF.toFixed(1)
+  ),
+  latitude,
+  longitude,
+  altitude
+})
 
   res.json({
     ok: true,

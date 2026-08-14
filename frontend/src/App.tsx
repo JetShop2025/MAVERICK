@@ -170,20 +170,22 @@ const deviceStatus = getDeviceStatus()
     {((telemetry.temperature * 9) / 5 + 32).toFixed(1)} °F
     <br />
 
-    {telemetry.hasCurrentGps === false && (
-      <>
-        <strong>Last known location</strong>
-        <br />
-      </>
-    )}
+    {(telemetry.hasCurrentGps === false ||
+  deviceStatus !== 'online') && (
+  <>
+    <strong>Last known location</strong>
+    <br />
+  </>
+)}
 
     Lat: {telemetry.latitude}
     <br />
 
     Lon: {telemetry.longitude}
 
-    {telemetry.hasCurrentGps === false &&
-      telemetry.locationReceivedAt && (
+    {(telemetry.hasCurrentGps === false ||
+  deviceStatus !== 'online') &&
+  telemetry.locationReceivedAt && (
         <>
           <br />
           <span>

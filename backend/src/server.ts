@@ -1,9 +1,18 @@
 import express from 'express'
 import cors from 'cors'
 import dotenv from 'dotenv'
+import { PrismaClient } from './generated/prisma/client.js'
+import { PrismaPg } from '@prisma/adapter-pg'
 
 dotenv.config()
 
+const adapter = new PrismaPg({
+  connectionString: process.env.DATABASE_URL
+})
+
+const prisma = new PrismaClient({
+  adapter
+})
 const app = express()
 const PORT = process.env.PORT || 3000
 
@@ -26,7 +35,7 @@ app.get('/health', (_req, res) => {
 
 let latestTelemetry: any = null;
 
-app.post('/api/telemetry', (req, res) => {
+app.post('/api/telemetry', async (req, res) => {
   const {
     deviceId,
     temperature,
@@ -43,6 +52,16 @@ app.post('/api/telemetry', (req, res) => {
   altitude,
   receivedAt: new Date().toISOString()
 };
+
+await prisma.telemetry.create({
+  data: {
+    deviceId,
+    temperature,
+    latitude,
+    longitude,
+    altitude
+  }
+})
 
 const temperatureF =
   (temperature * 9) / 5 + 32
@@ -63,20 +82,39 @@ console.log('Telemetry received:', {
   })
 })
 
-app.get('/api/telemetry/latest', (req, res) => {
+app.get('/api/telemetry/latest', async (req, res) => {
+  try {
+    const latestTelemetry =
+      await prisma.telemetry.findFirst({
+        orderBy: {
+          receivedAt: 'desc'
+        }
+      })
 
-  if (!latestTelemetry) {
-    return res.status(404).json({
+    if (!latestTelemetry) {
+      return res.status(404).json({
+        ok: false,
+        message: 'No telemetry available'
+      })
+    }
+
+    res.json({
+      ok: true,
+      telemetry: latestTelemetry
+    })
+
+  } catch (error) {
+    console.error(
+      'Error loading latest telemetry:',
+      error
+    )
+
+    res.status(500).json({
       ok: false,
-      message: 'No telemetry available'
-    });
+      message: 'Database error'
+    })
   }
-
-  res.json({
-    ok: true,
-    telemetry: latestTelemetry
-  });
-});
+})
 
 app.listen(PORT, () => {
   console.log(`Maverick API running on http://localhost:${PORT}`)

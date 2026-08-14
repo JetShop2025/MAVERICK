@@ -1,10 +1,10 @@
 import { MapContainer, TileLayer, Marker, Popup } from 'react-leaflet'
 import L from 'leaflet'
-
 import markerIcon2x from 'leaflet/dist/images/marker-icon-2x.png'
 import markerIcon from 'leaflet/dist/images/marker-icon.png'
 import markerShadow from 'leaflet/dist/images/marker-shadow.png'
 import './App.css'
+import maverickLogo from './assets/maverick-logo.jpeg'
 import { useEffect, useState } from 'react'
 const trailerIcon = L.icon({
   iconRetinaUrl: markerIcon2x,
@@ -20,6 +20,16 @@ const trailerIcon = L.icon({
 function App() {
     const [, setApiStatus] = useState('Checking...')
     const [telemetry, setTelemetry] = useState<any>(null)
+
+    const [, setNow] = useState(Date.now())
+
+useEffect(() => {
+  const timer = setInterval(() => {
+    setNow(Date.now())
+  }, 5000)
+
+  return () => clearInterval(timer)
+}, [])
 
     const getDeviceStatus = () => {
   if (!telemetry?.receivedAt) {
@@ -74,7 +84,7 @@ const deviceStatus = getDeviceStatus()
   return (
     <div className="app">
       <aside className="sidebar">
-        <h1>Maverick Tracking System</h1>
+        <img src={maverickLogo} alt="Maverick Logo" className="logo" />
 
         <nav>
           <button className="active">Dashboard</button>
@@ -88,15 +98,18 @@ const deviceStatus = getDeviceStatus()
       <main className="main">
         <header className="topbar">
           <div>
-            <h2>Fleet Dashboard</h2>
+            <h2>I LOVE YOU INGRID</h2>
             <p>Live trailer location and temperature monitoring</p>
           </div>
 
-          <div className="status">
-            <span className={`dot ${deviceStatus}`}></span>
-            Device {deviceStatus}
-          </div>
-        </header>
+      <div className={`status status-${deviceStatus}`}>
+        <span className={`dot ${deviceStatus}`}></span>
+
+        <span>
+          Device {deviceStatus}
+        </span>
+      </div>
+      </header>
 
         <section className="cards">
           <div className="card">
@@ -144,14 +157,25 @@ const deviceStatus = getDeviceStatus()
 
   >
     <Popup>
-      <strong>{telemetry.deviceId}</strong>
-      <br />
-      Temperature: {((telemetry.temperature * 9) / 5 + 32).toFixed(1)} °F
-      <br />
-      Lat: {telemetry.latitude}
-      <br />
-      Lon: {telemetry.longitude}
-    </Popup>
+  <div className={`map-popup map-popup-${deviceStatus}`}>
+    <strong>{telemetry.deviceId}</strong>
+    <br />
+
+    <span>
+      Status: {deviceStatus}
+    </span>
+    <br />
+
+    Temperature:{' '}
+    {((telemetry.temperature * 9) / 5 + 32).toFixed(1)} °F
+    <br />
+
+    Lat: {telemetry.latitude}
+    <br />
+
+    Lon: {telemetry.longitude}
+  </div>
+</Popup>
   </Marker>
 )}
 

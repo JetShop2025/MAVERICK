@@ -118,7 +118,8 @@ const deviceStatus = getDeviceStatus()
               url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
       />
 
- {telemetry && (
+ {telemetry?.latitude != null &&
+ telemetry?.longitude != null && (
   <Marker
     position={[
       telemetry.latitude,

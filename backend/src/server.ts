@@ -44,6 +44,21 @@ app.post('/api/telemetry', async (req, res) => {
     altitude
   } = req.body
 
+  const safeLatitude =
+  typeof latitude === 'number'
+    ? latitude
+    : null
+
+const safeLongitude =
+  typeof longitude === 'number'
+    ? longitude
+    : null
+
+const safeAltitude =
+  typeof altitude === 'number'
+    ? altitude
+    : null
+
   latestTelemetry = {
   deviceId,
   temperature,
@@ -57,9 +72,9 @@ await prisma.telemetry.create({
   data: {
     deviceId,
     temperature,
-    latitude,
-    longitude,
-    altitude
+    latitude: safeLatitude,
+    longitude: safeLongitude,
+    altitude: safeAltitude
   }
 })
 
@@ -71,19 +86,19 @@ console.log('Telemetry received:', {
   temperatureF: Number(
     temperatureF.toFixed(1)
   ),
-  latitude,
-  longitude,
-  altitude
+  latitude: safeLatitude,
+  longitude: safeLongitude,
+  altitude: safeAltitude
+})
+res.json({
+  ok: true,
+  message: 'Telemetry received'
+})
 })
 
-  res.json({
-    ok: true,
-    message: 'Telemetry received'
-  })
-})
-
-app.get('/api/telemetry/latest', async (req, res) => {
+app.get('/api/telemetry/latest', async (_req, res) => {
   try {
+    // Última telemetría recibida, tenga GPS o no
     const latestTelemetry =
       await prisma.telemetry.findFirst({
         orderBy: {
@@ -98,9 +113,55 @@ app.get('/api/telemetry/latest', async (req, res) => {
       })
     }
 
+    // Última telemetría que SÍ tuvo ubicación GPS válida
+    const latestLocation =
+      await prisma.telemetry.findFirst({
+        where: {
+          latitude: {
+            not: null
+          },
+          longitude: {
+            not: null
+          }
+        },
+        orderBy: {
+          receivedAt: 'desc'
+        }
+      })
+
+    const hasCurrentGps =
+      latestTelemetry.latitude !== null &&
+      latestTelemetry.longitude !== null
+
     res.json({
       ok: true,
-      telemetry: latestTelemetry
+      telemetry: {
+        ...latestTelemetry,
+
+        // Si la lectura actual no tiene GPS,
+        // usamos la última ubicación conocida
+        latitude:
+          latestTelemetry.latitude ??
+          latestLocation?.latitude ??
+          null,
+
+        longitude:
+          latestTelemetry.longitude ??
+          latestLocation?.longitude ??
+          null,
+
+        altitude:
+          latestTelemetry.altitude ??
+          latestLocation?.altitude ??
+          null,
+
+        // Nos permite saber si el GPS actual tiene fix
+        hasCurrentGps,
+
+        // Fecha de la última ubicación GPS válida
+        locationReceivedAt:
+          latestLocation?.receivedAt ?? null
+      }
     })
 
   } catch (error) {

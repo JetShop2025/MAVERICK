@@ -88,6 +88,18 @@ button {
   background: #22c55e;
 }
 
+.dot.online {
+  background: #22c55e;
+}
+
+.dot.delayed {
+  background: #f59e0b;
+}
+
+.dot.offline {
+  background: #ef4444;
+}
+
 .cards {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));

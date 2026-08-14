@@ -3,8 +3,31 @@ import './App.css'
 import { useEffect, useState } from 'react'
 
 function App() {
-    const [apiStatus, setApiStatus] = useState('Checking...')
+    const [, setApiStatus] = useState('Checking...')
     const [telemetry, setTelemetry] = useState<any>(null)
+
+    const getDeviceStatus = () => {
+  if (!telemetry?.receivedAt) {
+    return 'offline'
+  }
+
+  const ageMs =
+    Date.now() -
+    new Date(telemetry.receivedAt).getTime()
+
+  if (ageMs < 90000) {
+    return 'online'
+  }
+
+  if (ageMs < 300000) {
+    return 'delayed'
+  }
+
+  return 'offline'
+}
+
+const deviceStatus = getDeviceStatus()
+
 
   useEffect(() => {
   const cargarTelemetria = () => {
@@ -55,8 +78,8 @@ function App() {
           </div>
 
           <div className="status">
-            <span className="dot"></span>
-            System {apiStatus}
+            <span className={`dot ${deviceStatus}`}></span>
+            Device {deviceStatus}
           </div>
         </header>
 

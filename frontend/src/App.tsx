@@ -98,8 +98,8 @@ const deviceStatus = getDeviceStatus()
       <main className="main">
         <header className="topbar">
           <div>
-            <h2>I LOVE YOU INGRID</h2>
-            <p>Live trailer location and temperature monitoring</p>
+            <h2>FLEET DASHBOARD</h2>
+            <p>Live Trailer Location and Temperature Monitoring</p>
           </div>
 
       <div className={`status status-${deviceStatus}`}>
@@ -170,10 +170,33 @@ const deviceStatus = getDeviceStatus()
     {((telemetry.temperature * 9) / 5 + 32).toFixed(1)} °F
     <br />
 
+    {telemetry.hasCurrentGps === false && (
+      <>
+        <strong>Last known location</strong>
+        <br />
+      </>
+    )}
+
     Lat: {telemetry.latitude}
     <br />
 
     Lon: {telemetry.longitude}
+
+    {telemetry.hasCurrentGps === false &&
+      telemetry.locationReceivedAt && (
+        <>
+          <br />
+          <span>
+            Location updated:{' '}
+            {new Date(
+              telemetry.locationReceivedAt
+            ).toLocaleTimeString([], {
+              hour: '2-digit',
+              minute: '2-digit'
+            })}
+          </span>
+        </>
+      )}
   </div>
 </Popup>
   </Marker>

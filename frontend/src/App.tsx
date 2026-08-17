@@ -670,6 +670,50 @@ function App() {
     telemetry?.latitude != null &&
     telemetry?.longitude != null
 
+  // =====================================================
+  // GPS DISPLAY STATE
+  // =====================================================
+  // Device connectivity and GPS availability are separate.
+  // A trailer can be ONLINE while the GNSS is still
+  // acquiring a fresh fix. In that case Maverick keeps
+  // the previous valid position only as "last known".
+
+  const gpsAcquiring =
+    deviceStatus === 'online' &&
+    !Boolean(
+      telemetry?.hasCurrentGps
+    )
+
+  const gpsStatusText =
+    telemetry?.hasCurrentGps
+      ? 'Current'
+      : gpsAcquiring
+        ? '🟡 Acquiring location...'
+        : hasLocation
+          ? 'Last known'
+          : 'Unavailable'
+
+  const gpsDetailText =
+    telemetry?.hasCurrentGps
+      ? 'Current GPS'
+      : gpsAcquiring
+        ? '🟡 Acquiring GPS location...'
+        : hasLocation
+          ? 'Last known GPS'
+          : 'No GPS'
+
+  const locationLabel =
+    telemetry?.hasCurrentGps
+      ? 'Location'
+      : hasLocation
+        ? 'Last known location'
+        : 'Location'
+
+  const locationTimeLabel =
+    telemetry?.hasCurrentGps
+      ? 'Location Updated'
+      : 'Last Valid Location'
+
   const normalizedSearch =
     searchTerm
       .trim()
@@ -1499,10 +1543,10 @@ function App() {
             <>
               <MapContainer
                 center={[
-                  36.320755,
-                  -121.249853
+                  39.8283,
+                  -98.5795
                 ]}
-                zoom={9}
+                zoom={4}
                 zoomControl={true}
                 className="fleet-map"
               >
@@ -1540,6 +1584,11 @@ function App() {
                       ]}
                       icon={
                         trailerIcon
+                      }
+                      opacity={
+                        telemetry.hasCurrentGps
+                          ? 1
+                          : 0.55
                       }
                     >
                       <Popup>
@@ -1582,7 +1631,9 @@ function App() {
                           {
                             telemetry.hasCurrentGps
                               ? 'Current GPS location'
-                              : 'Last known location'
+                              : gpsAcquiring
+                                ? '🟡 Acquiring GPS · showing last known location'
+                                : 'Last known location'
                           }
 
                           <br />
@@ -1605,7 +1656,11 @@ function App() {
                               <>
                                 <br />
 
-                                Location updated:{' '}
+                                {
+                                  telemetry.hasCurrentGps
+                                    ? 'Location updated: '
+                                    : 'Last valid location: '
+                                }
 
                                 {
                                   formatDateTime(
@@ -1965,9 +2020,7 @@ function App() {
 
                             <dd>
                               {
-                                telemetry.hasCurrentGps
-                                  ? 'Current'
-                                  : 'Last known'
+                                gpsStatusText
                               }
                             </dd>
                           </div>
@@ -1988,7 +2041,9 @@ function App() {
 
                           <div>
                             <dt>
-                              Location
+                              {
+                                locationLabel
+                              }
                             </dt>
 
                             <dd className="location-value">
@@ -2016,7 +2071,9 @@ function App() {
 
                           <div>
                             <dt>
-                              Location Updated
+                              {
+                                locationTimeLabel
+                              }
                             </dt>
 
                             <dd>
@@ -2669,11 +2726,7 @@ function App() {
 
                   <strong>
                     {
-                      telemetry?.hasCurrentGps
-                        ? 'Current'
-                        : hasLocation
-                          ? 'Last known'
-                          : 'Unavailable'
+                      gpsStatusText
                     }
                   </strong>
                 </article>
@@ -3169,11 +3222,7 @@ function App() {
 
                   <dd>
                     {
-                      telemetry?.hasCurrentGps
-                        ? 'Current GPS'
-                        : hasLocation
-                          ? 'Last known GPS'
-                          : 'No GPS'
+                      gpsDetailText
                     }
                   </dd>
                 </div>
@@ -3194,7 +3243,11 @@ function App() {
 
                 <div>
                   <dt>
-                    Location updated
+                    {
+                      telemetry?.hasCurrentGps
+                        ? 'Location updated'
+                        : 'Last valid location'
+                    }
                   </dt>
 
                   <dd>
@@ -3208,7 +3261,13 @@ function App() {
 
                 <div>
                   <dt>
-                    Coordinates
+                    {
+                      telemetry?.hasCurrentGps
+                        ? 'Coordinates'
+                        : hasLocation
+                          ? 'Last known coordinates'
+                          : 'Coordinates'
+                    }
                   </dt>
 
                   <dd>

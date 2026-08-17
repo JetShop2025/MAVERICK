@@ -65,7 +65,17 @@ model Telemetry {
   latitude    Float?
   longitude   Float?
   altitude    Float?
-  receivedAt  DateTime @default(now())
+
+  // Momento REAL en que el dispositivo capturo la lectura.
+  // Para GPS valido viene del UTC de GNSS.
+  recordedAt DateTime?
+
+  // true = lectura historica reenviada desde la cola SD.
+  // Nunca debe reemplazar el estado/ubicacion "en vivo".
+  isBackfill Boolean @default(false)
+
+  // Momento en que Maverick recibio el paquete.
+  receivedAt DateTime @default(now())
 
   assetId Int?
   asset   Asset? @relation(fields: [assetId], references: [id], onDelete: SetNull)
@@ -73,4 +83,6 @@ model Telemetry {
   @@index([deviceId])
   @@index([assetId])
   @@index([receivedAt])
+  @@index([recordedAt])
+  @@index([isBackfill])
 }

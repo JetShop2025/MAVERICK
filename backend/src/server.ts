@@ -826,7 +826,9 @@ app.post(
         temperature,
         latitude,
         longitude,
-        altitude
+        altitude,
+        recordedAt,
+        isBackfill
       } = req.body
 
       // ---------------------------------
@@ -863,6 +865,29 @@ app.post(
           ? altitude
           : null
 
+      const safeIsBackfill =
+        isBackfill === true
+
+      let safeRecordedAt:
+        Date | null = null
+
+      if (
+        typeof recordedAt === 'string' &&
+        recordedAt.trim().length > 0
+      ) {
+        const parsedRecordedAt =
+          new Date(recordedAt)
+
+        if (
+          !Number.isNaN(
+            parsedRecordedAt.getTime()
+          )
+        ) {
+          safeRecordedAt =
+            parsedRecordedAt
+        }
+      }
+
       // ---------------------------------
       // GUARDAR
       // ---------------------------------
@@ -887,6 +912,12 @@ app.post(
 
     altitude:
       safeAltitude,
+
+    recordedAt:
+      safeRecordedAt,
+
+    isBackfill:
+      safeIsBackfill,
 
     assetId:
       asset?.id ?? null
@@ -924,7 +955,15 @@ app.post(
             safeLongitude,
 
           altitude:
-            safeAltitude
+            safeAltitude,
+
+          recordedAt:
+            safeRecordedAt
+              ?.toISOString() ??
+            null,
+
+          isBackfill:
+            safeIsBackfill
         }
       )
 
@@ -1004,7 +1043,11 @@ if (assetIds.length === 0) {
     where: {
       assetId: {
         in: assetIds
-      }
+      },
+
+      // Una lectura reenviada desde SD es historial,
+      // no el estado actual del trailer.
+      isBackfill: false
     },
     orderBy: {
       receivedAt: 'desc'
@@ -1027,20 +1070,38 @@ if (assetIds.length === 0) {
       const latestLocation =
         await prisma.telemetry.findFirst({
           where: {
-  assetId: {
-    in: assetIds
-  },
-  latitude: {
-    not: null
-  },
-  longitude: {
-    not: null
-  }
-},
+            assetId: {
+              in: assetIds
+            },
 
-          orderBy: {
-            receivedAt: 'desc'
-          }
+            // No usar reenvios historicos para mover
+            // el marcador del mapa en tiempo real.
+            isBackfill: false,
+
+            latitude: {
+              not: null
+            },
+
+            longitude: {
+              not: null
+            },
+
+            // Solo ubicaciones con hora real capturada
+            // por GNSS. Evita que datos viejos anteriores
+            // a esta correccion parezcan ubicacion nueva.
+            recordedAt: {
+              not: null
+            }
+          },
+
+          orderBy: [
+            {
+              recordedAt: 'desc'
+            },
+            {
+              receivedAt: 'desc'
+            }
+          ]
         })
 
       // ---------------------------------
@@ -1051,6 +1112,8 @@ if (assetIds.length === 0) {
         latestTelemetry.latitude !==
           null &&
         latestTelemetry.longitude !==
+          null &&
+        latestTelemetry.recordedAt !==
           null
 
       // ---------------------------------
@@ -1081,8 +1144,11 @@ if (assetIds.length === 0) {
 
           hasCurrentGps,
 
+          // Compatibilidad con el frontend actual:
+          // conservamos el nombre locationReceivedAt,
+          // pero ahora representa la hora REAL de captura GPS.
           locationReceivedAt:
-            latestLocation?.receivedAt ??
+            latestLocation?.recordedAt ??
             null
         }
       })

@@ -517,6 +517,9 @@ app.get(
             name: true,
             description: true,
             active: true,
+            temperatureMinC: true,
+            temperatureMaxC: true,
+            temperatureAlertsEnabled: true,
             createdAt: true,
             updatedAt: true
           }
@@ -542,7 +545,7 @@ app.get(
 )
 
 // =====================================================
-// RENOMBRAR ASSET
+// EDITAR ASSET / LIMITES DE TEMPERATURA
 // =====================================================
 
 app.patch(
@@ -587,22 +590,6 @@ app.patch(
         })
       }
 
-      const name =
-        typeof req.body?.name === 'string'
-          ? req.body.name.trim()
-          : ''
-
-      if (
-        name.length < 2 ||
-        name.length > 80
-      ) {
-        return res.status(400).json({
-          ok: false,
-          message:
-            'Asset name must be between 2 and 80 characters'
-        })
-      }
-
       const asset =
         await prisma.asset.findFirst({
           where: {
@@ -618,20 +605,188 @@ app.patch(
         })
       }
 
+      const data: {
+        name?: string
+        temperatureMinC?: number | null
+        temperatureMaxC?: number | null
+        temperatureAlertsEnabled?: boolean
+      } = {}
+
+      // ---------------------------------
+      // NOMBRE
+      // ---------------------------------
+
+      if (req.body?.name !== undefined) {
+        const name =
+          typeof req.body.name === 'string'
+            ? req.body.name.trim()
+            : ''
+
+        if (
+          name.length < 2 ||
+          name.length > 80
+        ) {
+          return res.status(400).json({
+            ok: false,
+            message:
+              'Asset name must be between 2 and 80 characters'
+          })
+        }
+
+        data.name = name
+      }
+
+      // ---------------------------------
+      // TEMPERATURA MINIMA
+      // ---------------------------------
+
+      if (
+        req.body?.temperatureMinC !==
+        undefined
+      ) {
+        const value =
+          req.body.temperatureMinC
+
+        if (value === null) {
+          data.temperatureMinC = null
+        } else {
+          const parsed =
+            Number(value)
+
+          if (!Number.isFinite(parsed)) {
+            return res.status(400).json({
+              ok: false,
+              message:
+                'Invalid minimum temperature'
+            })
+          }
+
+          data.temperatureMinC = parsed
+        }
+      }
+
+      // ---------------------------------
+      // TEMPERATURA MAXIMA
+      // ---------------------------------
+
+      if (
+        req.body?.temperatureMaxC !==
+        undefined
+      ) {
+        const value =
+          req.body.temperatureMaxC
+
+        if (value === null) {
+          data.temperatureMaxC = null
+        } else {
+          const parsed =
+            Number(value)
+
+          if (!Number.isFinite(parsed)) {
+            return res.status(400).json({
+              ok: false,
+              message:
+                'Invalid maximum temperature'
+            })
+          }
+
+          data.temperatureMaxC = parsed
+        }
+      }
+
+      // ---------------------------------
+      // ACTIVAR / DESACTIVAR ALERTAS
+      // ---------------------------------
+
+      if (
+        req.body
+          ?.temperatureAlertsEnabled !==
+        undefined
+      ) {
+        if (
+          typeof req.body
+            .temperatureAlertsEnabled !==
+          'boolean'
+        ) {
+          return res.status(400).json({
+            ok: false,
+            message:
+              'Invalid temperature alert setting'
+          })
+        }
+
+        data.temperatureAlertsEnabled =
+          req.body
+            .temperatureAlertsEnabled
+      }
+
+      // ---------------------------------
+      // VALIDAR LIMITES FINALES
+      // ---------------------------------
+
+      const finalMin =
+        data.temperatureMinC !== undefined
+          ? data.temperatureMinC
+          : asset.temperatureMinC
+
+      const finalMax =
+        data.temperatureMaxC !== undefined
+          ? data.temperatureMaxC
+          : asset.temperatureMaxC
+
+      if (
+        finalMin !== null &&
+        finalMax !== null &&
+        finalMin !== undefined &&
+        finalMax !== undefined &&
+        finalMin >= finalMax
+      ) {
+        return res.status(400).json({
+          ok: false,
+          message:
+            'Minimum temperature must be lower than maximum temperature'
+        })
+      }
+
+      if (
+        data.temperatureAlertsEnabled === true &&
+        (finalMin === null ||
+          finalMin === undefined ||
+          finalMax === null ||
+          finalMax === undefined)
+      ) {
+        return res.status(400).json({
+          ok: false,
+          message:
+            'Set minimum and maximum temperatures before enabling alerts'
+        })
+      }
+
+      if (
+        Object.keys(data).length === 0
+      ) {
+        return res.status(400).json({
+          ok: false,
+          message:
+            'No valid fields to update'
+        })
+      }
+
       const updatedAsset =
         await prisma.asset.update({
           where: {
             id: asset.id
           },
-          data: {
-            name
-          },
+          data,
           select: {
             id: true,
             deviceId: true,
             name: true,
             description: true,
             active: true,
+            temperatureMinC: true,
+            temperatureMaxC: true,
+            temperatureAlertsEnabled: true,
             createdAt: true,
             updatedAt: true
           }

@@ -43,6 +43,10 @@ model Asset {
   description String?
   active      Boolean  @default(true)
 
+  temperatureMinC          Float?
+  temperatureMaxC          Float?
+  temperatureAlertsEnabled Boolean @default(false)
+
   companyId Int
   company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
 

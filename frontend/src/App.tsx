@@ -265,6 +265,36 @@ function App() {
   ] = useState('')
 
   const [
+    temperatureLimitsOpen,
+    setTemperatureLimitsOpen
+  ] = useState(false)
+
+  const [
+    temperatureMinF,
+    setTemperatureMinF
+  ] = useState('')
+
+  const [
+    temperatureMaxF,
+    setTemperatureMaxF
+  ] = useState('')
+
+  const [
+    temperatureAlertsEnabled,
+    setTemperatureAlertsEnabled
+  ] = useState(false)
+
+  const [
+    temperatureLimitsSaving,
+    setTemperatureLimitsSaving
+  ] = useState(false)
+
+  const [
+    temperatureLimitsError,
+    setTemperatureLimitsError
+  ] = useState('')
+
+  const [
     notificationsOpen,
     setNotificationsOpen
   ] = useState(false)
@@ -692,10 +722,52 @@ function App() {
     hasLocation &&
     assetVisible
 
-  const activeAlertCount =
+  const currentTemperatureC =
+    telemetry?.temperature != null
+      ? Number(telemetry.temperature)
+      : null
+
+  const temperatureBelowLimit =
+    Boolean(
+      selectedAsset
+        ?.temperatureAlertsEnabled
+    ) &&
+    currentTemperatureC != null &&
+    selectedAsset?.temperatureMinC != null &&
+    currentTemperatureC <
+      Number(
+        selectedAsset.temperatureMinC
+      )
+
+  const temperatureAboveLimit =
+    Boolean(
+      selectedAsset
+        ?.temperatureAlertsEnabled
+    ) &&
+    currentTemperatureC != null &&
+    selectedAsset?.temperatureMaxC != null &&
+    currentTemperatureC >
+      Number(
+        selectedAsset.temperatureMaxC
+      )
+
+  const temperatureOutOfRange =
+    temperatureBelowLimit ||
+    temperatureAboveLimit
+
+  const deviceAlertCount =
     deviceStatus === 'online'
       ? 0
       : 1
+
+  const temperatureAlertCount =
+    temperatureOutOfRange
+      ? 1
+      : 0
+
+  const activeAlertCount =
+    deviceAlertCount +
+    temperatureAlertCount
 
   // =====================================================
   // ACTIONS
@@ -822,6 +894,208 @@ function App() {
         )
       } finally {
         setRenameSaving(false)
+      }
+    }
+
+  const celsiusToFahrenheit = (
+    value: number
+  ) =>
+    (value * 9) / 5 + 32
+
+  const fahrenheitToCelsius = (
+    value: number
+  ) =>
+    ((value - 32) * 5) / 9
+
+  const openTemperatureLimits = () => {
+    if (!selectedAsset) {
+      return
+    }
+
+    setTemperatureLimitsError('')
+
+    setTemperatureMinF(
+      selectedAsset.temperatureMinC != null
+        ? celsiusToFahrenheit(
+            Number(
+              selectedAsset.temperatureMinC
+            )
+          ).toFixed(1)
+        : ''
+    )
+
+    setTemperatureMaxF(
+      selectedAsset.temperatureMaxC != null
+        ? celsiusToFahrenheit(
+            Number(
+              selectedAsset.temperatureMaxC
+            )
+          ).toFixed(1)
+        : ''
+    )
+
+    setTemperatureAlertsEnabled(
+      Boolean(
+        selectedAsset
+          .temperatureAlertsEnabled
+      )
+    )
+
+    setTemperatureLimitsOpen(true)
+  }
+
+  const handleSaveTemperatureLimits =
+    async () => {
+      const token =
+        localStorage.getItem(
+          'maverick_token'
+        )
+
+      if (!selectedAsset?.id) {
+        setTemperatureLimitsError(
+          'Asset information is not loaded yet.'
+        )
+        return
+      }
+
+      if (!token) {
+        setTemperatureLimitsError(
+          'Your session has expired.'
+        )
+        return
+      }
+
+      const cleanMin =
+        temperatureMinF.trim()
+
+      const cleanMax =
+        temperatureMaxF.trim()
+
+      const minF =
+        cleanMin === ''
+          ? null
+          : Number(cleanMin)
+
+      const maxF =
+        cleanMax === ''
+          ? null
+          : Number(cleanMax)
+
+      if (
+        minF !== null &&
+        !Number.isFinite(minF)
+      ) {
+        setTemperatureLimitsError(
+          'Enter a valid minimum temperature.'
+        )
+        return
+      }
+
+      if (
+        maxF !== null &&
+        !Number.isFinite(maxF)
+      ) {
+        setTemperatureLimitsError(
+          'Enter a valid maximum temperature.'
+        )
+        return
+      }
+
+      if (
+        minF !== null &&
+        maxF !== null &&
+        minF >= maxF
+      ) {
+        setTemperatureLimitsError(
+          'Minimum temperature must be lower than maximum temperature.'
+        )
+        return
+      }
+
+      if (
+        temperatureAlertsEnabled &&
+        (
+          minF === null ||
+          maxF === null
+        )
+      ) {
+        setTemperatureLimitsError(
+          'Set both minimum and maximum temperatures before enabling alerts.'
+        )
+        return
+      }
+
+      const temperatureMinC =
+        minF === null
+          ? null
+          : fahrenheitToCelsius(
+              minF
+            )
+
+      const temperatureMaxC =
+        maxF === null
+          ? null
+          : fahrenheitToCelsius(
+              maxF
+            )
+
+      setTemperatureLimitsSaving(true)
+      setTemperatureLimitsError('')
+
+      try {
+        const res =
+          await fetch(
+            `${API_BASE}/api/assets/${selectedAsset.id}`,
+            {
+              method: 'PATCH',
+              headers: {
+                'Content-Type':
+                  'application/json',
+                Authorization:
+                  `Bearer ${token}`
+              },
+              body: JSON.stringify({
+                temperatureMinC,
+                temperatureMaxC,
+                temperatureAlertsEnabled
+              })
+            }
+          )
+
+        const data =
+          await res.json()
+
+        if (res.status === 401) {
+          handleLogout()
+          return
+        }
+
+        if (!res.ok || !data.ok) {
+          setTemperatureLimitsError(
+            data.message ||
+            'Unable to save temperature limits.'
+          )
+          return
+        }
+
+        setAssets(
+          (currentAssets) =>
+            currentAssets.map(
+              (asset) =>
+                asset.id ===
+                  data.asset.id
+                  ? data.asset
+                  : asset
+            )
+        )
+
+        setTemperatureLimitsOpen(false)
+      } catch {
+        setTemperatureLimitsError(
+          'Unable to connect to Maverick.'
+        )
+      } finally {
+        setTemperatureLimitsSaving(false)
       }
     }
 
@@ -1879,52 +2153,107 @@ function App() {
           </div>
 
           {
-            deviceStatus === 'online'
+            activeAlertCount === 0
               ? (
                 <div className="no-alerts">
-                  No active device alerts.
+                  No active alerts.
                 </div>
               )
               : (
-                <button
-                  className="alert-item alert-button"
-                  onClick={() =>
-                    setNotificationsOpen(true)
+                <>
+                  {
+                    temperatureOutOfRange && (
+                      <button
+                        className="alert-item alert-button"
+                        onClick={() =>
+                          setNotificationsOpen(true)
+                        }
+                        type="button"
+                      >
+                        <div className="mini-status offline">
+                          !
+                        </div>
+
+                        <div>
+                          <strong>
+                            {
+                              temperatureAboveLimit
+                                ? 'High Temperature'
+                                : 'Low Temperature'
+                            }
+                          </strong>
+
+                          <span>
+                            {selectedAssetName}
+                          </span>
+
+                          <small>
+                            Current: {temperatureF}°F
+                            {' · '}
+                            Limit:{' '}
+                            {
+                              temperatureAboveLimit
+                                ? `${celsiusToFahrenheit(
+                                    Number(
+                                      selectedAsset?.temperatureMaxC
+                                    )
+                                  ).toFixed(1)}°F max`
+                                : `${celsiusToFahrenheit(
+                                    Number(
+                                      selectedAsset?.temperatureMinC
+                                    )
+                                  ).toFixed(1)}°F min`
+                            }
+                          </small>
+                        </div>
+                      </button>
+                    )
                   }
-                  type="button"
-                >
-                  <div
-                    className={
-                      `mini-status ${deviceStatus}`
-                    }
-                  >
-                    !
-                  </div>
 
-                  <div>
-                    <strong>
-                      {
-                        deviceStatus === 'offline'
-                          ? 'Trailer Offline'
-                          : 'Telemetry Delayed'
-                      }
-                    </strong>
+                  {
+                    deviceStatus !== 'online' && (
+                      <button
+                        className="alert-item alert-button"
+                        onClick={() =>
+                          setNotificationsOpen(true)
+                        }
+                        type="button"
+                      >
+                        <div
+                          className={
+                            `mini-status ${deviceStatus}`
+                          }
+                        >
+                          !
+                        </div>
 
-                    <span>
-                      {selectedAssetName}
-                    </span>
+                        <div>
+                          <strong>
+                            {
+                              deviceStatus === 'offline'
+                                ? 'Trailer Offline'
+                                : 'Telemetry Delayed'
+                            }
+                          </strong>
 
-                    <small>
-                      {
-                        telemetry?.receivedAt
-                          ? formatAge(
-                              telemetry.receivedAt
-                            )
-                          : 'No recent telemetry'
-                      }
-                    </small>
-                  </div>
-                </button>
+                          <span>
+                            {selectedAssetName}
+                          </span>
+
+                          <small>
+                            {
+                              telemetry?.receivedAt
+                                ? formatAge(
+                                    telemetry.receivedAt
+                                  )
+                                : 'No recent telemetry'
+                            }
+                          </small>
+                        </div>
+                      </button>
+                    )
+                  }
+                </>
               )
           }
         </div>
@@ -2130,6 +2459,18 @@ function App() {
                             }
                           >
                             Rename
+                          </button>
+
+                          <button
+                            onClick={
+                              openTemperatureLimits
+                            }
+                            type="button"
+                            disabled={
+                              !selectedAsset
+                            }
+                          >
+                            Temp Limits
                           </button>
 
                           <button
@@ -2549,56 +2890,110 @@ function App() {
             </div>
 
             {
-              deviceStatus ===
-                'online'
+              activeAlertCount === 0
                 ? (
                   <p>
-                    No active device alerts.
+                    No active alerts.
                   </p>
                 )
                 : (
-                  <button
-                    className="popover-alert"
-                    onClick={() => {
-                      setNotificationsOpen(
-                        false
+                  <>
+                    {
+                      temperatureOutOfRange && (
+                        <button
+                          className="popover-alert"
+                          onClick={() => {
+                            setNotificationsOpen(
+                              false
+                            )
+                            setDetailsOpen(true)
+                          }}
+                          type="button"
+                        >
+                          <span className="mini-status offline">
+                            !
+                          </span>
+
+                          <div>
+                            <strong>
+                              {
+                                temperatureAboveLimit
+                                  ? 'High Temperature Alert'
+                                  : 'Low Temperature Alert'
+                              }
+                            </strong>
+
+                            <small>
+                              {selectedAssetName}
+                              {' · '}
+                              Current {temperatureF}°F
+                              {' · '}
+                              {
+                                temperatureAboveLimit
+                                  ? `Max ${celsiusToFahrenheit(
+                                      Number(
+                                        selectedAsset?.temperatureMaxC
+                                      )
+                                    ).toFixed(1)}°F`
+                                  : `Min ${celsiusToFahrenheit(
+                                      Number(
+                                        selectedAsset?.temperatureMinC
+                                      )
+                                    ).toFixed(1)}°F`
+                              }
+                            </small>
+                          </div>
+                        </button>
                       )
-                      openAssetOnMap()
-                    }}
-                    type="button"
-                  >
-                    <span
-                      className={
-                        `mini-status ${deviceStatus}`
-                      }
-                    >
-                      !
-                    </span>
+                    }
 
-                    <div>
-                      <strong>
-                        {
-                          deviceStatus ===
-                            'offline'
-                            ? 'Trailer Offline'
-                            : 'Telemetry Delayed'
-                        }
-                      </strong>
+                    {
+                      deviceStatus !== 'online' && (
+                        <button
+                          className="popover-alert"
+                          onClick={() => {
+                            setNotificationsOpen(
+                              false
+                            )
+                            openAssetOnMap()
+                          }}
+                          type="button"
+                        >
+                          <span
+                            className={
+                              `mini-status ${deviceStatus}`
+                            }
+                          >
+                            !
+                          </span>
 
-                      <small>
-                        {
-                          telemetry?.deviceId ||
-                          selectedDeviceId
-                        }
-                        {' · '}
-                        {
-                          formatAge(
-                            telemetry?.receivedAt
-                          )
-                        }
-                      </small>
-                    </div>
-                  </button>
+                          <div>
+                            <strong>
+                              {
+                                deviceStatus ===
+                                  'offline'
+                                  ? 'Trailer Offline'
+                                  : 'Telemetry Delayed'
+                              }
+                            </strong>
+
+                            <small>
+                              {
+                                telemetry?.deviceId ||
+                                selectedDeviceId
+                              }
+                              {' · '}
+                              {
+                                formatAge(
+                                  telemetry?.receivedAt
+                                )
+                              }
+                            </small>
+                          </div>
+                        </button>
+                      )
+                    }
+                  </>
                 )
             }
 
@@ -2727,6 +3122,48 @@ function App() {
 
                 <div>
                   <dt>
+                    Temperature Limits
+                  </dt>
+
+                  <dd>
+                    {
+                      selectedAsset
+                        ?.temperatureMinC != null &&
+                      selectedAsset
+                        ?.temperatureMaxC != null
+                        ? `${celsiusToFahrenheit(
+                            Number(
+                              selectedAsset.temperatureMinC
+                            )
+                          ).toFixed(1)}°F – ${celsiusToFahrenheit(
+                            Number(
+                              selectedAsset.temperatureMaxC
+                            )
+                          ).toFixed(1)}°F`
+                        : 'Not configured'
+                    }
+                  </dd>
+                </div>
+
+                <div>
+                  <dt>
+                    Temperature Alerts
+                  </dt>
+
+                  <dd>
+                    {
+                      selectedAsset
+                        ?.temperatureAlertsEnabled
+                        ? temperatureOutOfRange
+                          ? 'ACTIVE ALERT'
+                          : 'Enabled'
+                        : 'Disabled'
+                    }
+                  </dd>
+                </div>
+
+                <div>
+                  <dt>
                     GPS
                   </dt>
 
@@ -2799,6 +3236,20 @@ function App() {
                   type="button"
                 >
                   Close
+                </button>
+
+                <button
+                  className="secondary-action"
+                  onClick={() => {
+                    setDetailsOpen(false)
+                    openTemperatureLimits()
+                  }}
+                  type="button"
+                  disabled={
+                    !selectedAsset
+                  }
+                >
+                  Temp Limits
                 </button>
 
                 <button
@@ -2965,6 +3416,207 @@ function App() {
                     renameSaving
                       ? 'Saving...'
                       : 'Save Name'
+                  }
+                </button>
+              </div>
+            </section>
+          </div>
+        )
+      }
+
+      {/* ================================= */}
+      {/* TEMPERATURE LIMITS MODAL */}
+      {/* ================================= */}
+
+      {
+        temperatureLimitsOpen && (
+          <div
+            className="modal-backdrop"
+            onMouseDown={() => {
+              if (
+                !temperatureLimitsSaving
+              ) {
+                setTemperatureLimitsOpen(
+                  false
+                )
+                setTemperatureLimitsError(
+                  ''
+                )
+              }
+            }}
+          >
+            <section
+              className="details-modal rename-modal"
+              onMouseDown={
+                (event) =>
+                  event.stopPropagation()
+              }
+            >
+              <div className="modal-header">
+                <div>
+                  <span className="page-kicker">
+                    Temperature Monitor
+                  </span>
+
+                  <h2>
+                    {
+                      selectedAssetName
+                    }
+                  </h2>
+
+                  <small className="modal-device-id">
+                    Device ID:{' '}
+                    {
+                      telemetry?.deviceId ||
+                      selectedDeviceId
+                    }
+                  </small>
+                </div>
+
+                <button
+                  className="modal-close"
+                  onClick={() => {
+                    setTemperatureLimitsOpen(
+                      false
+                    )
+                    setTemperatureLimitsError(
+                      ''
+                    )
+                  }}
+                  type="button"
+                  disabled={
+                    temperatureLimitsSaving
+                  }
+                >
+                  ×
+                </button>
+              </div>
+
+              <div className="rename-form">
+                <label
+                  htmlFor="temperature-min-f"
+                >
+                  Minimum temperature (°F)
+                </label>
+
+                <input
+                  id="temperature-min-f"
+                  type="number"
+                  step="0.1"
+                  value={
+                    temperatureMinF
+                  }
+                  onChange={
+                    (event) =>
+                      setTemperatureMinF(
+                        event.target.value
+                      )
+                  }
+                  placeholder="Example: 34"
+                  disabled={
+                    temperatureLimitsSaving
+                  }
+                />
+
+                <label
+                  htmlFor="temperature-max-f"
+                >
+                  Maximum temperature (°F)
+                </label>
+
+                <input
+                  id="temperature-max-f"
+                  type="number"
+                  step="0.1"
+                  value={
+                    temperatureMaxF
+                  }
+                  onChange={
+                    (event) =>
+                      setTemperatureMaxF(
+                        event.target.value
+                      )
+                  }
+                  placeholder="Example: 40"
+                  disabled={
+                    temperatureLimitsSaving
+                  }
+                />
+
+                <label className="toggle-row">
+                  <span>
+                    Enable temperature alerts
+                  </span>
+
+                  <input
+                    type="checkbox"
+                    checked={
+                      temperatureAlertsEnabled
+                    }
+                    onChange={
+                      (event) =>
+                        setTemperatureAlertsEnabled(
+                          event.target.checked
+                        )
+                    }
+                    disabled={
+                      temperatureLimitsSaving
+                    }
+                  />
+
+                  <i className="toggle" />
+                </label>
+
+                <div className="rename-help">
+                  <span>
+                    Maverick stores limits internally in Celsius and displays them here in Fahrenheit.
+                  </span>
+                </div>
+
+                {
+                  temperatureLimitsError && (
+                    <div className="rename-error">
+                      {
+                        temperatureLimitsError
+                      }
+                    </div>
+                  )
+                }
+              </div>
+
+              <div className="modal-actions">
+                <button
+                  className="secondary-action"
+                  onClick={() => {
+                    setTemperatureLimitsOpen(
+                      false
+                    )
+                    setTemperatureLimitsError(
+                      ''
+                    )
+                  }}
+                  type="button"
+                  disabled={
+                    temperatureLimitsSaving
+                  }
+                >
+                  Cancel
+                </button>
+
+                <button
+                  className="primary-action"
+                  onClick={
+                    handleSaveTemperatureLimits
+                  }
+                  type="button"
+                  disabled={
+                    temperatureLimitsSaving
+                  }
+                >
+                  {
+                    temperatureLimitsSaving
+                      ? 'Saving...'
+                      : 'Save Limits'
                   }
                 </button>
               </div>

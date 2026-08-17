@@ -1,6 +1,10 @@
 import { useState } from 'react'
 import maverickLogo from './assets/maverick-logo.jpeg'
 import './Login.css'
+const API_BASE =
+  window.location.hostname === 'localhost'
+    ? 'http://localhost:3000'
+    : 'https://maverick-1z64.onrender.com'
 
 type LoginProps = {
   onLogin: () => void
@@ -21,7 +25,7 @@ function Login({ onLogin }: LoginProps) {
 
   try {
     const response = await fetch(
-      'https://maverick-1z64.onrender.com/api/auth/login',
+         `${API_BASE}/api/auth/login`,
       {
         method: 'POST',
         headers: {
@@ -73,7 +77,7 @@ function Login({ onLogin }: LoginProps) {
           className="login-logo"
         />
 
-        <h1>Maverick</h1>
+        <h1></h1>
 
         <p className="login-subtitle">
           Fleet Tracking & Temperature Monitoring

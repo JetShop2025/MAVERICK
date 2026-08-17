@@ -484,6 +484,179 @@ app.get(
   }
 )
 
+app.get(
+  '/api/assets',
+  requireAuth,
+  async (
+    req: AuthenticatedRequest,
+    res: Response
+  ) => {
+    try {
+      const companyId =
+        req.user?.companyId
+
+      if (!companyId) {
+        return res.status(401).json({
+          ok: false,
+          message: 'Invalid session'
+        })
+      }
+
+      const assets =
+        await prisma.asset.findMany({
+          where: {
+            companyId,
+            active: true
+          },
+          orderBy: {
+            name: 'asc'
+          },
+          select: {
+            id: true,
+            deviceId: true,
+            name: true,
+            description: true,
+            active: true,
+            createdAt: true,
+            updatedAt: true
+          }
+        })
+
+      return res.json({
+        ok: true,
+        assets
+      })
+    } catch (error) {
+      console.error(
+        'Get assets error:',
+        error
+      )
+
+      return res.status(500).json({
+        ok: false,
+        message:
+          'Unable to load assets'
+      })
+    }
+  }
+)
+
+// =====================================================
+// RENOMBRAR ASSET
+// =====================================================
+
+app.patch(
+  '/api/assets/:id',
+  requireAuth,
+  async (
+    req: AuthenticatedRequest,
+    res: Response
+  ) => {
+    try {
+      const companyId =
+        req.user?.companyId
+
+      const role =
+        req.user?.role
+
+      if (!companyId) {
+        return res.status(401).json({
+          ok: false,
+          message: 'Invalid session'
+        })
+      }
+
+      if (
+        role !== 'company_admin' &&
+        role !== 'superadmin'
+      ) {
+        return res.status(403).json({
+          ok: false,
+          message:
+            'You do not have permission to edit assets'
+        })
+      }
+
+      const assetId =
+        Number(req.params.id)
+
+      if (!Number.isInteger(assetId)) {
+        return res.status(400).json({
+          ok: false,
+          message: 'Invalid asset ID'
+        })
+      }
+
+      const name =
+        typeof req.body?.name === 'string'
+          ? req.body.name.trim()
+          : ''
+
+      if (
+        name.length < 2 ||
+        name.length > 80
+      ) {
+        return res.status(400).json({
+          ok: false,
+          message:
+            'Asset name must be between 2 and 80 characters'
+        })
+      }
+
+      const asset =
+        await prisma.asset.findFirst({
+          where: {
+            id: assetId,
+            companyId
+          }
+        })
+
+      if (!asset) {
+        return res.status(404).json({
+          ok: false,
+          message: 'Asset not found'
+        })
+      }
+
+      const updatedAsset =
+        await prisma.asset.update({
+          where: {
+            id: asset.id
+          },
+          data: {
+            name
+          },
+          select: {
+            id: true,
+            deviceId: true,
+            name: true,
+            description: true,
+            active: true,
+            createdAt: true,
+            updatedAt: true
+          }
+        })
+
+      return res.json({
+        ok: true,
+        asset: updatedAsset
+      })
+
+    } catch (error) {
+      console.error(
+        'Update asset error:',
+        error
+      )
+
+      return res.status(500).json({
+        ok: false,
+        message:
+          'Unable to update asset'
+      })
+    }
+  }
+)
+
 // =====================================================
 // RECIBIR TELEMETRIA
 // =====================================================

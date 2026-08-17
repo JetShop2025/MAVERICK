@@ -11,16 +11,36 @@ import markerIcon2x from 'leaflet/dist/images/marker-icon-2x.png'
 import markerIcon from 'leaflet/dist/images/marker-icon.png'
 import markerShadow from 'leaflet/dist/images/marker-shadow.png'
 
-import { useEffect, useState } from 'react'
+import {
+  useCallback,
+  useEffect,
+  useState
+} from 'react'
 
 import './App.css'
 import maverickLogo from './assets/maverick-logo.jpeg'
 import Login from './Login'
 
+type ViewName =
+  | 'map'
+  | 'fleet'
+  | 'operations'
+  | 'monitors'
+  | 'reports'
 
-// =====================================================
-// ICONO DEL TRAILER
-// =====================================================
+type DeviceStatus =
+  | 'online'
+  | 'delayed'
+  | 'offline'
+
+type StatusFilter =
+  | 'all'
+  | DeviceStatus
+
+const API_BASE =
+  window.location.hostname === 'localhost'
+    ? 'http://localhost:3000'
+    : 'https://maverick-1z64.onrender.com'
 
 const trailerIcon = L.icon({
   iconRetinaUrl: markerIcon2x,
@@ -31,11 +51,6 @@ const trailerIcon = L.icon({
   popupAnchor: [1, -34],
   shadowSize: [41, 41]
 })
-
-
-// =====================================================
-// CONTROLADOR DEL MAPA
-// =====================================================
 
 function MapController({
   latitude,
@@ -53,7 +68,7 @@ function MapController({
     ) {
       map.setView(
         [latitude, longitude],
-        15
+        13
       )
     }
   }, [
@@ -65,83 +80,115 @@ function MapController({
   return null
 }
 
+function readStoredUser() {
+  try {
+    const saved =
+      localStorage.getItem(
+        'maverick_user'
+      )
 
-// =====================================================
-// APP
-// =====================================================
+    return saved
+      ? JSON.parse(saved)
+      : null
+  } catch {
+    return null
+  }
+}
 
 function App() {
+  // =====================================================
+  // LOGIN / SESSION
+  // =====================================================
 
-  // ---------------------------------
-  // LOGIN
-  // ---------------------------------
-const [
-  isLoggedIn,
-  setIsLoggedIn
-] = useState(
-  () =>
-    Boolean(
+  const [
+    isLoggedIn,
+    setIsLoggedIn
+  ] = useState(
+    () =>
+      Boolean(
+        localStorage.getItem(
+          'maverick_token'
+        )
+      )
+  )
+
+  const [
+    currentUser,
+    setCurrentUser
+  ] = useState<any>(
+    () => readStoredUser()
+  )
+
+  useEffect(() => {
+    const token =
       localStorage.getItem(
         'maverick_token'
       )
-    )
-)
 
-useEffect(() => {
-  const token =
-    localStorage.getItem(
-      'maverick_token'
-    )
-
-  if (!token) {
-    setIsLoggedIn(false)
-    return
-  }
-
-  fetch(
-    'https://maverick-1z64.onrender.com/api/auth/me',
-    {
-      headers: {
-        Authorization: `Bearer ${token}`
-      }
-    }
-  )
-    .then(async (res) => {
-      const data =
-        await res.json()
-
-      if (!res.ok || !data.ok) {
-        localStorage.removeItem(
-          'maverick_token'
-        )
-
-        localStorage.removeItem(
-          'maverick_user'
-        )
-
-        setIsLoggedIn(false)
-        return
-      }
-
-      localStorage.setItem(
-        'maverick_user',
-        JSON.stringify(data.user)
-      )
-
-      setIsLoggedIn(true)
-    })
-    .catch(() => {
+    if (!token) {
       setIsLoggedIn(false)
-    })
-}, [])
+      return
+    }
 
+    fetch(
+      `${API_BASE}/api/auth/me`,
+      {
+        headers: {
+          Authorization:
+            `Bearer ${token}`
+        }
+      }
+    )
+      .then(async (res) => {
+        const data =
+          await res.json()
 
-  // ---------------------------------
-  // TELEMETRIA
-  // ---------------------------------
+        if (
+          !res.ok ||
+          !data.ok
+        ) {
+          localStorage.removeItem(
+            'maverick_token'
+          )
+
+          localStorage.removeItem(
+            'maverick_user'
+          )
+
+          setCurrentUser(null)
+          setIsLoggedIn(false)
+          return
+        }
+
+        localStorage.setItem(
+          'maverick_user',
+          JSON.stringify(
+            data.user
+          )
+        )
+
+        setCurrentUser(
+          data.user
+        )
+
+        setIsLoggedIn(true)
+      })
+      .catch(() => {
+        setIsLoggedIn(false)
+      })
+  }, [])
+
+  // =====================================================
+  // DASHBOARD STATE
+  // =====================================================
 
   const [
-    ,
+    activeView,
+    setActiveView
+  ] = useState<ViewName>('map')
+
+  const [
+    apiStatus,
     setApiStatus
   ] = useState('Checking...')
 
@@ -150,92 +197,311 @@ useEffect(() => {
     setTelemetry
   ] = useState<any>(null)
 
-
-  // ---------------------------------
-  // TRAILER SELECCIONADO
-  // ---------------------------------
+  const [
+    assets,
+    setAssets
+  ] = useState<any[]>([])
 
   const [
     selectedDeviceId,
     setSelectedDeviceId
   ] = useState('TRAILER-001')
 
-
-  // ---------------------------------
-  // RELOJ PARA ACTUALIZAR STATUS
-  // ---------------------------------
-
   const [
-    ,
+    now,
     setNow
   ] = useState(Date.now())
 
+  const [
+    searchTerm,
+    setSearchTerm
+  ] = useState('')
+
+  const [
+    statusFilter,
+    setStatusFilter
+  ] = useState<StatusFilter>(
+    'all'
+  )
+
+  const [
+    assetTypeFilter,
+    setAssetTypeFilter
+  ] = useState('all')
+
+  const [
+    filtersOpen,
+    setFiltersOpen
+  ] = useState(true)
+
+  const [
+  bottomDockOpen,
+  setBottomDockOpen
+] = useState(false)
+
+  const [
+    detailsOpen,
+    setDetailsOpen
+  ] = useState(false)
+
+  const [
+    renameOpen,
+    setRenameOpen
+  ] = useState(false)
+
+  const [
+    renameValue,
+    setRenameValue
+  ] = useState('')
+
+  const [
+    renameSaving,
+    setRenameSaving
+  ] = useState(false)
+
+  const [
+    renameError,
+    setRenameError
+  ] = useState('')
+
+  const [
+    notificationsOpen,
+    setNotificationsOpen
+  ] = useState(false)
+
+  const [
+    helpOpen,
+    setHelpOpen
+  ] = useState(false)
+
+  const [
+    showOnline,
+    setShowOnline
+  ] = useState(true)
+
+  const [
+    showDelayed,
+    setShowDelayed
+  ] = useState(true)
+
+  const [
+    showOffline,
+    setShowOffline
+  ] = useState(true)
 
   useEffect(() => {
-
     const timer =
       setInterval(() => {
-
-        setNow(
-          Date.now()
-        )
-
+        setNow(Date.now())
       }, 5000)
 
     return () =>
       clearInterval(timer)
-
   }, [])
 
+  // =====================================================
+  // TELEMETRY
+  // =====================================================
+
+  const loadTelemetry =
+    useCallback(
+      async () => {
+        const token =
+          localStorage.getItem(
+            'maverick_token'
+          )
+
+        if (!token) {
+          setIsLoggedIn(false)
+          return
+        }
+
+        try {
+          const res =
+            await fetch(
+              `${API_BASE}/api/telemetry/latest`,
+              {
+                headers: {
+                  Authorization:
+                    `Bearer ${token}`
+                }
+              }
+            )
+
+          const data =
+            await res.json()
+
+          if (
+            res.status === 401
+          ) {
+            localStorage.removeItem(
+              'maverick_token'
+            )
+
+            localStorage.removeItem(
+              'maverick_user'
+            )
+
+            setCurrentUser(null)
+            setTelemetry(null)
+            setIsLoggedIn(false)
+            return
+          }
+
+          if (data.ok) {
+            setTelemetry(
+              data.telemetry
+            )
+
+            if (
+              data.telemetry?.deviceId
+            ) {
+              setSelectedDeviceId(
+                data.telemetry.deviceId
+              )
+            }
+
+            setApiStatus(
+              'online'
+            )
+          } else {
+            setApiStatus(
+              'offline'
+            )
+          }
+        } catch {
+          setApiStatus(
+            'offline'
+          )
+        }
+      },
+      []
+    )
+
+  useEffect(() => {
+    loadTelemetry()
+
+    const interval =
+      setInterval(
+        loadTelemetry,
+        5000
+      )
+
+    return () =>
+      clearInterval(
+        interval
+      )
+  }, [loadTelemetry])
+
+  const loadAssets =
+    useCallback(
+      async () => {
+        const token =
+          localStorage.getItem(
+            'maverick_token'
+          )
+
+        if (!token) {
+          return
+        }
+
+        try {
+          const res =
+            await fetch(
+              `${API_BASE}/api/assets`,
+              {
+                headers: {
+                  Authorization:
+                    `Bearer ${token}`
+                }
+              }
+            )
+
+          const data =
+            await res.json()
+
+          if (res.status === 401) {
+            localStorage.removeItem(
+              'maverick_token'
+            )
+            localStorage.removeItem(
+              'maverick_user'
+            )
+            setCurrentUser(null)
+            setAssets([])
+            setIsLoggedIn(false)
+            return
+          }
+
+          if (res.ok && data.ok) {
+            setAssets(
+              data.assets || []
+            )
+          }
+        } catch (error) {
+          console.error(
+            'Unable to load assets:',
+            error
+          )
+        }
+      },
+      []
+    )
+
+  useEffect(() => {
+    if (!isLoggedIn) {
+      return
+    }
+
+    loadAssets()
+  }, [
+    isLoggedIn,
+    loadAssets
+  ])
 
   // =====================================================
-  // STATUS DEL DISPOSITIVO
+  // DEVICE STATUS
   // =====================================================
 
-  const getDeviceStatus = () => {
+  const getDeviceStatus =
+    (): DeviceStatus => {
+      if (
+        !telemetry?.receivedAt
+      ) {
+        return 'offline'
+      }
 
-    if (
-      !telemetry?.receivedAt
-    ) {
+      const ageMs =
+        now -
+        new Date(
+          telemetry.receivedAt
+        ).getTime()
+
+      if (ageMs < 90000) {
+        return 'online'
+      }
+
+      if (ageMs < 300000) {
+        return 'delayed'
+      }
+
       return 'offline'
     }
-
-    const ageMs =
-      Date.now() -
-      new Date(
-        telemetry.receivedAt
-      ).getTime()
-
-
-    // Menos de 90 segundos
-    if (ageMs < 90000) {
-      return 'online'
-    }
-
-
-    // Entre 90 segundos y 5 minutos
-    if (ageMs < 300000) {
-      return 'delayed'
-    }
-
-
-    // Mas de 5 minutos
-    return 'offline'
-  }
-
 
   const deviceStatus =
     getDeviceStatus()
 
-
-  // =====================================================
-  // FORMATEAR FECHA Y HORA
-  // =====================================================
+  const statusLabel =
+    deviceStatus === 'online'
+      ? 'Online'
+      : deviceStatus ===
+          'delayed'
+        ? 'Delayed'
+        : 'Offline'
 
   const formatDateTime = (
     value?: string | null
   ) => {
-
     if (!value) {
       return 'Unknown'
     }
@@ -251,210 +517,191 @@ useEffect(() => {
     })
   }
 
-
-  // =====================================================
-  // CARGAR TELEMETRIA
-  // =====================================================
-
-  useEffect(() => {
-
-    const cargarTelemetria =
-      () => {
-
-        const token =
-  localStorage.getItem(
-    'maverick_token'
-  )
-
-fetch(
-  'https://maverick-1z64.onrender.com/api/telemetry/latest',
-  {
-    headers: {
-      Authorization: `Bearer ${token}`
+  const formatAge = (
+    value?: string | null
+  ) => {
+    if (!value) {
+      return 'No data'
     }
+
+    const diff =
+      Math.max(
+        0,
+        now -
+          new Date(
+            value
+          ).getTime()
+      )
+
+    const seconds =
+      Math.floor(
+        diff / 1000
+      )
+
+    if (seconds < 60) {
+      return `${seconds}s ago`
+    }
+
+    const minutes =
+      Math.floor(
+        seconds / 60
+      )
+
+    if (minutes < 60) {
+      return `${minutes}m ago`
+    }
+
+    const hours =
+      Math.floor(
+        minutes / 60
+      )
+
+    if (hours < 24) {
+      return `${hours}h ago`
+    }
+
+    return `${
+      Math.floor(
+        hours / 24
+      )
+    }d ago`
   }
-)
-
-          .then(
-            (res) =>
-              res.json()
-          )
-
-          .then(
-            (data) => {
-
-              if (data.ok) {
-
-                setTelemetry(
-                  data.telemetry
-                )
-
-                setApiStatus(
-                  'online'
-                )
-
-              } else {
-
-                setApiStatus(
-                  'offline'
-                )
-              }
-            }
-          )
-
-          .catch(
-            () => {
-
-              setApiStatus(
-                'offline'
-              )
-            }
-          )
-      }
-
-
-    cargarTelemetria()
-
-
-    const intervalo =
-      setInterval(
-        cargarTelemetria,
-        5000
-      )
-
-
-    return () =>
-      clearInterval(
-        intervalo
-      )
-
-  }, [])
-
 
   // =====================================================
-  // LOGIN
+  // USER
   // =====================================================
 
-  if (!isLoggedIn) {
+  const userName =
+    currentUser?.name ||
+    currentUser?.email ||
+    'Maverick User'
 
-    return (
-      <Login
-        onLogin={() =>
-          setIsLoggedIn(true)
-        }
-      />
+  const userRole =
+    currentUser?.role
+      ? String(
+          currentUser.role
+        )
+          .replaceAll(
+            '_',
+            ' '
+          )
+          .replace(
+            /\b\w/g,
+            (letter) =>
+              letter.toUpperCase()
+          )
+      : 'Fleet Operator'
+
+  const userInitials =
+    String(userName)
+      .split(/[\s@.]+/)
+      .filter(Boolean)
+      .slice(0, 2)
+      .map(
+        (part) =>
+          part[0]?.toUpperCase()
+      )
+      .join('') || 'MU'
+
+  // =====================================================
+  // CURRENT ASSET VALUES
+  // =====================================================
+
+  const temperatureF =
+    telemetry?.temperature != null
+      ? (
+          (
+            telemetry.temperature *
+              9
+          ) /
+            5 +
+          32
+        ).toFixed(1)
+      : '--'
+
+  const selectedAsset =
+    assets.find(
+      (asset) =>
+        asset.deviceId ===
+        selectedDeviceId
+    ) ||
+    assets.find(
+      (asset) =>
+        asset.deviceId ===
+        telemetry?.deviceId
     )
-  }
 
+  const selectedAssetName =
+    selectedAsset?.name ||
+    telemetry?.deviceId ||
+    selectedDeviceId
+
+  const hasLocation =
+    telemetry?.latitude != null &&
+    telemetry?.longitude != null
+
+  const normalizedSearch =
+    searchTerm
+      .trim()
+      .toLowerCase()
+
+  const matchesSearch =
+    !normalizedSearch ||
+    String(
+      telemetry?.deviceId || ''
+    )
+      .toLowerCase()
+      .includes(
+        normalizedSearch
+      ) ||
+    String(
+      selectedAssetName || ''
+    )
+      .toLowerCase()
+      .includes(
+        normalizedSearch
+      )
+
+  const matchesStatus =
+    statusFilter === 'all' ||
+    statusFilter ===
+      deviceStatus
+
+  const matchesAssetType =
+    assetTypeFilter ===
+      'all' ||
+    assetTypeFilter ===
+      'trailer'
+
+  const statusToggleEnabled =
+    deviceStatus === 'online'
+      ? showOnline
+      : deviceStatus ===
+          'delayed'
+        ? showDelayed
+        : showOffline
+
+  const assetVisible =
+    Boolean(telemetry) &&
+    matchesSearch &&
+    matchesStatus &&
+    matchesAssetType &&
+    statusToggleEnabled
+
+  const markerVisible =
+    hasLocation &&
+    assetVisible
+
+  const activeAlertCount =
+    deviceStatus === 'online'
+      ? 0
+      : 1
 
   // =====================================================
-  // DASHBOARD
+  // ACTIONS
   // =====================================================
 
-  return (
-
-    <div className="app">
-
-      {/* ================================= */}
-      {/* SIDEBAR */}
-      {/* ================================= */}
-
-      <aside className="sidebar">
-
-        <img
-          src={maverickLogo}
-          alt="Maverick Logo"
-          className="logo"
-        />
-
-
-        <nav>
-
-          <button className="active">
-            Dashboard
-          </button>
-
-          <button>
-            Trailers
-          </button>
-
-          <button>
-            Dispatch
-          </button>
-
-          <button>
-            Alerts
-          </button>
-
-          <button>
-            Reports
-          </button>
-
-        </nav>
-
-      </aside>
-
-
-      {/* ================================= */}
-      {/* MAIN */}
-      {/* ================================= */}
-
-      <main className="main">
-
-
-        {/* ================================= */}
-        {/* TOPBAR */}
-        {/* ================================= */}
-
-        <header className="topbar">
-
-          <div>
-
-            <h2>
-              FLEET DASHBOARD
-            </h2>
-
-            <p>
-              Live Trailer Location and
-              Temperature Monitoring
-            </p>
-
-          </div>
-
-
-          <div className="topbar-actions">
-
-  <div
-    className={
-      `status status-${deviceStatus}`
-    }
-  >
-    <span
-      className={
-        `dot ${deviceStatus}`
-      }
-    />
-
-    <span>
-      Device {deviceStatus}
-    </span>
-  </div>
-
-  <div className="user-menu">
-
-    <div className="user-info">
-      <strong>
-        Maverick User
-      </strong>
-
-      <span>
-        Fleet Operator
-      </span>
-    </div>
-
-    <button
-  className="logout-button"
-  onClick={() => {
+  const handleLogout = () => {
     localStorage.removeItem(
       'maverick_token'
     )
@@ -463,292 +710,626 @@ fetch(
       'maverick_user'
     )
 
+    setCurrentUser(null)
+    setTelemetry(null)
+    setAssets([])
     setIsLoggedIn(false)
-  }}
->
-  Logout
-</button>
+  }
 
-  </div>
+  const handleLogin = () => {
+    setCurrentUser(
+      readStoredUser()
+    )
 
-</div>
+    setIsLoggedIn(true)
+  }
 
-        </header>
+  const openRenameAsset = () => {
+    setRenameError('')
+    setRenameValue(
+      selectedAssetName
+    )
+    setRenameOpen(true)
+  }
 
+  const handleRenameAsset =
+    async () => {
+      const token =
+        localStorage.getItem(
+          'maverick_token'
+        )
 
-        {/* ================================= */}
-        {/* CARDS */}
-        {/* ================================= */}
+      const cleanName =
+        renameValue.trim()
 
-        <section className="cards">
+      if (!selectedAsset?.id) {
+        setRenameError(
+          'Asset information is not loaded yet.'
+        )
+        return
+      }
 
+      if (
+        cleanName.length < 2 ||
+        cleanName.length > 80
+      ) {
+        setRenameError(
+          'Asset name must be between 2 and 80 characters.'
+        )
+        return
+      }
 
-          <div className="card">
+      if (!token) {
+        setRenameError(
+          'Your session has expired.'
+        )
+        return
+      }
 
-            <p>
-              Active Trailers
-            </p>
+      setRenameSaving(true)
+      setRenameError('')
 
-            <strong>
-              {
-                telemetry &&
-                deviceStatus !== 'offline'
-                  ? 1
-                  : 0
-              }
-            </strong>
+      try {
+        const res =
+          await fetch(
+            `${API_BASE}/api/assets/${selectedAsset.id}`,
+            {
+              method: 'PATCH',
+              headers: {
+                'Content-Type':
+                  'application/json',
+                Authorization:
+                  `Bearer ${token}`
+              },
+              body: JSON.stringify({
+                name: cleanName
+              })
+            }
+          )
 
-          </div>
+        const data =
+          await res.json()
 
+        if (res.status === 401) {
+          handleLogout()
+          return
+        }
 
-          <div className="card">
+        if (!res.ok || !data.ok) {
+          setRenameError(
+            data.message ||
+            'Unable to rename asset.'
+          )
+          return
+        }
 
-            <p>
-              Online Devices
-            </p>
+        setAssets(
+          (currentAssets) =>
+            currentAssets.map(
+              (asset) =>
+                asset.id ===
+                  data.asset.id
+                  ? data.asset
+                  : asset
+            )
+        )
 
-            <strong>
-              {
-                deviceStatus === 'online'
-                  ? 1
-                  : 0
-              }
-            </strong>
+        setRenameOpen(false)
+        setRenameValue('')
+      } catch {
+        setRenameError(
+          'Unable to connect to Maverick.'
+        )
+      } finally {
+        setRenameSaving(false)
+      }
+    }
 
-          </div>
+  const openAssetOnMap = () => {
+    setSearchTerm('')
+    setStatusFilter('all')
+    setAssetTypeFilter('all')
+    setShowOnline(true)
+    setShowDelayed(true)
+    setShowOffline(true)
+    setFiltersOpen(true)
+    setActiveView('map')
+  }
 
+  const handleSearchKeyDown = (
+    event:
+      React.KeyboardEvent<HTMLInputElement>
+  ) => {
+    if (
+      event.key === 'Enter'
+    ) {
+      setActiveView('map')
+      setFiltersOpen(true)
+    }
+  }
 
-          <div className="card">
+  // =====================================================
+  // LOGIN SCREEN
+  // =====================================================
 
-            <p>
-              Delayed Devices
-            </p>
+  if (!isLoggedIn) {
+    return (
+      <Login
+        onLogin={
+          handleLogin
+        }
+      />
+    )
+  }
 
-            <strong>
-              {
-                deviceStatus === 'delayed'
-                  ? 1
-                  : 0
-              }
-            </strong>
+  // =====================================================
+  // MAIN DASHBOARD
+  // =====================================================
 
-          </div>
+  return (
+    <div className="mav-shell">
 
+      {/* ================================= */}
+      {/* HEADER */}
+      {/* ================================= */}
 
-          <div className="card">
+      <header className="mav-header">
 
-            <p>
-              Offline Devices
-            </p>
+        <button
+          className="mav-brand"
+          onClick={() =>
+            setActiveView('map')
+          }
+          type="button"
+        >
+          <img
+            src={maverickLogo}
+            alt="Maverick"
+          />
 
-            <strong>
-              {
-                deviceStatus === 'offline'
-                  ? 1
-                  : 0
-              }
-            </strong>
+          <strong>
+            MAVERICK
+          </strong>
+        </button>
 
-          </div>
+        <div className="mav-search">
+          <span>⌕</span>
 
-        </section>
+          <input
+            type="text"
+            value={
+              searchTerm
+            }
+            onChange={
+              (event) =>
+                setSearchTerm(
+                  event.target.value
+                )
+            }
+            onKeyDown={
+              handleSearchKeyDown
+            }
+            placeholder="Search trailer ID"
+            aria-label="Search trailers"
+          />
 
-
-        {/* ================================= */}
-        {/* MAPA + STATUS */}
-        {/* ================================= */}
-
-        <section className="content-grid">
-
-
-          {/* ================================= */}
-          {/* MAPA */}
-          {/* ================================= */}
-
-          <div className="panel map-panel">
-
-            <h3>
-              Live Fleet Map
-            </h3>
-
-
-            <div className="asset-selector">
-
-              <label
-                htmlFor="asset-select"
-              >
-                Locate Asset:
-              </label>
-
-
-              <select
-                id="asset-select"
-                value={
-                  selectedDeviceId
+          {
+            searchTerm && (
+              <button
+                className="clear-search"
+                onClick={() =>
+                  setSearchTerm('')
                 }
-                onChange={
-                  (e) =>
-                    setSelectedDeviceId(
-                      e.target.value
-                    )
-                }
+                type="button"
+                aria-label="Clear search"
               >
+                ×
+              </button>
+            )
+          }
+        </div>
 
-                <option
-                  value="TRAILER-001"
-                >
-                  TRAILER-001
-                </option>
+        <nav className="mav-nav">
+          <button
+            className={
+              activeView === 'map'
+                ? 'active'
+                : ''
+            }
+            onClick={() =>
+              setActiveView('map')
+            }
+          >
+            Map
+          </button>
 
-              </select>
+          <button
+            className={
+              activeView === 'fleet'
+                ? 'active'
+                : ''
+            }
+            onClick={() =>
+              setActiveView('fleet')
+            }
+          >
+            Fleet
+          </button>
 
+          <button
+            className={
+              activeView ===
+                'operations'
+                ? 'active'
+                : ''
+            }
+            onClick={() =>
+              setActiveView(
+                'operations'
+              )
+            }
+          >
+            Operations
+          </button>
+
+          <button
+            className={
+              activeView ===
+                'monitors'
+                ? 'active'
+                : ''
+            }
+            onClick={() =>
+              setActiveView(
+                'monitors'
+              )
+            }
+          >
+            Monitors
+          </button>
+
+          <button
+            className={
+              activeView ===
+                'reports'
+                ? 'active'
+                : ''
+            }
+            onClick={() =>
+              setActiveView(
+                'reports'
+              )
+            }
+          >
+            Reports
+          </button>
+        </nav>
+
+        <div className="mav-header-actions">
+          <button
+            className={
+              `icon-button ${
+                notificationsOpen
+                  ? 'active'
+                  : ''
+              }`
+            }
+            aria-label="Notifications"
+            onClick={() => {
+              setNotificationsOpen(
+                !notificationsOpen
+              )
+              setHelpOpen(false)
+            }}
+            type="button"
+          >
+            🔔
+
+            {
+              activeAlertCount >
+                0 && (
+                <span className="notification-badge">
+                  {
+                    activeAlertCount
+                  }
+                </span>
+              )
+            }
+          </button>
+
+          <button
+            className={
+              `icon-button ${
+                helpOpen
+                  ? 'active'
+                  : ''
+              }`
+            }
+            aria-label="Help"
+            onClick={() => {
+              setHelpOpen(
+                !helpOpen
+              )
+              setNotificationsOpen(
+                false
+              )
+            }}
+            type="button"
+          >
+            ?
+          </button>
+
+          <div className="user-chip">
+            <div className="user-avatar">
+              {userInitials}
             </div>
 
+            <div className="user-chip-text">
+              <strong>
+                {userName}
+              </strong>
 
-            <MapContainer
-              center={[
-                36.320755,
-                -121.249853
-              ]}
-              zoom={13}
-              style={{
-                height: '600px',
-                width: '100%',
-                borderRadius: '12px'
-              }}
+              <span>
+                {userRole}
+              </span>
+            </div>
+
+            <button
+              className="logout-link"
+              onClick={
+                handleLogout
+              }
+              type="button"
             >
+              Logout
+            </button>
+          </div>
+        </div>
 
-              <MapController
-                latitude={
-                  telemetry?.latitude ??
-                  null
-                }
-                longitude={
-                  telemetry?.longitude ??
-                  null
-                }
-              />
+      </header>
 
+      {/* ================================= */}
+      {/* STATUS BAR */}
+      {/* ================================= */}
 
-              <TileLayer
-                attribution={
-                  '&copy; OpenStreetMap contributors'
-                }
-                url={
-                  'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png'
-                }
-              />
+      <section className="mav-statusbar">
 
+        <select
+          value="all"
+          aria-label="Fleet selector"
+          onChange={() => {
+            setSearchTerm('')
+            setStatusFilter('all')
+          }}
+        >
+          <option value="all">
+            All Fleets
+          </option>
+        </select>
 
-              {
-                telemetry?.latitude != null &&
-                telemetry?.longitude != null &&
-                (
+        <div className="metric-pill neutral">
+          <span className="metric-dot" />
 
-                  <Marker
-                    position={[
-                      telemetry.latitude,
-                      telemetry.longitude
-                    ]}
-                    icon={
-                      trailerIcon
-                    }
-                  >
+          <strong>
+            {telemetry ? 1 : 0}
+          </strong>
 
-                    <Popup>
+          Assets
+        </div>
 
-                      <div
-                        className={
-                          `map-popup map-popup-${deviceStatus}`
-                        }
-                      >
+        <div className="metric-pill online">
+          <span className="metric-dot" />
 
-                        <strong>
-                          {
-                            telemetry.deviceId
+          <strong>
+            {
+              deviceStatus ===
+                'online' &&
+              telemetry
+                ? 1
+                : 0
+            }
+          </strong>
+
+          Online
+        </div>
+
+        <div className="metric-pill delayed">
+          <span className="metric-dot" />
+
+          <strong>
+            {
+              deviceStatus ===
+                'delayed' &&
+              telemetry
+                ? 1
+                : 0
+            }
+          </strong>
+
+          Delayed
+        </div>
+
+        <div className="metric-pill offline">
+          <span className="metric-dot" />
+
+          <strong>
+            {
+              deviceStatus ===
+                'offline'
+                ? 1
+                : 0
+            }
+          </strong>
+
+          Offline
+        </div>
+
+        <div className="statusbar-spacer" />
+
+        {
+          activeView === 'map' && (
+            <button
+              className="toolbar-button"
+              onClick={() =>
+                setFiltersOpen(
+                  !filtersOpen
+                )
+              }
+              type="button"
+            >
+              Filters
+            </button>
+          )
+        }
+
+        <button
+          className="toolbar-button"
+          onClick={() => {
+            loadTelemetry()
+            loadAssets()
+          }}
+          type="button"
+        >
+          Refresh
+        </button>
+
+        <div className="map-mode">
+          <span>
+            API {apiStatus}
+          </span>
+
+          <span>•</span>
+
+          <span>
+            {
+              activeView === 'map'
+                ? 'Live Map'
+                : activeView
+                    .charAt(0)
+                    .toUpperCase() +
+                  activeView.slice(1)
+            }
+          </span>
+        </div>
+
+      </section>
+
+      {/* ================================= */}
+      {/* WORKSPACE */}
+      {/* ================================= */}
+
+      <main className="map-workspace">
+
+        {
+          activeView === 'map' && (
+            <>
+              <MapContainer
+                center={[
+                  36.320755,
+                  -121.249853
+                ]}
+                zoom={9}
+                zoomControl={true}
+                className="fleet-map"
+              >
+
+                <MapController
+                  latitude={
+                    markerVisible
+                      ? telemetry?.latitude ??
+                        null
+                      : null
+                  }
+                  longitude={
+                    markerVisible
+                      ? telemetry?.longitude ??
+                        null
+                      : null
+                  }
+                />
+
+                <TileLayer
+                  attribution={
+                    '&copy; OpenStreetMap contributors'
+                  }
+                  url={
+                    'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png'
+                  }
+                />
+
+                {
+                  markerVisible && (
+                    <Marker
+                      position={[
+                        telemetry.latitude,
+                        telemetry.longitude
+                      ]}
+                      icon={
+                        trailerIcon
+                      }
+                    >
+                      <Popup>
+                        <div
+                          className={
+                            `map-popup map-popup-${deviceStatus}`
                           }
-                        </strong>
+                        >
+                          <strong>
+                            {
+                              selectedAssetName
+                            }
+                          </strong>
 
-                        <br />
+                          {
+                            selectedAssetName !==
+                              telemetry.deviceId && (
+                              <>
+                                <br />
+                                Device ID:{' '}
+                                {
+                                  telemetry.deviceId
+                                }
+                              </>
+                            )
+                          }
 
+                          <br />
 
-                        <span>
                           Status:{' '}
-                          {deviceStatus}
-                        </span>
+                          {statusLabel}
 
-                        <br />
+                          <br />
 
+                          Temperature:{' '}
+                          {temperatureF}°F
 
-                        Temperature:{' '}
+                          <br />
 
-                        {
-                          (
+                          {
+                            telemetry.hasCurrentGps
+                              ? 'Current GPS location'
+                              : 'Last known location'
+                          }
+
+                          <br />
+
+                          Lat:{' '}
+                          {
+                            telemetry.latitude
+                          }
+
+                          <br />
+
+                          Lon:{' '}
+                          {
+                            telemetry.longitude
+                          }
+
+                          {
+                            telemetry.locationReceivedAt &&
                             (
-                              telemetry.temperature *
-                              9
-                            ) /
-                            5 +
-                            32
-                          ).toFixed(1)
-                        }
-
-                        {' '}°F
-
-                        <br />
-
-
-                        {
-                          (
-                            telemetry.hasCurrentGps ===
-                              false ||
-                            deviceStatus !==
-                              'online'
-                          ) && (
-
-                            <>
-
-                              <strong>
-                                Last known location
-                              </strong>
-
-                              <br />
-
-                            </>
-
-                          )
-                        }
-
-
-                        Lat:{' '}
-                        {
-                          telemetry.latitude
-                        }
-
-                        <br />
-
-
-                        Lon:{' '}
-                        {
-                          telemetry.longitude
-                        }
-
-
-                        {
-                          (
-                            telemetry.hasCurrentGps ===
-                              false ||
-                            deviceStatus !==
-                              'online'
-                          ) &&
-                          telemetry.locationReceivedAt &&
-                          (
-
-                            <>
-
-                              <br />
-
-                              <span>
+                              <>
+                                <br />
 
                                 Location updated:{' '}
 
@@ -757,212 +1338,1640 @@ fetch(
                                     telemetry.locationReceivedAt
                                   )
                                 }
+                              </>
+                            )
+                          }
+                        </div>
+                      </Popup>
+                    </Marker>
+                  )
+                }
 
-                              </span>
+              </MapContainer>
 
-                            </>
+              {/* ================================= */}
+              {/* FILTERS */}
+              {/* ================================= */}
 
+              {
+                filtersOpen && (
+                  <aside className="floating-panel filter-panel">
+
+                    <div className="panel-title-row">
+                      <h3>
+                        Fleet Filters
+                      </h3>
+
+                      <button
+                        className="panel-close"
+                        onClick={() =>
+                          setFiltersOpen(
+                            false
                           )
                         }
+                        type="button"
+                        aria-label="Close filters"
+                      >
+                        ×
+                      </button>
+                    </div>
 
-                      </div>
+                    <select
+                      value="all"
+                      onChange={() =>
+                        setSearchTerm('')
+                      }
+                    >
+                      <option value="all">
+                        All Fleets
+                      </option>
+                    </select>
 
-                    </Popup>
+                    <div className="filter-search">
+                      <input
+                        value={
+                          searchTerm
+                        }
+                        onChange={
+                          (event) =>
+                            setSearchTerm(
+                              event.target.value
+                            )
+                        }
+                        placeholder="Search assets"
+                        aria-label="Search assets"
+                      />
 
-                  </Marker>
+                      {
+                        searchTerm
+                          ? (
+                            <button
+                              className="filter-clear"
+                              onClick={() =>
+                                setSearchTerm('')
+                              }
+                              type="button"
+                            >
+                              ×
+                            </button>
+                          )
+                          : (
+                            <span>
+                              ⌕
+                            </span>
+                          )
+                      }
+                    </div>
 
-                )
-              }
+                    <select
+                      value={
+                        assetTypeFilter
+                      }
+                      onChange={
+                        (event) =>
+                          setAssetTypeFilter(
+                            event.target.value
+                          )
+                      }
+                    >
+                      <option value="all">
+                        All Asset Types
+                      </option>
 
-            </MapContainer>
+                      <option value="trailer">
+                        Trailer
+                      </option>
+                    </select>
 
-          </div>
+                    <select
+                      value={
+                        statusFilter
+                      }
+                      onChange={
+                        (event) =>
+                          setStatusFilter(
+                            event.target.value as StatusFilter
+                          )
+                      }
+                    >
+                      <option value="all">
+                        All Statuses
+                      </option>
 
+                      <option value="online">
+                        Online
+                      </option>
 
-          {/* ================================= */}
-          {/* TRAILER STATUS */}
-          {/* ================================= */}
+                      <option value="delayed">
+                        Delayed
+                      </option>
 
-          <div className="panel">
+                      <option value="offline">
+                        Offline
+                      </option>
+                    </select>
 
-            <h3>
-              Trailer Status
-            </h3>
+                    <div className="panel-divider" />
 
+                    <h4>
+                      Status Legend
+                    </h4>
 
-            {
-              telemetry
-                ? (
-
-                  <div
-                    className={
-                      `trailer-row ${
-                        deviceStatus ===
-                        'offline'
-                          ? 'alert'
-                          : ''
-                      }`
-                    }
-                  >
-
-
-                    <div>
+                    <div className="legend-row">
+                      <span className="legend-left">
+                        <i className="legend-dot online" />
+                        Online
+                      </span>
 
                       <strong>
                         {
-                          telemetry.deviceId
+                          deviceStatus ===
+                            'online' &&
+                          telemetry
+                            ? 1
+                            : 0
                         }
                       </strong>
+                    </div>
 
+                    <div className="legend-row">
+                      <span className="legend-left">
+                        <i className="legend-dot delayed" />
+                        Delayed
+                      </span>
 
-                      <p>
-
+                      <strong>
                         {
                           deviceStatus ===
-                          'online'
-                            ? 'Online'
-                            : deviceStatus ===
-                              'delayed'
-                            ? 'Delayed'
-                            : 'Offline'
+                            'delayed' &&
+                          telemetry
+                            ? 1
+                            : 0
                         }
+                      </strong>
+                    </div>
 
-                      </p>
+                    <div className="legend-row">
+                      <span className="legend-left">
+                        <i className="legend-dot offline" />
+                        Offline
+                      </span>
 
-
-                      <p>
-
+                      <strong>
                         {
-                          telemetry.hasCurrentGps
-                            ? 'Current GPS location'
-                            : 'Last known location'
+                          deviceStatus ===
+                            'offline'
+                            ? 1
+                            : 0
                         }
+                      </strong>
+                    </div>
 
-                      </p>
+                    <div className="panel-divider" />
 
+                    <h4>
+                      Quick Toggles
+                    </h4>
 
-                      <p>
+                    <label className="toggle-row">
+                      <span>
+                        <i className="legend-dot online" />
+                        Online
+                      </span>
 
-                        Last telemetry:{' '}
+                      <input
+                        type="checkbox"
+                        checked={
+                          showOnline
+                        }
+                        onChange={
+                          (event) =>
+                            setShowOnline(
+                              event.target.checked
+                            )
+                        }
+                      />
 
+                      <i className="toggle" />
+                    </label>
+
+                    <label className="toggle-row">
+                      <span>
+                        <i className="legend-dot delayed" />
+                        Delayed
+                      </span>
+
+                      <input
+                        type="checkbox"
+                        checked={
+                          showDelayed
+                        }
+                        onChange={
+                          (event) =>
+                            setShowDelayed(
+                              event.target.checked
+                            )
+                        }
+                      />
+
+                      <i className="toggle" />
+                    </label>
+
+                    <label className="toggle-row">
+                      <span>
+                        <i className="legend-dot offline" />
+                        Offline
+                      </span>
+
+                      <input
+                        type="checkbox"
+                        checked={
+                          showOffline
+                        }
+                        onChange={
+                          (event) =>
+                            setShowOffline(
+                              event.target.checked
+                            )
+                        }
+                      />
+
+                      <i className="toggle" />
+                    </label>
+
+                    {
+                      !assetVisible &&
+                      telemetry && (
+                        <div className="filter-empty">
+                          No asset matches the current filters.
+                        </div>
+                      )
+                    }
+
+                  </aside>
+                )
+              }
+
+              {/* ================================= */}
+              {/* ASSET DETAILS */}
+              {/* ================================= */}
+
+              <aside className="floating-panel asset-panel">
+
+                {
+                  telemetry &&
+                  assetVisible
+                    ? (
+                      <>
+                        <div className="asset-head">
+
+                          <div
+                            className={
+                              `asset-status-icon ${deviceStatus}`
+                            }
+                          >
+                            ◈
+                          </div>
+
+                          <div>
+                            <strong>
+                              {
+                                selectedAssetName
+                              }
+                            </strong>
+
+                            {
+                              selectedAssetName !==
+                                telemetry.deviceId && (
+                                <small className="asset-device-id">
+                                  {
+                                    telemetry.deviceId
+                                  }
+                                </small>
+                              )
+                            }
+
+                            <div
+                              className={
+                                `asset-state ${deviceStatus}`
+                              }
+                            >
+                              {statusLabel}
+
+                              <span>•</span>
+
+                              {
+                                formatAge(
+                                  telemetry.receivedAt
+                                )
+                              }
+                            </div>
+                          </div>
+
+                        </div>
+
+                        <div className="panel-divider" />
+
+                        <dl className="asset-details">
+
+                          <div>
+                            <dt>
+                              Temperature
+                            </dt>
+
+                            <dd>
+                              {temperatureF}°F
+                            </dd>
+                          </div>
+
+                          <div>
+                            <dt>
+                              GPS
+                            </dt>
+
+                            <dd>
+                              {
+                                telemetry.hasCurrentGps
+                                  ? 'Current'
+                                  : 'Last known'
+                              }
+                            </dd>
+                          </div>
+
+                          <div>
+                            <dt>
+                              Last Ping
+                            </dt>
+
+                            <dd>
+                              {
+                                formatDateTime(
+                                  telemetry.receivedAt
+                                )
+                              }
+                            </dd>
+                          </div>
+
+                          <div>
+                            <dt>
+                              Location
+                            </dt>
+
+                            <dd className="location-value">
+                              {
+                                hasLocation
+                                  ? (
+                                    <>
+                                      {
+                                        telemetry.latitude.toFixed(
+                                          6
+                                        )
+                                      }
+                                      ,{' '}
+                                      {
+                                        telemetry.longitude.toFixed(
+                                          6
+                                        )
+                                      }
+                                    </>
+                                  )
+                                  : 'No GPS location'
+                              }
+                            </dd>
+                          </div>
+
+                          <div>
+                            <dt>
+                              Location Updated
+                            </dt>
+
+                            <dd>
+                              {
+                                formatDateTime(
+                                  telemetry.locationReceivedAt
+                                )
+                              }
+                            </dd>
+                          </div>
+
+                        </dl>
+
+                        <button
+                          className="view-details-button"
+                          onClick={() =>
+                            setDetailsOpen(
+                              true
+                            )
+                          }
+                          type="button"
+                        >
+                          View Details
+                        </button>
+                      </>
+                    )
+                    : (
+                      <div className="empty-panel">
+                        <strong>
+                          {
+                            telemetry
+                              ? 'No matching asset'
+                              : 'No telemetry yet'
+                          }
+                        </strong>
+
+                        <span>
+                          {
+                            telemetry
+                              ? 'Change the search or filters to show TRAILER-001.'
+                              : 'Waiting for asset data...'
+                          }
+                        </span>
+                      </div>
+                    )
+                }
+
+              </aside>
+
+              {/* ================================= */}
+              {/* BOTTOM DOCK */}
+              {/* ================================= */}
+
+<section
+  className={
+    `bottom-dock ${
+      bottomDockOpen
+        ? 'open'
+        : 'collapsed'
+    }`
+  }
+>
+  <div className="bottom-dock-bar">
+
+    <button
+      className="dock-summary-button"
+      onClick={() =>
+        setNotificationsOpen(true)
+      }
+      type="button"
+    >
+      Alerts
+      <span
+        className={
+          activeAlertCount > 0
+            ? 'dock-count alert'
+            : 'dock-count'
+        }
+      >
+        {activeAlertCount}
+      </span>
+    </button>
+
+    <button
+      className="dock-summary-button"
+      onClick={() =>
+        setActiveView('fleet')
+      }
+      type="button"
+    >
+      My Assets
+      <span className="dock-count">
+        {assets.length || (telemetry ? 1 : 0)}
+      </span>
+    </button>
+
+    <div className="dock-bar-spacer" />
+
+    <button
+      className="dock-expand-button"
+      onClick={() =>
+        setBottomDockOpen(
+          !bottomDockOpen
+        )
+      }
+      type="button"
+    >
+      {
+        bottomDockOpen
+          ? '▼ Collapse'
+          : '▲ Expand'
+      }
+    </button>
+
+  </div>
+
+  {
+    bottomDockOpen && (
+      <div className="bottom-dock-content">
+
+        <div className="recent-alerts">
+          <div className="dock-heading">
+            <strong>
+              Recent Alerts
+            </strong>
+
+            {
+              activeAlertCount > 0 && (
+                <span className="alert-count visible">
+                  {activeAlertCount}
+                </span>
+              )
+            }
+          </div>
+
+          {
+            deviceStatus === 'online'
+              ? (
+                <div className="no-alerts">
+                  No active device alerts.
+                </div>
+              )
+              : (
+                <button
+                  className="alert-item alert-button"
+                  onClick={() =>
+                    setNotificationsOpen(true)
+                  }
+                  type="button"
+                >
+                  <div
+                    className={
+                      `mini-status ${deviceStatus}`
+                    }
+                  >
+                    !
+                  </div>
+
+                  <div>
+                    <strong>
+                      {
+                        deviceStatus === 'offline'
+                          ? 'Trailer Offline'
+                          : 'Telemetry Delayed'
+                      }
+                    </strong>
+
+                    <span>
+                      {selectedAssetName}
+                    </span>
+
+                    <small>
+                      {
+                        telemetry?.receivedAt
+                          ? formatAge(
+                              telemetry.receivedAt
+                            )
+                          : 'No recent telemetry'
+                      }
+                    </small>
+                  </div>
+                </button>
+              )
+          }
+        </div>
+
+        <div className="my-assets">
+          <div className="dock-heading">
+            <strong>
+              My Assets
+            </strong>
+
+            <button
+              className="view-all"
+              onClick={() =>
+                setActiveView('fleet')
+              }
+              type="button"
+            >
+              View All
+            </button>
+          </div>
+
+          <div className="asset-card-row">
+            {
+              telemetry
+                ? (
+                  <button
+                    className={
+                      `asset-mini-card ${deviceStatus}`
+                    }
+                    onClick={
+                      openAssetOnMap
+                    }
+                    type="button"
+                  >
+                    <div
+                      className={
+                        `mini-status ${deviceStatus}`
+                      }
+                    >
+                      ◈
+                    </div>
+
+                    <div>
+                      <strong>
+                        {selectedAssetName}
+                      </strong>
+
+                      <span>
+                        {statusLabel}
+                      </span>
+
+                      <small>
                         {
-                          formatDateTime(
+                          formatAge(
                             telemetry.receivedAt
                           )
                         }
-
-                      </p>
-
-
-                      {
-                        telemetry.latitude !=
-                          null &&
-                        telemetry.longitude !=
-                          null &&
-                        (
-
-                          <p>
-
-                            {
-                              telemetry.latitude.toFixed(
-                                6
-                              )
-                            }
-
-                            ,{' '}
-
-                            {
-                              telemetry.longitude.toFixed(
-                                6
-                              )
-                            }
-
-                          </p>
-
-                        )
-                      }
-
-
-                      {
-                        telemetry.locationReceivedAt &&
-                        (
-
-                          <p>
-
-                            Location updated:{' '}
-
-                            {
-                              formatDateTime(
-                                telemetry.locationReceivedAt
-                              )
-                            }
-
-                          </p>
-
-                        )
-                      }
-
+                      </small>
                     </div>
-
-
-                    {/* ================================= */}
-                    {/* TEMPERATURA */}
-                    {/* ================================= */}
-
-                    <div className="trailer-temp">
-
-                      <span>
-
-                        {
-                          (
-                            (
-                              telemetry.temperature *
-                              9
-                            ) /
-                            5 +
-                            32
-                          ).toFixed(1)
-                        }
-
-                        °F
-
-                      </span>
-
-
-                      {
-                        deviceStatus ===
-                          'offline' &&
-                        (
-
-                          <p className="last-reading-label">
-
-                            Last recorded
-                            temperature
-
-                          </p>
-
-                        )
-                      }
-
-                    </div>
-
-                  </div>
-
+                  </button>
                 )
                 : (
+                  <span className="no-assets">
+                    No assets available.
+                  </span>
+                )
+            }
+          </div>
+        </div>
+
+      </div>
+    )
+  }
+
+</section>
+            </>
+          )
+        }
+
+        {/* ================================= */}
+        {/* FLEET PAGE */}
+        {/* ================================= */}
+
+        {
+          activeView === 'fleet' && (
+            <section className="workspace-page">
+
+              <div className="page-header">
+                <div>
+                  <span className="page-kicker">
+                    Fleet
+                  </span>
+
+                  <h1>
+                    Fleet Assets
+                  </h1>
 
                   <p>
-                    Waiting for telemetry...
+                    Assets available to your company account.
                   </p>
+                </div>
 
+                <button
+                  className="primary-action"
+                  onClick={
+                    openAssetOnMap
+                  }
+                  type="button"
+                >
+                  Open Live Map
+                </button>
+              </div>
+
+              <div className="page-card">
+
+                <div className="table-header">
+                  <span>
+                    Asset
+                  </span>
+
+                  <span>
+                    Status
+                  </span>
+
+                  <span>
+                    Temperature
+                  </span>
+
+                  <span>
+                    Last Ping
+                  </span>
+
+                  <span>
+                    Action
+                  </span>
+                </div>
+
+                {
+                  telemetry
+                    ? (
+                      <div className="fleet-row">
+                        <div className="fleet-asset-name">
+                          <span
+                            className={
+                              `mini-status ${deviceStatus}`
+                            }
+                          >
+                            ◈
+                          </span>
+
+                          <div>
+                            <strong>
+                              {
+                                selectedAssetName
+                              }
+                            </strong>
+
+                            <small>
+                              {
+                                telemetry.deviceId
+                              }
+                            </small>
+                          </div>
+                        </div>
+
+                        <span
+                          className={
+                            `inline-status ${deviceStatus}`
+                          }
+                        >
+                          {statusLabel}
+                        </span>
+
+                        <span>
+                          {temperatureF}°F
+                        </span>
+
+                        <span>
+                          {
+                            formatDateTime(
+                              telemetry.receivedAt
+                            )
+                          }
+                        </span>
+
+                        <div className="row-actions">
+                          <button
+                            onClick={
+                              openAssetOnMap
+                            }
+                            type="button"
+                          >
+                            Locate
+                          </button>
+
+                          <button
+                            onClick={
+                              openRenameAsset
+                            }
+                            type="button"
+                            disabled={
+                              !selectedAsset
+                            }
+                          >
+                            Rename
+                          </button>
+
+                          <button
+                            onClick={() =>
+                              setDetailsOpen(
+                                true
+                              )
+                            }
+                            type="button"
+                          >
+                            Details
+                          </button>
+                        </div>
+                      </div>
+                    )
+                    : (
+                      <div className="page-empty">
+                        No fleet telemetry is available yet.
+                      </div>
+                    )
+                }
+
+              </div>
+
+            </section>
+          )
+        }
+
+        {/* ================================= */}
+        {/* OPERATIONS PAGE */}
+        {/* ================================= */}
+
+        {
+          activeView ===
+            'operations' && (
+            <section className="workspace-page">
+
+              <div className="page-header">
+                <div>
+                  <span className="page-kicker">
+                    Operations
+                  </span>
+
+                  <h1>
+                    Operations Center
+                  </h1>
+
+                  <p>
+                    Live operational controls using the telemetry currently available.
+                  </p>
+                </div>
+              </div>
+
+              <div className="dashboard-grid">
+
+                <article className="page-card action-card">
+                  <span className="card-label">
+                    Selected Asset
+                  </span>
+
+                  <strong className="large-value">
+                    {
+                      selectedDeviceId
+                    }
+                  </strong>
+
+                  <span
+                    className={
+                      `inline-status ${deviceStatus}`
+                    }
+                  >
+                    {statusLabel}
+                  </span>
+
+                  <button
+                    className="primary-action"
+                    onClick={
+                      openAssetOnMap
+                    }
+                    type="button"
+                  >
+                    Locate on Map
+                  </button>
+                </article>
+
+                <article className="page-card action-card">
+                  <span className="card-label">
+                    Telemetry
+                  </span>
+
+                  <strong className="large-value">
+                    {temperatureF}°F
+                  </strong>
+
+                  <span className="muted-text">
+                    Last ping:{' '}
+                    {
+                      formatAge(
+                        telemetry?.receivedAt
+                      )
+                    }
+                  </span>
+
+                  <button
+                    className="secondary-action"
+                    onClick={
+                      loadTelemetry
+                    }
+                    type="button"
+                  >
+                    Refresh Now
+                  </button>
+                </article>
+
+                <article className="page-card action-card">
+                  <span className="card-label">
+                    Dispatch
+                  </span>
+
+                  <strong className="large-value">
+                    0
+                  </strong>
+
+                  <span className="muted-text">
+                    No dispatch jobs are connected to the backend yet.
+                  </span>
+                </article>
+
+              </div>
+
+            </section>
+          )
+        }
+
+        {/* ================================= */}
+        {/* MONITORS PAGE */}
+        {/* ================================= */}
+
+        {
+          activeView ===
+            'monitors' && (
+            <section className="workspace-page">
+
+              <div className="page-header">
+                <div>
+                  <span className="page-kicker">
+                    Monitors
+                  </span>
+
+                  <h1>
+                    Device Health
+                  </h1>
+
+                  <p>
+                    Current health snapshot for the connected trailer.
+                  </p>
+                </div>
+              </div>
+
+              <div className="dashboard-grid monitor-grid">
+
+                <article className="page-card monitor-card">
+                  <span>
+                    API
+                  </span>
+
+                  <strong>
+                    {apiStatus}
+                  </strong>
+                </article>
+
+                <article className="page-card monitor-card">
+                  <span>
+                    Device
+                  </span>
+
+                  <strong>
+                    {statusLabel}
+                  </strong>
+                </article>
+
+                <article className="page-card monitor-card">
+                  <span>
+                    Temperature
+                  </span>
+
+                  <strong>
+                    {temperatureF}°F
+                  </strong>
+                </article>
+
+                <article className="page-card monitor-card">
+                  <span>
+                    GPS
+                  </span>
+
+                  <strong>
+                    {
+                      telemetry?.hasCurrentGps
+                        ? 'Current'
+                        : hasLocation
+                          ? 'Last known'
+                          : 'Unavailable'
+                    }
+                  </strong>
+                </article>
+
+              </div>
+
+              <div className="page-card monitor-detail">
+                <h2>
+                  Latest Telemetry
+                </h2>
+
+                <dl className="report-list">
+                  <div>
+                    <dt>
+                      Device ID
+                    </dt>
+
+                    <dd>
+                      {
+                        telemetry?.deviceId ||
+                        'Unknown'
+                      }
+                    </dd>
+                  </div>
+
+                  <div>
+                    <dt>
+                      Last telemetry
+                    </dt>
+
+                    <dd>
+                      {
+                        formatDateTime(
+                          telemetry?.receivedAt
+                        )
+                      }
+                    </dd>
+                  </div>
+
+                  <div>
+                    <dt>
+                      Last location
+                    </dt>
+
+                    <dd>
+                      {
+                        formatDateTime(
+                          telemetry?.locationReceivedAt
+                        )
+                      }
+                    </dd>
+                  </div>
+                </dl>
+              </div>
+
+            </section>
+          )
+        }
+
+        {/* ================================= */}
+        {/* REPORTS PAGE */}
+        {/* ================================= */}
+
+        {
+          activeView ===
+            'reports' && (
+            <section className="workspace-page">
+
+              <div className="page-header">
+                <div>
+                  <span className="page-kicker">
+                    Reports
+                  </span>
+
+                  <h1>
+                    Current Fleet Snapshot
+                  </h1>
+
+                  <p>
+                    This report uses the latest telemetry currently provided by the backend.
+                  </p>
+                </div>
+
+                <button
+                  className="primary-action"
+                  onClick={() =>
+                    window.print()
+                  }
+                  type="button"
+                >
+                  Print Report
+                </button>
+              </div>
+
+              <div className="page-card report-card">
+
+                <dl className="report-list">
+
+                  <div>
+                    <dt>
+                      Asset
+                    </dt>
+
+                    <dd>
+                      {
+                        selectedAssetName
+                      }
+                    </dd>
+                  </div>
+
+                  <div>
+                    <dt>
+                      Status
+                    </dt>
+
+                    <dd>
+                      {statusLabel}
+                    </dd>
+                  </div>
+
+                  <div>
+                    <dt>
+                      Temperature
+                    </dt>
+
+                    <dd>
+                      {temperatureF}°F
+                    </dd>
+                  </div>
+
+                  <div>
+                    <dt>
+                      Last telemetry
+                    </dt>
+
+                    <dd>
+                      {
+                        formatDateTime(
+                          telemetry?.receivedAt
+                        )
+                      }
+                    </dd>
+                  </div>
+
+                  <div>
+                    <dt>
+                      Last location update
+                    </dt>
+
+                    <dd>
+                      {
+                        formatDateTime(
+                          telemetry?.locationReceivedAt
+                        )
+                      }
+                    </dd>
+                  </div>
+
+                  <div>
+                    <dt>
+                      Coordinates
+                    </dt>
+
+                    <dd>
+                      {
+                        hasLocation
+                          ? `${telemetry.latitude.toFixed(
+                              6
+                            )}, ${telemetry.longitude.toFixed(
+                              6
+                            )}`
+                          : 'No GPS location'
+                      }
+                    </dd>
+                  </div>
+
+                </dl>
+
+                <p className="report-note">
+                  Historical charts and date-range reports will need a backend history endpoint; this page intentionally does not invent historical data.
+                </p>
+
+              </div>
+
+            </section>
+          )
+        }
+
+      </main>
+
+      {/* ================================= */}
+      {/* NOTIFICATIONS */}
+      {/* ================================= */}
+
+      {
+        notificationsOpen && (
+          <aside className="header-popover notifications-popover">
+
+            <div className="popover-header">
+              <strong>
+                Notifications
+              </strong>
+
+              <button
+                onClick={() =>
+                  setNotificationsOpen(
+                    false
+                  )
+                }
+                type="button"
+              >
+                ×
+              </button>
+            </div>
+
+            {
+              deviceStatus ===
+                'online'
+                ? (
+                  <p>
+                    No active device alerts.
+                  </p>
+                )
+                : (
+                  <button
+                    className="popover-alert"
+                    onClick={() => {
+                      setNotificationsOpen(
+                        false
+                      )
+                      openAssetOnMap()
+                    }}
+                    type="button"
+                  >
+                    <span
+                      className={
+                        `mini-status ${deviceStatus}`
+                      }
+                    >
+                      !
+                    </span>
+
+                    <div>
+                      <strong>
+                        {
+                          deviceStatus ===
+                            'offline'
+                            ? 'Trailer Offline'
+                            : 'Telemetry Delayed'
+                        }
+                      </strong>
+
+                      <small>
+                        {
+                          telemetry?.deviceId ||
+                          selectedDeviceId
+                        }
+                        {' · '}
+                        {
+                          formatAge(
+                            telemetry?.receivedAt
+                          )
+                        }
+                      </small>
+                    </div>
+                  </button>
                 )
             }
 
+          </aside>
+        )
+      }
+
+      {/* ================================= */}
+      {/* HELP */}
+      {/* ================================= */}
+
+      {
+        helpOpen && (
+          <aside className="header-popover help-popover">
+
+            <div className="popover-header">
+              <strong>
+                Maverick Help
+              </strong>
+
+              <button
+                onClick={() =>
+                  setHelpOpen(
+                    false
+                  )
+                }
+                type="button"
+              >
+                ×
+              </button>
+            </div>
+
+            <p>
+              Use Map to locate assets, Fleet to view your assigned trailers, Monitors for live device health, and Reports for the current fleet snapshot.
+            </p>
+
+            <p>
+              Filters and status toggles on the map now control which asset markers are visible.
+            </p>
+
+          </aside>
+        )
+      }
+
+      {/* ================================= */}
+      {/* DETAILS MODAL */}
+      {/* ================================= */}
+
+      {
+        detailsOpen && (
+          <div
+            className="modal-backdrop"
+            onMouseDown={() =>
+              setDetailsOpen(
+                false
+              )
+            }
+          >
+            <section
+              className="details-modal"
+              onMouseDown={
+                (event) =>
+                  event.stopPropagation()
+              }
+            >
+
+              <div className="modal-header">
+                <div>
+                  <span className="page-kicker">
+                    Asset Details
+                  </span>
+
+                  <h2>
+                    {
+                      selectedAssetName
+                    }
+                  </h2>
+
+                  {
+                    telemetry?.deviceId &&
+                    selectedAssetName !==
+                      telemetry.deviceId && (
+                      <small className="modal-device-id">
+                        Device ID:{' '}
+                        {
+                          telemetry.deviceId
+                        }
+                      </small>
+                    )
+                  }
+                </div>
+
+                <button
+                  className="modal-close"
+                  onClick={() =>
+                    setDetailsOpen(
+                      false
+                    )
+                  }
+                  type="button"
+                >
+                  ×
+                </button>
+              </div>
+
+              <dl className="report-list">
+                <div>
+                  <dt>
+                    Status
+                  </dt>
+
+                  <dd>
+                    {statusLabel}
+                  </dd>
+                </div>
+
+                <div>
+                  <dt>
+                    Temperature
+                  </dt>
+
+                  <dd>
+                    {temperatureF}°F
+                  </dd>
+                </div>
+
+                <div>
+                  <dt>
+                    GPS
+                  </dt>
+
+                  <dd>
+                    {
+                      telemetry?.hasCurrentGps
+                        ? 'Current GPS'
+                        : hasLocation
+                          ? 'Last known GPS'
+                          : 'No GPS'
+                    }
+                  </dd>
+                </div>
+
+                <div>
+                  <dt>
+                    Last telemetry
+                  </dt>
+
+                  <dd>
+                    {
+                      formatDateTime(
+                        telemetry?.receivedAt
+                      )
+                    }
+                  </dd>
+                </div>
+
+                <div>
+                  <dt>
+                    Location updated
+                  </dt>
+
+                  <dd>
+                    {
+                      formatDateTime(
+                        telemetry?.locationReceivedAt
+                      )
+                    }
+                  </dd>
+                </div>
+
+                <div>
+                  <dt>
+                    Coordinates
+                  </dt>
+
+                  <dd>
+                    {
+                      hasLocation
+                        ? `${telemetry.latitude.toFixed(
+                            6
+                          )}, ${telemetry.longitude.toFixed(
+                            6
+                          )}`
+                        : 'No GPS location'
+                    }
+                  </dd>
+                </div>
+              </dl>
+
+              <div className="modal-actions">
+                <button
+                  className="secondary-action"
+                  onClick={() =>
+                    setDetailsOpen(
+                      false
+                    )
+                  }
+                  type="button"
+                >
+                  Close
+                </button>
+
+                <button
+                  className="primary-action"
+                  onClick={() => {
+                    setDetailsOpen(
+                      false
+                    )
+                    openAssetOnMap()
+                  }}
+                  type="button"
+                >
+                  Locate on Map
+                </button>
+              </div>
+
+            </section>
           </div>
+        )
+      }
 
-        </section>
+      {/* ================================= */}
+      {/* RENAME ASSET MODAL */}
+      {/* ================================= */}
 
-      </main>
+      {
+        renameOpen && (
+          <div
+            className="modal-backdrop"
+            onMouseDown={() => {
+              if (!renameSaving) {
+                setRenameOpen(false)
+                setRenameError('')
+              }
+            }}
+          >
+            <section
+              className="details-modal rename-modal"
+              onMouseDown={
+                (event) =>
+                  event.stopPropagation()
+              }
+            >
+              <div className="modal-header">
+                <div>
+                  <span className="page-kicker">
+                    Rename Asset
+                  </span>
+
+                  <h2>
+                    {
+                      telemetry?.deviceId ||
+                      selectedDeviceId
+                    }
+                  </h2>
+                </div>
+
+                <button
+                  className="modal-close"
+                  onClick={() => {
+                    setRenameOpen(false)
+                    setRenameError('')
+                  }}
+                  type="button"
+                  disabled={
+                    renameSaving
+                  }
+                >
+                  ×
+                </button>
+              </div>
+
+              <div className="rename-form">
+                <label
+                  htmlFor="asset-name"
+                >
+                  Display name
+                </label>
+
+                <input
+                  id="asset-name"
+                  type="text"
+                  value={
+                    renameValue
+                  }
+                  onChange={
+                    (event) =>
+                      setRenameValue(
+                        event.target.value
+                      )
+                  }
+                  onKeyDown={
+                    (event) => {
+                      if (
+                        event.key ===
+                          'Enter' &&
+                        !renameSaving
+                      ) {
+                        handleRenameAsset()
+                      }
+                    }
+                  }
+                  maxLength={80}
+                  autoFocus
+                  placeholder="Example: Reefer Salinas 12"
+                />
+
+                <div className="rename-help">
+                  <span>
+                    The hardware ID remains{' '}
+                    <strong>
+                      {
+                        telemetry?.deviceId ||
+                        selectedDeviceId
+                      }
+                    </strong>.
+                  </span>
+
+                  <span>
+                    {
+                      renameValue.trim().length
+                    }/80
+                  </span>
+                </div>
+
+                {
+                  renameError && (
+                    <div className="rename-error">
+                      {
+                        renameError
+                      }
+                    </div>
+                  )
+                }
+              </div>
+
+              <div className="modal-actions">
+                <button
+                  className="secondary-action"
+                  onClick={() => {
+                    setRenameOpen(false)
+                    setRenameError('')
+                  }}
+                  type="button"
+                  disabled={
+                    renameSaving
+                  }
+                >
+                  Cancel
+                </button>
+
+                <button
+                  className="primary-action"
+                  onClick={
+                    handleRenameAsset
+                  }
+                  type="button"
+                  disabled={
+                    renameSaving ||
+                    renameValue.trim().length < 2
+                  }
+                >
+                  {
+                    renameSaving
+                      ? 'Saving...'
+                      : 'Save Name'
+                  }
+                </button>
+              </div>
+            </section>
+          </div>
+        )
+      }
 
     </div>
   )

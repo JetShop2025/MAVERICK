@@ -1,10 +1,22 @@
-import express from 'express'
+import express, {
+  type Request,
+  type Response,
+  type NextFunction
+} from 'express'
+
 import cors from 'cors'
 import dotenv from 'dotenv'
+import bcrypt from 'bcryptjs'
+import jwt from 'jsonwebtoken'
+
 import { PrismaClient } from './generated/prisma/client.js'
 import { PrismaPg } from '@prisma/adapter-pg'
 
 dotenv.config()
+
+// =====================================================
+// PRISMA
+// =====================================================
 
 const adapter = new PrismaPg({
   connectionString: process.env.DATABASE_URL
@@ -13,170 +25,785 @@ const adapter = new PrismaPg({
 const prisma = new PrismaClient({
   adapter
 })
+
+// =====================================================
+// EXPRESS
+// =====================================================
+
 const app = express()
-const PORT = process.env.PORT || 3000
+
+const PORT =
+  process.env.PORT || 3000
 
 app.use(cors())
-app.use(express.json())
 
-app.get('/', (_req, res) => {
-  res.json({
-    name: 'Maverick API',
-    status: 'online'
-  })
-})
+app.use(
+  express.json()
+)
 
-app.get('/health', (_req, res) => {
-  res.json({
-    ok: true,
-    service: 'maverick-backend'
-  })
-})
+// =====================================================
+// JWT
+// =====================================================
 
-let latestTelemetry: any = null;
+const JWT_SECRET =
+  process.env.JWT_SECRET || ''
 
-app.post('/api/telemetry', async (req, res) => {
-  const {
-    deviceId,
-    temperature,
-    latitude,
-    longitude,
-    altitude
-  } = req.body
+if (!JWT_SECRET) {
+  throw new Error(
+    'JWT_SECRET is not configured'
+  )
+}
 
-  const safeLatitude =
-  typeof latitude === 'number'
-    ? latitude
-    : null
+// =====================================================
+// USUARIO AUTENTICADO
+// =====================================================
 
-const safeLongitude =
-  typeof longitude === 'number'
-    ? longitude
-    : null
-
-const safeAltitude =
-  typeof altitude === 'number'
-    ? altitude
-    : null
-
-  latestTelemetry = {
-  deviceId,
-  temperature,
-  latitude,
-  longitude,
-  altitude,
-  receivedAt: new Date().toISOString()
-};
-
-await prisma.telemetry.create({
-  data: {
-    deviceId,
-    temperature,
-    latitude: safeLatitude,
-    longitude: safeLongitude,
-    altitude: safeAltitude
+type AuthenticatedRequest = Request & {
+  user?: {
+    userId: number
+    email: string
+    role: string
+    companyId: number
   }
-})
+}
 
-const temperatureF =
-  (temperature * 9) / 5 + 32
 
-console.log('Telemetry received:', {
-  deviceId,
-  temperatureF: Number(
-    temperatureF.toFixed(1)
-  ),
-  latitude: safeLatitude,
-  longitude: safeLongitude,
-  altitude: safeAltitude
-})
-res.json({
-  ok: true,
-  message: 'Telemetry received'
-})
-})
+// =====================================================
+// MIDDLEWARE DE AUTENTICACION
+// =====================================================
 
-app.get('/api/telemetry/latest', async (_req, res) => {
+function requireAuth(
+  req: AuthenticatedRequest,
+  res: Response,
+  next: NextFunction
+) {
+  const authHeader =
+    req.headers.authorization
+
+  if (
+    !authHeader ||
+    !authHeader.startsWith('Bearer ')
+  ) {
+    return res.status(401).json({
+      ok: false,
+      message: 'Authentication required'
+    })
+  }
+
+  const token =
+    authHeader.substring(7)
+
   try {
-    // Última telemetría recibida, tenga GPS o no
-    const latestTelemetry =
-      await prisma.telemetry.findFirst({
-        orderBy: {
-          receivedAt: 'desc'
-        }
-      })
+    const decoded =
+      jwt.verify(
+        token,
+        JWT_SECRET
+      ) as {
+        userId: number
+        email: string
+        role: string
+        companyId: number
+      }
 
-    if (!latestTelemetry) {
-      return res.status(404).json({
-        ok: false,
-        message: 'No telemetry available'
-      })
+    req.user = {
+      userId: decoded.userId,
+      email: decoded.email,
+      role: decoded.role,
+      companyId: decoded.companyId
     }
 
-    // Última telemetría que SÍ tuvo ubicación GPS válida
-    const latestLocation =
-      await prisma.telemetry.findFirst({
-        where: {
-          latitude: {
-            not: null
-          },
-          longitude: {
-            not: null
-          }
-        },
-        orderBy: {
-          receivedAt: 'desc'
-        }
-      })
+    next()
 
-    const hasCurrentGps =
-      latestTelemetry.latitude !== null &&
-      latestTelemetry.longitude !== null
+  } catch {
+    return res.status(401).json({
+      ok: false,
+      message: 'Invalid or expired session'
+    })
+  }
+}
 
-    res.json({
-      ok: true,
-      telemetry: {
-        ...latestTelemetry,
+// =====================================================
+// CREAR PRIMER USUARIO ADMIN
+// =====================================================
 
-        // Si la lectura actual no tiene GPS,
-        // usamos la última ubicación conocida
-        latitude:
-          latestTelemetry.latitude ??
-          latestLocation?.latitude ??
-          null,
+async function ensureAdminUser() {
+  const email =
+    process.env.ADMIN_EMAIL
+      ?.trim()
+      .toLowerCase()
 
-        longitude:
-          latestTelemetry.longitude ??
-          latestLocation?.longitude ??
-          null,
+  const password =
+    process.env.ADMIN_PASSWORD
 
-        altitude:
-          latestTelemetry.altitude ??
-          latestLocation?.altitude ??
-          null,
+  if (!email || !password) {
+    console.log(
+      'ADMIN_EMAIL or ADMIN_PASSWORD not configured.'
+    )
 
-        // Nos permite saber si el GPS actual tiene fix
-        hasCurrentGps,
+    return
+  }
 
-        // Fecha de la última ubicación GPS válida
-        locationReceivedAt:
-          latestLocation?.receivedAt ?? null
+  // =====================================
+  // CREAR COMPAÑIA INICIAL
+  // =====================================
+
+  const company =
+    await prisma.company.upsert({
+      where: {
+        slug: 'maverick-demo'
+      },
+
+      update: {
+        active: true
+      },
+
+      create: {
+        name: 'Maverick Demo Company',
+        slug: 'maverick-demo',
+        active: true
       }
     })
 
-  } catch (error) {
-    console.error(
-      'Error loading latest telemetry:',
-      error
+  console.log(
+    `Company ready: ${company.name}`
+  )
+
+
+  // =====================================
+  // CREAR ASSET TRAILER-001
+  // =====================================
+
+  const asset =
+    await prisma.asset.upsert({
+      where: {
+        deviceId: 'TRAILER-001'
+      },
+
+      update: {
+        companyId: company.id,
+        active: true
+      },
+
+      create: {
+        deviceId: 'TRAILER-001',
+        name: 'TRAILER-001',
+        description:
+          'Maverick tracking unit',
+        companyId: company.id
+      }
+    })
+
+  console.log(
+    `Asset ready: ${asset.deviceId}`
+  )
+
+
+  // =====================================
+  // CREAR ADMIN
+  // =====================================
+
+  const existingUser =
+    await prisma.user.findUnique({
+      where: {
+        email
+      }
+    })
+
+  if (existingUser) {
+
+    await prisma.user.update({
+      where: {
+        id: existingUser.id
+      },
+
+      data: {
+        companyId: company.id,
+        role: 'company_admin',
+        active: true
+      }
+    })
+
+    console.log(
+      `Admin user ready: ${email}`
     )
 
-    res.status(500).json({
-      ok: false,
-      message: 'Database error'
+    return
+  }
+
+
+  const passwordHash =
+    await bcrypt.hash(
+      password,
+      12
+    )
+
+
+  await prisma.user.create({
+    data: {
+      email,
+      passwordHash,
+      name: 'Maverick Admin',
+      role: 'company_admin',
+      active: true,
+      companyId: company.id
+    }
+  })
+
+
+  console.log(
+    `Admin user created: ${email}`
+  )
+}
+
+// =====================================================
+// ROOT
+// =====================================================
+
+app.get(
+  '/',
+  (_req, res) => {
+
+    res.json({
+      name: 'Maverick API',
+      status: 'online'
     })
+  }
+)
+
+// =====================================================
+// HEALTH
+// =====================================================
+
+app.get(
+  '/health',
+  (_req, res) => {
+
+    res.json({
+      ok: true,
+      service: 'maverick-backend'
+    })
+  }
+)
+
+// =====================================================
+// LOGIN
+// =====================================================
+
+app.post(
+  '/api/auth/login',
+  async (req, res) => {
+
+    try {
+      const {
+        email,
+        password
+      } = req.body
+
+      // ---------------------------------
+      // VALIDAR CAMPOS
+      // ---------------------------------
+
+      if (
+        typeof email !== 'string' ||
+        typeof password !== 'string' ||
+        !email.trim() ||
+        !password
+      ) {
+        return res.status(400).json({
+          ok: false,
+          message:
+            'Email and password are required'
+        })
+      }
+
+      // ---------------------------------
+      // BUSCAR USUARIO
+      // ---------------------------------
+
+      const user =
+        await prisma.user.findUnique({
+          where: {
+            email:
+              email
+                .trim()
+                .toLowerCase()
+          }
+        })
+
+      if (!user) {
+        return res.status(401).json({
+          ok: false,
+          message:
+            'Invalid email or password'
+        })
+      }
+
+      // ---------------------------------
+      // VALIDAR PASSWORD
+      // ---------------------------------
+
+      const validPassword =
+        await bcrypt.compare(
+          password,
+          user.passwordHash
+        )
+
+      if (!validPassword) {
+        return res.status(401).json({
+          ok: false,
+          message:
+            'Invalid email or password'
+        })
+      }
+
+      // ---------------------------------
+      // CREAR JWT
+      // ---------------------------------
+
+      const token =
+  jwt.sign(
+    {
+      userId: user.id,
+      email: user.email,
+      role: user.role,
+      companyId: user.companyId
+    },
+    JWT_SECRET,
+    {
+      expiresIn: '7d'
+    }
+  )
+      // ---------------------------------
+      // RESPUESTA
+      // ---------------------------------
+return res.json({
+  ok: true,
+
+  token,
+
+  user: {
+    id: user.id,
+    email: user.email,
+    name: user.name,
+    role: user.role,
+    companyId: user.companyId
   }
 })
 
-app.listen(PORT, () => {
-  console.log(`Maverick API running on http://localhost:${PORT}`)
+} catch (error) {
+
+  console.error(
+    'Login error:',
+    error
+  )
+
+  return res.status(500).json({
+    ok: false,
+    message: 'Login service error'
+  })
+}
+}
+)
+
+// =====================================================
+// VALIDAR SESION
+// =====================================================
+
+app.get(
+  '/api/auth/me',
+  async (req, res) => {
+
+    try {
+      const authHeader =
+        req.headers.authorization
+
+      if (
+        !authHeader ||
+        !authHeader.startsWith(
+          'Bearer '
+        )
+      ) {
+        return res.status(401).json({
+          ok: false,
+          message:
+            'Authentication required'
+        })
+      }
+
+      const token =
+        authHeader.substring(7)
+
+      const decoded =
+  jwt.verify(
+    token,
+    JWT_SECRET
+  ) as {
+    userId: number
+    email: string
+    role: string
+    companyId: number
+  }
+
+      const user =
+        await prisma.user.findUnique({
+          where: {
+            id: decoded.userId
+          },
+
+          select: {
+            id: true,
+            email: true,
+            name: true,
+            role: true,
+            companyId: true,
+            createdAt: true
+          }
+        })
+
+      if (!user) {
+        return res.status(401).json({
+          ok: false,
+          message:
+            'User not found'
+        })
+      }
+
+      return res.json({
+        ok: true,
+        user
+      })
+
+    } catch {
+
+      return res.status(401).json({
+        ok: false,
+        message:
+          'Invalid or expired session'
+      })
+    }
+  }
+)
+
+// =====================================================
+// RECIBIR TELEMETRIA
+// =====================================================
+
+app.post(
+  '/api/telemetry',
+  async (req, res) => {
+
+    try {
+      const {
+        deviceId,
+        temperature,
+        latitude,
+        longitude,
+        altitude
+      } = req.body
+
+      // ---------------------------------
+      // VALIDACION BASICA
+      // ---------------------------------
+
+      if (
+        typeof deviceId !== 'string' ||
+        typeof temperature !== 'number'
+      ) {
+        return res.status(400).json({
+          ok: false,
+          message:
+            'Invalid telemetry data'
+        })
+      }
+
+      // ---------------------------------
+      // GPS SEGURO
+      // ---------------------------------
+
+      const safeLatitude =
+        typeof latitude === 'number'
+          ? latitude
+          : null
+
+      const safeLongitude =
+        typeof longitude === 'number'
+          ? longitude
+          : null
+
+      const safeAltitude =
+        typeof altitude === 'number'
+          ? altitude
+          : null
+
+      // ---------------------------------
+      // GUARDAR
+      // ---------------------------------
+      
+      const asset =
+  await prisma.asset.findUnique({
+    where: {
+      deviceId
+    }
+  })
+
+      await prisma.telemetry.create({
+  data: {
+    deviceId,
+    temperature,
+
+    latitude:
+      safeLatitude,
+
+    longitude:
+      safeLongitude,
+
+    altitude:
+      safeAltitude,
+
+    assetId:
+      asset?.id ?? null
+  }
 })
+
+      // ---------------------------------
+      // LOG EN FAHRENHEIT
+      // ---------------------------------
+
+      const temperatureF =
+        (
+          temperature *
+          9
+        ) /
+        5 +
+        32
+
+      console.log(
+        'Telemetry received:',
+        {
+          deviceId,
+
+          temperatureF:
+            Number(
+              temperatureF.toFixed(
+                1
+              )
+            ),
+
+          latitude:
+            safeLatitude,
+
+          longitude:
+            safeLongitude,
+
+          altitude:
+            safeAltitude
+        }
+      )
+
+      return res.json({
+        ok: true,
+        message:
+          'Telemetry received'
+      })
+
+    } catch (error) {
+
+      console.error(
+        'Telemetry error:',
+        error
+      )
+
+      return res.status(500).json({
+        ok: false,
+        message:
+          'Database error'
+      })
+    }
+  }
+)
+
+// =====================================================
+// ULTIMA TELEMETRIA
+// =====================================================
+
+app.get(
+  '/api/telemetry/latest',
+  requireAuth,
+  async (req: AuthenticatedRequest, res) => {
+
+    try {
+
+      const companyId =
+  req.user?.companyId
+
+if (!companyId) {
+  return res.status(401).json({
+    ok: false,
+    message: 'Invalid session'
+  })
+}
+
+const companyAssets =
+  await prisma.asset.findMany({
+    where: {
+      companyId,
+      active: true
+    },
+    select: {
+      id: true,
+      deviceId: true
+    }
+  })
+
+const assetIds =
+  companyAssets.map(
+    (asset) => asset.id
+  )
+
+if (assetIds.length === 0) {
+  return res.status(404).json({
+    ok: false,
+    message: 'No assets assigned to this company'
+  })
+}
+
+      // ---------------------------------
+      // ULTIMA TELEMETRIA
+      // ---------------------------------
+
+      const latestTelemetry =
+  await prisma.telemetry.findFirst({
+    where: {
+      assetId: {
+        in: assetIds
+      }
+    },
+    orderBy: {
+      receivedAt: 'desc'
+    }
+  })
+
+      if (!latestTelemetry) {
+
+        return res.status(404).json({
+          ok: false,
+          message:
+            'No telemetry available'
+        })
+      }
+
+      // ---------------------------------
+      // ULTIMA UBICACION GPS VALIDA
+      // ---------------------------------
+
+      const latestLocation =
+        await prisma.telemetry.findFirst({
+          where: {
+  assetId: {
+    in: assetIds
+  },
+  latitude: {
+    not: null
+  },
+  longitude: {
+    not: null
+  }
+},
+
+          orderBy: {
+            receivedAt: 'desc'
+          }
+        })
+
+      // ---------------------------------
+      // GPS ACTUAL
+      // ---------------------------------
+
+      const hasCurrentGps =
+        latestTelemetry.latitude !==
+          null &&
+        latestTelemetry.longitude !==
+          null
+
+      // ---------------------------------
+      // RESPUESTA
+      // ---------------------------------
+
+      return res.json({
+        ok: true,
+
+        telemetry: {
+
+          ...latestTelemetry,
+
+          latitude:
+            latestTelemetry.latitude ??
+            latestLocation?.latitude ??
+            null,
+
+          longitude:
+            latestTelemetry.longitude ??
+            latestLocation?.longitude ??
+            null,
+
+          altitude:
+            latestTelemetry.altitude ??
+            latestLocation?.altitude ??
+            null,
+
+          hasCurrentGps,
+
+          locationReceivedAt:
+            latestLocation?.receivedAt ??
+            null
+        }
+      })
+
+    } catch (error) {
+
+      console.error(
+        'Error loading latest telemetry:',
+        error
+      )
+
+      return res.status(500).json({
+        ok: false,
+        message:
+          'Database error'
+      })
+    }
+  }
+)
+
+// =====================================================
+// ARRANCAR SERVIDOR
+// =====================================================
+
+async function startServer() {
+
+  try {
+
+    await ensureAdminUser()
+
+    app.listen(
+      PORT,
+      () => {
+
+        console.log(
+          `Maverick API running on port ${PORT}`
+        )
+      }
+    )
+
+  } catch (error) {
+
+    console.error(
+      'Maverick startup error:',
+      error
+    )
+
+    process.exit(1)
+  }
+}
+
+startServer()

@@ -827,6 +827,8 @@ app.post(
         latitude,
         longitude,
         altitude,
+        speedKph,
+        movementStatus,
         recordedAt,
         isBackfill
       } = req.body
@@ -863,6 +865,20 @@ app.post(
       const safeAltitude =
         typeof altitude === 'number'
           ? altitude
+          : null
+
+      const safeSpeedKph =
+        typeof speedKph === 'number' &&
+        Number.isFinite(speedKph)
+          ? Math.max(0, speedKph)
+          : null
+
+      const safeMovementStatus =
+        typeof movementStatus === 'string' &&
+        movementStatus.trim().length > 0
+          ? movementStatus
+              .trim()
+              .toUpperCase()
           : null
 
       const safeIsBackfill =
@@ -913,6 +929,12 @@ app.post(
     altitude:
       safeAltitude,
 
+    speedKph:
+      safeSpeedKph,
+
+    movementStatus:
+      safeMovementStatus,
+
     recordedAt:
       safeRecordedAt,
 
@@ -956,6 +978,12 @@ app.post(
 
           altitude:
             safeAltitude,
+
+          speedKph:
+            safeSpeedKph,
+
+          movementStatus:
+            safeMovementStatus,
 
           recordedAt:
             safeRecordedAt
@@ -1164,6 +1192,214 @@ if (assetIds.length === 0) {
         ok: false,
         message:
           'Database error'
+      })
+    }
+  }
+)
+
+
+// =====================================================
+// HISTORIAL GPS / RECORRIDOS
+// =====================================================
+
+app.get(
+  '/api/telemetry/history',
+  requireAuth,
+  async (
+    req: AuthenticatedRequest,
+    res: Response
+  ) => {
+    try {
+      const companyId =
+        req.user?.companyId
+
+      if (!companyId) {
+        return res.status(401).json({
+          ok: false,
+          message: 'Invalid session'
+        })
+      }
+
+      const deviceId =
+        typeof req.query.deviceId ===
+          'string'
+          ? req.query.deviceId.trim()
+          : ''
+
+      if (!deviceId) {
+        return res.status(400).json({
+          ok: false,
+          message:
+            'deviceId is required'
+        })
+      }
+
+      const asset =
+        await prisma.asset.findFirst({
+          where: {
+            companyId,
+            deviceId,
+            active: true
+          },
+          select: {
+            id: true,
+            deviceId: true,
+            name: true
+          }
+        })
+
+      if (!asset) {
+        return res.status(404).json({
+          ok: false,
+          message:
+            'Asset not found'
+        })
+      }
+
+      const now =
+        new Date()
+
+      const defaultFrom =
+        new Date(
+          now.getTime() -
+          24 * 60 * 60 * 1000
+        )
+
+      const from =
+        typeof req.query.from ===
+          'string'
+          ? new Date(req.query.from)
+          : defaultFrom
+
+      const to =
+        typeof req.query.to ===
+          'string'
+          ? new Date(req.query.to)
+          : now
+
+      if (
+        Number.isNaN(from.getTime()) ||
+        Number.isNaN(to.getTime()) ||
+        from > to
+      ) {
+        return res.status(400).json({
+          ok: false,
+          message:
+            'Invalid history date range'
+        })
+      }
+
+      const maxWindowMs =
+        31 * 24 * 60 * 60 * 1000
+
+      if (
+        to.getTime() -
+        from.getTime() >
+        maxWindowMs
+      ) {
+        return res.status(400).json({
+          ok: false,
+          message:
+            'History range cannot exceed 31 days'
+        })
+      }
+
+      const rows =
+        await prisma.telemetry.findMany({
+          where: {
+            assetId: asset.id,
+            latitude: {
+              not: null
+            },
+            longitude: {
+              not: null
+            },
+            OR: [
+              {
+                recordedAt: {
+                  gte: from,
+                  lte: to
+                }
+              },
+              {
+                recordedAt: null,
+                receivedAt: {
+                  gte: from,
+                  lte: to
+                }
+              }
+            ]
+          },
+          select: {
+            id: true,
+            temperature: true,
+            latitude: true,
+            longitude: true,
+            altitude: true,
+            speedKph: true,
+            movementStatus: true,
+            recordedAt: true,
+            receivedAt: true,
+            isBackfill: true
+          },
+          take: 5000
+        })
+
+      const points =
+        rows
+          .map((row) => ({
+            id: row.id,
+            temperature:
+              row.temperature,
+            latitude:
+              row.latitude as number,
+            longitude:
+              row.longitude as number,
+            altitude:
+              row.altitude,
+            speedKph:
+              row.speedKph,
+            movementStatus:
+              row.movementStatus,
+            isBackfill:
+              row.isBackfill,
+            timestamp:
+              (
+                row.recordedAt ??
+                row.receivedAt
+              ).toISOString()
+          }))
+          .sort(
+            (a, b) =>
+              new Date(
+                a.timestamp
+              ).getTime() -
+              new Date(
+                b.timestamp
+              ).getTime()
+          )
+
+      return res.json({
+        ok: true,
+        asset,
+        range: {
+          from:
+            from.toISOString(),
+          to:
+            to.toISOString()
+        },
+        points
+      })
+    } catch (error) {
+      console.error(
+        'History error:',
+        error
+      )
+
+      return res.status(500).json({
+        ok: false,
+        message:
+          'Unable to load trip history'
       })
     }
   }

@@ -65,6 +65,8 @@ model Telemetry {
   latitude    Float?
   longitude   Float?
   altitude    Float?
+  speedKph    Float?
+  movementStatus String?
 
   // Momento REAL en que el dispositivo capturo la lectura.
   // Para GPS valido viene del UTC de GNSS.
@@ -85,4 +87,5 @@ model Telemetry {
   @@index([receivedAt])
   @@index([recordedAt])
   @@index([isBackfill])
+  @@index([assetId, recordedAt])
 }

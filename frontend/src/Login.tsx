@@ -1,11 +1,7 @@
 import { useState } from 'react'
 import maverickLogo from './assets/maverick-logo.jpeg'
 import './Login.css'
-const API_BASE =
-  window.location.hostname === 'localhost'
-    ? 'http://localhost:3000'
-    : 'https://maverick-1z64.onrender.com'
-
+const API_BASE = 'https://maverick-1z64.onrender.com'
 type LoginProps = {
   onLogin: () => void
 }

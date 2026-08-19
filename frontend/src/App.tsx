@@ -3,6 +3,7 @@ import {
   TileLayer,
   Marker,
   Popup,
+  Polyline,
   useMap
 } from 'react-leaflet'
 
@@ -37,20 +38,55 @@ type StatusFilter =
   | 'all'
   | DeviceStatus
 
-const API_BASE =
-  window.location.hostname === 'localhost'
-    ? 'http://localhost:3000'
-    : 'https://maverick-1z64.onrender.com'
+type MovementStatus =
+  | 'moving'
+  | 'parked'
+  | 'acquiring'
+  | 'offline'
 
-const trailerIcon = L.icon({
-  iconRetinaUrl: markerIcon2x,
-  iconUrl: markerIcon,
-  shadowUrl: markerShadow,
-  iconSize: [25, 41],
-  iconAnchor: [12, 41],
-  popupAnchor: [1, -34],
-  shadowSize: [41, 41]
-})
+type RoutePoint = {
+  latitude: number
+  longitude: number
+  timestamp: string
+}
+
+type HistoryPoint = RoutePoint & {
+  id: number
+  temperature: number
+  altitude: number | null
+  speedKph: number | null
+  movementStatus: string | null
+}
+
+type HistoryRange =
+  | 'today'
+  | 'yesterday'
+  | '7days'
+
+const API_BASE = 'https://maverick-1z64.onrender.com'
+
+// Keep Leaflet's default marker assets available for compatibility.
+// Maverick uses a custom status-aware trailer icon below.
+void markerIcon2x
+void markerIcon
+void markerShadow
+
+function createTrailerIcon(
+  movementStatus: MovementStatus
+) {
+  return L.divIcon({
+    className: 'mav-trailer-marker-wrapper',
+    html: `
+      <div class="mav-trailer-marker ${movementStatus}">
+        <span class="mav-trailer-marker-pulse"></span>
+        <span class="mav-trailer-marker-icon">▰</span>
+      </div>
+    `,
+    iconSize: [46, 46],
+    iconAnchor: [23, 23],
+    popupAnchor: [0, -26]
+  })
+}
 
 function MapController({
   latitude,
@@ -78,6 +114,32 @@ function MapController({
   ])
 
   return null
+}
+
+function distanceMiles(
+  lat1: number,
+  lon1: number,
+  lat2: number,
+  lon2: number
+) {
+  const toRad = (value: number) =>
+    value * Math.PI / 180
+
+  const earthRadiusMiles = 3958.7613
+  const dLat = toRad(lat2 - lat1)
+  const dLon = toRad(lon2 - lon1)
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(toRad(lat1)) *
+      Math.cos(toRad(lat2)) *
+      Math.sin(dLon / 2) ** 2
+
+  return earthRadiusMiles *
+    2 *
+    Math.atan2(
+      Math.sqrt(a),
+      Math.sqrt(1 - a)
+    )
 }
 
 function readStoredUser() {
@@ -201,6 +263,42 @@ function App() {
     assets,
     setAssets
   ] = useState<any[]>([])
+
+
+  const [
+    routePoints,
+    setRoutePoints
+  ] = useState<RoutePoint[]>([])
+
+  const [
+    showRoute,
+    setShowRoute
+  ] = useState(true)
+
+  const [
+    historyOpen,
+    setHistoryOpen
+  ] = useState(false)
+
+  const [
+    historyRange,
+    setHistoryRange
+  ] = useState<HistoryRange>('today')
+
+  const [
+    historyPoints,
+    setHistoryPoints
+  ] = useState<HistoryPoint[]>([])
+
+  const [
+    historyLoading,
+    setHistoryLoading
+  ] = useState(false)
+
+  const [
+    historyError,
+    setHistoryError
+  ] = useState('')
 
   const [
     selectedDeviceId,
@@ -422,6 +520,58 @@ function App() {
         interval
       )
   }, [loadTelemetry])
+
+
+  // =====================================================
+  // LIVE ROUTE FOR THIS BROWSER SESSION
+  // =====================================================
+  // Every fresh valid GPS position is appended once.
+  // This gives us a live breadcrumb trail immediately,
+  // without requiring a historical endpoint yet.
+
+  useEffect(() => {
+    if (
+      !telemetry?.hasCurrentGps ||
+      telemetry?.latitude == null ||
+      telemetry?.longitude == null
+    ) {
+      return
+    }
+
+    const timestamp =
+      telemetry.locationReceivedAt ||
+      telemetry.recordedAt ||
+      telemetry.receivedAt
+
+    if (!timestamp) {
+      return
+    }
+
+    const nextPoint: RoutePoint = {
+      latitude: Number(telemetry.latitude),
+      longitude: Number(telemetry.longitude),
+      timestamp: String(timestamp)
+    }
+
+    setRoutePoints((current) => {
+      const last =
+        current[current.length - 1]
+
+      if (
+        last?.timestamp ===
+        nextPoint.timestamp
+      ) {
+        return current
+      }
+
+      const next = [
+        ...current,
+        nextPoint
+      ]
+
+      return next.slice(-300)
+    })
+  }, [telemetry])
 
   const loadAssets =
     useCallback(
@@ -649,6 +799,11 @@ function App() {
         ).toFixed(1)
       : '--'
 
+  const temperatureLabel =
+    deviceStatus === 'online'
+      ? 'Temperature'
+      : 'Last Temperature'
+
   const selectedAsset =
     assets.find(
       (asset) =>
@@ -713,6 +868,57 @@ function App() {
     telemetry?.hasCurrentGps
       ? 'Location Updated'
       : 'Last Valid Location'
+
+  const speedKphRaw =
+    telemetry?.speedKph != null
+      ? Number(telemetry.speedKph)
+      : null
+
+  const speedKph =
+    speedKphRaw != null &&
+    Number.isFinite(speedKphRaw)
+      ? Math.max(0, speedKphRaw)
+      : 0
+
+  const speedMph =
+    speedKph * 0.621371
+
+  const backendMovement =
+    String(
+      telemetry?.movementStatus || ''
+    ).toUpperCase()
+
+  const movementStatus: MovementStatus =
+    deviceStatus === 'offline'
+      ? 'offline'
+      : gpsAcquiring
+        ? 'acquiring'
+        : backendMovement === 'MOVING' ||
+            speedKph >= 5
+          ? 'moving'
+          : 'parked'
+
+  const movementLabel =
+    movementStatus === 'moving'
+      ? 'Moving'
+      : movementStatus === 'parked'
+        ? 'Parked'
+        : movementStatus === 'acquiring'
+          ? 'Acquiring GPS'
+          : 'Offline'
+
+  const trailerIcon =
+    createTrailerIcon(
+      movementStatus
+    )
+
+  const routeLatLngs =
+    routePoints.map(
+      (point) => [
+        point.latitude,
+        point.longitude
+      ] as [number, number]
+    )
 
   const normalizedSearch =
     searchTerm
@@ -1143,6 +1349,272 @@ function App() {
       }
     }
 
+  const handleClearTemperatureLimits =
+    async () => {
+      const token =
+        localStorage.getItem(
+          'maverick_token'
+        )
+
+      if (!selectedAsset?.id || !token) {
+        setTemperatureLimitsError(
+          'Asset or session information is unavailable.'
+        )
+        return
+      }
+
+      setTemperatureLimitsSaving(true)
+      setTemperatureLimitsError('')
+
+      try {
+        const res =
+          await fetch(
+            `${API_BASE}/api/assets/${selectedAsset.id}`,
+            {
+              method: 'PATCH',
+              headers: {
+                'Content-Type':
+                  'application/json',
+                Authorization:
+                  `Bearer ${token}`
+              },
+              body: JSON.stringify({
+                temperatureMinC: null,
+                temperatureMaxC: null,
+                temperatureAlertsEnabled:
+                  false
+              })
+            }
+          )
+
+        const data =
+          await res.json()
+
+        if (res.status === 401) {
+          handleLogout()
+          return
+        }
+
+        if (!res.ok || !data.ok) {
+          setTemperatureLimitsError(
+            data.message ||
+            'Unable to remove temperature limits.'
+          )
+          return
+        }
+
+        setAssets(
+          (currentAssets) =>
+            currentAssets.map(
+              (asset) =>
+                asset.id ===
+                  data.asset.id
+                  ? data.asset
+                  : asset
+            )
+        )
+
+        setTemperatureMinF('')
+        setTemperatureMaxF('')
+        setTemperatureAlertsEnabled(
+          false
+        )
+        setTemperatureLimitsOpen(false)
+      } catch {
+        setTemperatureLimitsError(
+          'Unable to connect to Maverick.'
+        )
+      } finally {
+        setTemperatureLimitsSaving(false)
+      }
+    }
+
+  const getHistoryWindow = (
+    range: HistoryRange
+  ) => {
+    const end = new Date()
+    const start = new Date()
+
+    if (range === 'today') {
+      start.setHours(0, 0, 0, 0)
+    } else if (range === 'yesterday') {
+      start.setDate(start.getDate() - 1)
+      start.setHours(0, 0, 0, 0)
+      end.setDate(end.getDate() - 1)
+      end.setHours(23, 59, 59, 999)
+    } else {
+      start.setDate(start.getDate() - 6)
+      start.setHours(0, 0, 0, 0)
+    }
+
+    return {
+      from: start.toISOString(),
+      to: end.toISOString()
+    }
+  }
+
+  const loadHistory = useCallback(
+    async (
+      range: HistoryRange =
+        historyRange
+    ) => {
+      const token =
+        localStorage.getItem(
+          'maverick_token'
+        )
+
+      const deviceId =
+        telemetry?.deviceId ||
+        selectedDeviceId
+
+      if (!token || !deviceId) {
+        return
+      }
+
+      const {
+        from,
+        to
+      } = getHistoryWindow(range)
+
+      setHistoryLoading(true)
+      setHistoryError('')
+
+      try {
+        const params =
+          new URLSearchParams({
+            deviceId,
+            from,
+            to
+          })
+
+        const res =
+          await fetch(
+            `${API_BASE}/api/telemetry/history?${params.toString()}`,
+            {
+              headers: {
+                Authorization:
+                  `Bearer ${token}`
+              }
+            }
+          )
+
+        const data =
+          await res.json()
+
+        if (res.status === 401) {
+          handleLogout()
+          return
+        }
+
+        if (!res.ok || !data.ok) {
+          setHistoryPoints([])
+          setHistoryError(
+            data.message ||
+            'Unable to load trip history.'
+          )
+          return
+        }
+
+        setHistoryPoints(
+          (data.points || []).map(
+            (point: any) => ({
+              id: Number(point.id),
+              latitude:
+                Number(point.latitude),
+              longitude:
+                Number(point.longitude),
+              timestamp:
+                String(point.timestamp),
+              temperature:
+                Number(point.temperature),
+              altitude:
+                point.altitude == null
+                  ? null
+                  : Number(point.altitude),
+              speedKph:
+                point.speedKph == null
+                  ? null
+                  : Number(point.speedKph),
+              movementStatus:
+                point.movementStatus == null
+                  ? null
+                  : String(
+                      point.movementStatus
+                    )
+            })
+          )
+        )
+      } catch {
+        setHistoryPoints([])
+        setHistoryError(
+          'Unable to connect to Maverick.'
+        )
+      } finally {
+        setHistoryLoading(false)
+      }
+    },
+    [
+      historyRange,
+      selectedDeviceId,
+      telemetry?.deviceId
+    ]
+  )
+
+  const openTripHistory = () => {
+    setHistoryOpen(true)
+    loadHistory(historyRange)
+  }
+
+  const handleHistoryRangeChange = (
+    range: HistoryRange
+  ) => {
+    setHistoryRange(range)
+    loadHistory(range)
+  }
+
+  const historyLatLngs =
+    historyPoints.map(
+      (point) => [
+        point.latitude,
+        point.longitude
+      ] as [number, number]
+    )
+
+  const historyDistanceMiles =
+    historyPoints.reduce(
+      (total, point, index) => {
+        if (index === 0) {
+          return 0
+        }
+
+        const previous =
+          historyPoints[index - 1]
+
+        return total +
+          distanceMiles(
+            previous.latitude,
+            previous.longitude,
+            point.latitude,
+            point.longitude
+          )
+      },
+      0
+    )
+
+  const historyAverageSpeedMph =
+    historyPoints.length > 0
+      ? historyPoints.reduce(
+          (total, point) =>
+            total +
+            (
+              point.speedKph ?? 0
+            ) *
+            0.621371,
+          0
+        ) /
+        historyPoints.length
+      : 0
+
   const openAssetOnMap = () => {
     setSearchTerm('')
     setStatusFilter('all')
@@ -1482,6 +1954,18 @@ function App() {
           Offline
         </div>
 
+        <div className={`metric-pill movement ${movementStatus}`}>
+          <span className="metric-dot" />
+
+          <strong>
+            {movementLabel}
+          </strong>
+
+          {movementStatus === 'moving'
+            ? `${speedMph.toFixed(1)} mph`
+            : ''}
+        </div>
+
         <div className="statusbar-spacer" />
 
         {
@@ -1576,6 +2060,20 @@ function App() {
                 />
 
                 {
+                  showRoute &&
+                  routeLatLngs.length > 1 && (
+                    <Polyline
+                      positions={routeLatLngs}
+                      pathOptions={{
+                        color: '#22c55e',
+                        weight: 4,
+                        opacity: 0.82
+                      }}
+                    />
+                  )
+                }
+
+                {
                   markerVisible && (
                     <Marker
                       position={[
@@ -1623,7 +2121,19 @@ function App() {
 
                           <br />
 
-                          Temperature:{' '}
+                          Movement:{' '}
+                          <strong className={`popup-movement ${movementStatus}`}>
+                            {movementLabel}
+                          </strong>
+
+                          <br />
+
+                          Speed:{' '}
+                          {speedMph.toFixed(1)} mph
+
+                          <br />
+
+                          {temperatureLabel}:{' '}
                           {temperatureF}°F
 
                           <br />
@@ -1677,6 +2187,21 @@ function App() {
                 }
 
               </MapContainer>
+
+              <div className="movement-legend">
+                <span className="legend-title">Asset state</span>
+                <span><i className="movement-dot moving" /> Moving</span>
+                <span><i className="movement-dot parked" /> Parked</span>
+                <span><i className="movement-dot acquiring" /> Acquiring</span>
+                <span><i className="movement-dot offline" /> Offline</span>
+                <button
+                  type="button"
+                  className={`route-toggle ${showRoute ? 'active' : ''}`}
+                  onClick={() => setShowRoute(!showRoute)}
+                >
+                  {showRoute ? 'Hide route' : 'Show route'}
+                </button>
+              </div>
 
               {/* ================================= */}
               {/* FILTERS */}
@@ -1956,7 +2481,7 @@ function App() {
 
                           <div
                             className={
-                              `asset-status-icon ${deviceStatus}`
+                              `asset-status-icon ${movementStatus}`
                             }
                           >
                             ◈
@@ -1995,6 +2520,18 @@ function App() {
                                 )
                               }
                             </div>
+
+
+                            <div className={`movement-state ${movementStatus}`}>
+                              <span className="movement-dot" />
+                              {movementLabel}
+                              {movementStatus === 'moving' && (
+                                <>
+                                  <span>•</span>
+                                  {speedMph.toFixed(1)} mph
+                                </>
+                              )}
+                            </div>
                           </div>
 
                         </div>
@@ -2005,11 +2542,33 @@ function App() {
 
                           <div>
                             <dt>
-                              Temperature
+                              {temperatureLabel}
                             </dt>
 
                             <dd>
                               {temperatureF}°F
+                            </dd>
+                          </div>
+
+                          <div>
+                            <dt>
+                              Movement
+                            </dt>
+
+                            <dd>
+                              <span className={`inline-movement ${movementStatus}`}>
+                                {movementLabel}
+                              </span>
+                            </dd>
+                          </div>
+
+                          <div>
+                            <dt>
+                              Speed
+                            </dt>
+
+                            <dd>
+                              {speedMph.toFixed(1)} mph
                             </dd>
                           </div>
 
@@ -2087,17 +2646,29 @@ function App() {
 
                         </dl>
 
-                        <button
-                          className="view-details-button"
-                          onClick={() =>
-                            setDetailsOpen(
-                              true
-                            )
-                          }
-                          type="button"
-                        >
-                          View Details
-                        </button>
+                        <div className="asset-action-stack">
+                          <button
+                            className="view-details-button"
+                            onClick={() =>
+                              setDetailsOpen(
+                                true
+                              )
+                            }
+                            type="button"
+                          >
+                            View Details
+                          </button>
+
+                          <button
+                            className="history-button"
+                            onClick={
+                              openTripHistory
+                            }
+                            type="button"
+                          >
+                            Trip History
+                          </button>
+                        </div>
                       </>
                     )
                     : (
@@ -2436,6 +3007,10 @@ function App() {
                   </span>
 
                   <span>
+                    Movement
+                  </span>
+
+                  <span>
                     Temperature
                   </span>
 
@@ -2484,8 +3059,19 @@ function App() {
                           {statusLabel}
                         </span>
 
+                        <span className={`inline-movement ${movementStatus}`}>
+                          {movementLabel}
+                          {movementStatus === 'moving'
+                            ? ` · ${speedMph.toFixed(1)} mph`
+                            : ''}
+                        </span>
+
                         <span>
-                          {temperatureF}°F
+                          {
+                            deviceStatus === 'online'
+                              ? `${temperatureF}°F`
+                              : `Last ${temperatureF}°F`
+                          }
                         </span>
 
                         <span>
@@ -2711,7 +3297,27 @@ function App() {
 
                 <article className="page-card monitor-card">
                   <span>
-                    Temperature
+                    Movement
+                  </span>
+
+                  <strong className={`monitor-movement ${movementStatus}`}>
+                    {movementLabel}
+                  </strong>
+                </article>
+
+                <article className="page-card monitor-card">
+                  <span>
+                    Speed
+                  </span>
+
+                  <strong>
+                    {speedMph.toFixed(1)} mph
+                  </strong>
+                </article>
+
+                <article className="page-card monitor-card">
+                  <span>
+                    {temperatureLabel}
                   </span>
 
                   <strong>
@@ -2849,7 +3455,7 @@ function App() {
 
                   <div>
                     <dt>
-                      Temperature
+                      {temperatureLabel}
                     </dt>
 
                     <dd>
@@ -3217,6 +3823,26 @@ function App() {
 
                 <div>
                   <dt>
+                    Movement
+                  </dt>
+
+                  <dd>
+                    {movementLabel}
+                  </dd>
+                </div>
+
+                <div>
+                  <dt>
+                    Speed
+                  </dt>
+
+                  <dd>
+                    {speedMph.toFixed(1)} mph
+                  </dd>
+                </div>
+
+                <div>
+                  <dt>
                     GPS
                   </dt>
 
@@ -3445,7 +4071,22 @@ function App() {
                 }
               </div>
 
-              <div className="modal-actions">
+              <div className="modal-actions temperature-modal-actions">
+                <button
+                  className="danger-action"
+                  onClick={
+                    handleClearTemperatureLimits
+                  }
+                  type="button"
+                  disabled={
+                    temperatureLimitsSaving
+                  }
+                >
+                  Remove Limits
+                </button>
+
+                <span className="modal-action-spacer" />
+
                 <button
                   className="secondary-action"
                   onClick={() => {
@@ -3478,6 +4119,261 @@ function App() {
                   }
                 </button>
               </div>
+            </section>
+          </div>
+        )
+      }
+
+      {/* ================================= */}
+      {/* TRIP HISTORY MODAL */}
+      {/* ================================= */}
+
+      {
+        historyOpen && (
+          <div
+            className="modal-backdrop"
+            onMouseDown={() =>
+              setHistoryOpen(false)
+            }
+          >
+            <section
+              className="details-modal history-modal"
+              onMouseDown={
+                (event) =>
+                  event.stopPropagation()
+              }
+            >
+              <div className="modal-header">
+                <div>
+                  <span className="page-kicker">
+                    Trip History
+                  </span>
+
+                  <h2>
+                    {selectedAssetName}
+                  </h2>
+
+                  <small className="modal-device-id">
+                    {
+                      telemetry?.deviceId ||
+                      selectedDeviceId
+                    }
+                  </small>
+                </div>
+
+                <button
+                  className="modal-close"
+                  onClick={() =>
+                    setHistoryOpen(false)
+                  }
+                  type="button"
+                >
+                  ×
+                </button>
+              </div>
+
+              <div className="history-toolbar">
+                <label>
+                  Range
+                  <select
+                    value={historyRange}
+                    onChange={
+                      (event) =>
+                        handleHistoryRangeChange(
+                          event.target.value as
+                            HistoryRange
+                        )
+                    }
+                  >
+                    <option value="today">
+                      Today
+                    </option>
+                    <option value="yesterday">
+                      Yesterday
+                    </option>
+                    <option value="7days">
+                      Last 7 days
+                    </option>
+                  </select>
+                </label>
+
+                <button
+                  className="secondary-action"
+                  onClick={() =>
+                    loadHistory(
+                      historyRange
+                    )
+                  }
+                  type="button"
+                  disabled={historyLoading}
+                >
+                  {
+                    historyLoading
+                      ? 'Loading...'
+                      : 'Refresh'
+                  }
+                </button>
+              </div>
+
+              {
+                historyError && (
+                  <div className="rename-error">
+                    {historyError}
+                  </div>
+                )
+              }
+
+              {
+                !historyLoading &&
+                !historyError &&
+                historyPoints.length ===
+                  0 && (
+                  <div className="history-empty">
+                    No GPS history is available for this range yet.
+                  </div>
+                )
+              }
+
+              {
+                historyPoints.length >
+                  0 && (
+                  <>
+                    <div className="history-stats">
+                      <div>
+                        <span>
+                          GPS Points
+                        </span>
+                        <strong>
+                          {
+                            historyPoints.length
+                          }
+                        </strong>
+                      </div>
+
+                      <div>
+                        <span>
+                          Distance
+                        </span>
+                        <strong>
+                          {
+                            historyDistanceMiles
+                              .toFixed(1)
+                          } mi
+                        </strong>
+                      </div>
+
+                      <div>
+                        <span>
+                          Avg Speed
+                        </span>
+                        <strong>
+                          {
+                            historyAverageSpeedMph
+                              .toFixed(1)
+                          } mph
+                        </strong>
+                      </div>
+                    </div>
+
+                    <div className="history-map">
+                      <MapContainer
+                        center={
+                          historyLatLngs[
+                            historyLatLngs.length -
+                              1
+                          ]
+                        }
+                        zoom={12}
+                        scrollWheelZoom
+                        className="history-leaflet-map"
+                      >
+                        <TileLayer
+                          attribution='&copy; OpenStreetMap contributors'
+                          url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+                        />
+
+                        {
+                          historyLatLngs.length >
+                            1 && (
+                            <Polyline
+                              positions={
+                                historyLatLngs
+                              }
+                            />
+                          )
+                        }
+
+                        <Marker
+                          position={
+                            historyLatLngs[0]
+                          }
+                        >
+                          <Popup>
+                            Trip start
+                            <br />
+                            {
+                              formatDateTime(
+                                historyPoints[0]
+                                  .timestamp
+                              )
+                            }
+                          </Popup>
+                        </Marker>
+
+                        <Marker
+                          position={
+                            historyLatLngs[
+                              historyLatLngs.length -
+                                1
+                            ]
+                          }
+                        >
+                          <Popup>
+                            Last point
+                            <br />
+                            {
+                              formatDateTime(
+                                historyPoints[
+                                  historyPoints.length -
+                                    1
+                                ].timestamp
+                              )
+                            }
+                          </Popup>
+                        </Marker>
+                      </MapContainer>
+                    </div>
+
+                    <div className="history-time-row">
+                      <span>
+                        Start:{' '}
+                        <strong>
+                          {
+                            formatDateTime(
+                              historyPoints[0]
+                                .timestamp
+                            )
+                          }
+                        </strong>
+                      </span>
+
+                      <span>
+                        Last point:{' '}
+                        <strong>
+                          {
+                            formatDateTime(
+                              historyPoints[
+                                historyPoints.length -
+                                  1
+                              ].timestamp
+                            )
+                          }
+                        </strong>
+                      </span>
+                    </div>
+                  </>
+                )
+              }
             </section>
           </div>
         )

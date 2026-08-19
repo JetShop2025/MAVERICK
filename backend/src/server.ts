@@ -1308,12 +1308,6 @@ app.get(
         await prisma.telemetry.findMany({
           where: {
             assetId: asset.id,
-            latitude: {
-              not: null
-            },
-            longitude: {
-              not: null
-            },
             OR: [
               {
                 recordedAt: {
@@ -1342,7 +1336,7 @@ app.get(
             receivedAt: true,
             isBackfill: true
           },
-          take: 5000
+          take: 50000
         })
 
       const points =
@@ -1352,9 +1346,9 @@ app.get(
             temperature:
               row.temperature,
             latitude:
-              row.latitude as number,
+              row.latitude,
             longitude:
-              row.longitude as number,
+              row.longitude,
             altitude:
               row.altitude,
             speedKph:

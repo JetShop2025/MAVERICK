@@ -50,8 +50,11 @@ type RoutePoint = {
   timestamp: string
 }
 
-type HistoryPoint = RoutePoint & {
+type HistoryPoint = {
   id: number
+  latitude: number | null
+  longitude: number | null
+  timestamp: string
   temperature: number
   altitude: number | null
   speedKph: number | null
@@ -62,6 +65,15 @@ type HistoryRange =
   | 'today'
   | 'yesterday'
   | '7days'
+  | 'custom'
+
+type HistoryTrip = {
+  id: number
+  points: HistoryPoint[]
+  start: string
+  end: string
+  distanceMiles: number
+}
 
 const API_BASE = 'https://maverick-1z64.onrender.com'
 
@@ -284,6 +296,22 @@ function App() {
     historyRange,
     setHistoryRange
   ] = useState<HistoryRange>('today')
+
+  const [
+    historyCustomDate,
+    setHistoryCustomDate
+  ] = useState(() => {
+    const now = new Date()
+    const year = now.getFullYear()
+    const month = String(now.getMonth() + 1).padStart(2, '0')
+    const day = String(now.getDate()).padStart(2, '0')
+    return `${year}-${month}-${day}`
+  })
+
+  const [
+    selectedHistoryTripId,
+    setSelectedHistoryTripId
+  ] = useState<number | 'all'>('all')
 
   const [
     historyPoints,
@@ -1430,7 +1458,8 @@ function App() {
     }
 
   const getHistoryWindow = (
-    range: HistoryRange
+    range: HistoryRange,
+    customDate = historyCustomDate
   ) => {
     const end = new Date()
     const start = new Date()
@@ -1442,6 +1471,38 @@ function App() {
       start.setHours(0, 0, 0, 0)
       end.setDate(end.getDate() - 1)
       end.setHours(23, 59, 59, 999)
+    } else if (range === 'custom') {
+      const [year, month, day] =
+        customDate
+          .split('-')
+          .map(Number)
+
+      const selectedStart =
+        new Date(
+          year,
+          month - 1,
+          day,
+          0,
+          0,
+          0,
+          0
+        )
+
+      const selectedEnd =
+        new Date(
+          year,
+          month - 1,
+          day,
+          23,
+          59,
+          59,
+          999
+        )
+
+      return {
+        from: selectedStart.toISOString(),
+        to: selectedEnd.toISOString()
+      }
     } else {
       start.setDate(start.getDate() - 6)
       start.setHours(0, 0, 0, 0)
@@ -1456,7 +1517,8 @@ function App() {
   const loadHistory = useCallback(
     async (
       range: HistoryRange =
-        historyRange
+        historyRange,
+      customDate = historyCustomDate
     ) => {
       const token =
         localStorage.getItem(
@@ -1474,10 +1536,14 @@ function App() {
       const {
         from,
         to
-      } = getHistoryWindow(range)
+      } = getHistoryWindow(
+        range,
+        customDate
+      )
 
       setHistoryLoading(true)
       setHistoryError('')
+      setSelectedHistoryTripId('all')
 
       try {
         const params =
@@ -1520,9 +1586,13 @@ function App() {
             (point: any) => ({
               id: Number(point.id),
               latitude:
-                Number(point.latitude),
+                point.latitude == null
+                  ? null
+                  : Number(point.latitude),
               longitude:
-                Number(point.longitude),
+                point.longitude == null
+                  ? null
+                  : Number(point.longitude),
               timestamp:
                 String(point.timestamp),
               temperature:
@@ -1555,6 +1625,7 @@ function App() {
     },
     [
       historyRange,
+      historyCustomDate,
       selectedDeviceId,
       telemetry?.deviceId
     ]
@@ -1562,58 +1633,409 @@ function App() {
 
   const openTripHistory = () => {
     setHistoryOpen(true)
-    loadHistory(historyRange)
+    loadHistory(
+      historyRange,
+      historyCustomDate
+    )
   }
 
   const handleHistoryRangeChange = (
     range: HistoryRange
   ) => {
     setHistoryRange(range)
-    loadHistory(range)
+
+    if (range !== 'custom') {
+      loadHistory(
+        range,
+        historyCustomDate
+      )
+    }
   }
 
+  const historyGpsPoints =
+    historyPoints.filter(
+      (point) =>
+        point.latitude != null &&
+        point.longitude != null
+    )
+
+  const buildHistoryTrips = (
+    points: HistoryPoint[]
+  ): HistoryTrip[] => {
+    if (points.length < 2) {
+      return []
+    }
+
+    const trips: HistoryTrip[] = []
+    let current: HistoryPoint[] = []
+
+    const flush = () => {
+      if (current.length < 2) {
+        current = []
+        return
+      }
+
+      const distance =
+        current.reduce(
+          (total, point, index) => {
+            if (index === 0) {
+              return 0
+            }
+
+            const previous =
+              current[index - 1]
+
+            if (
+              previous.latitude == null ||
+              previous.longitude == null ||
+              point.latitude == null ||
+              point.longitude == null
+            ) {
+              return total
+            }
+
+            return total +
+              distanceMiles(
+                previous.latitude,
+                previous.longitude,
+                point.latitude,
+                point.longitude
+              )
+          },
+          0
+        )
+
+      const tripStartMs = new Date(current[0].timestamp).getTime()
+      const tripEndMs = new Date(
+        current[current.length - 1].timestamp
+      ).getTime()
+      const durationMinutes = Math.max(
+        0,
+        (tripEndMs - tripStartMs) / 60000
+      )
+
+      // Ignore GPS drift / tiny repositioning. A trip must either
+      // cover a meaningful distance for a few minutes, or be
+      // clearly long enough to be a real movement segment.
+      const isRealTrip =
+        (distance >= 0.75 && durationMinutes >= 3) ||
+        distance >= 2
+
+      if (isRealTrip) {
+        trips.push({
+          id: trips.length + 1,
+          points: current,
+          start: current[0].timestamp,
+          end:
+            current[
+              current.length - 1
+            ].timestamp,
+          distanceMiles: distance
+        })
+      }
+
+      current = []
+    }
+
+    points.forEach(
+      (point, index) => {
+        if (index === 0) {
+          current = [point]
+          return
+        }
+
+        const previous =
+          points[index - 1]
+
+        const previousTime =
+          new Date(
+            previous.timestamp
+          ).getTime()
+
+        const currentTime =
+          new Date(
+            point.timestamp
+          ).getTime()
+
+        const gapMinutes =
+          (currentTime - previousTime) /
+          60000
+
+        const stepDistance =
+          previous.latitude != null &&
+          previous.longitude != null &&
+          point.latitude != null &&
+          point.longitude != null
+            ? distanceMiles(
+                previous.latitude,
+                previous.longitude,
+                point.latitude,
+                point.longitude
+              )
+            : 0
+
+        const movingSignal =
+          String(
+            point.movementStatus || ''
+          ).toUpperCase() === 'MOVING' ||
+          (point.speedKph ?? 0) >= 5 ||
+          stepDistance >= 0.03
+
+        const shouldBreak =
+          gapMinutes > 15 ||
+          (!movingSignal &&
+            current.length > 1 &&
+            gapMinutes > 5)
+
+        if (shouldBreak) {
+          flush()
+          current = [previous, point]
+        } else {
+          if (current.length === 0) {
+            current = [previous]
+          }
+          current.push(point)
+        }
+      }
+    )
+
+    flush()
+    return trips
+  }
+
+  const historyTrips =
+    buildHistoryTrips(
+      historyGpsPoints
+    )
+
+  const displayedHistoryPoints =
+    selectedHistoryTripId === 'all'
+      ? historyGpsPoints
+      : historyTrips.find(
+          (trip) =>
+            trip.id ===
+            selectedHistoryTripId
+        )?.points || []
+
   const historyLatLngs =
-    historyPoints.map(
+    displayedHistoryPoints.map(
       (point) => [
-        point.latitude,
-        point.longitude
+        point.latitude as number,
+        point.longitude as number
       ] as [number, number]
     )
 
   const historyDistanceMiles =
-    historyPoints.reduce(
+    displayedHistoryPoints.reduce(
       (total, point, index) => {
         if (index === 0) {
           return 0
         }
 
         const previous =
-          historyPoints[index - 1]
+          displayedHistoryPoints[
+            index - 1
+          ]
 
         return total +
           distanceMiles(
-            previous.latitude,
-            previous.longitude,
-            point.latitude,
-            point.longitude
+            previous.latitude as number,
+            previous.longitude as number,
+            point.latitude as number,
+            point.longitude as number
           )
       },
       0
     )
 
+  const pointsWithSpeed =
+    displayedHistoryPoints.filter(
+      (point) =>
+        point.speedKph != null &&
+        Number.isFinite(
+          point.speedKph
+        )
+    )
+
   const historyAverageSpeedMph =
-    historyPoints.length > 0
-      ? historyPoints.reduce(
+    pointsWithSpeed.length > 0
+      ? pointsWithSpeed.reduce(
           (total, point) =>
             total +
-            (
-              point.speedKph ?? 0
-            ) *
-            0.621371,
+            (point.speedKph as number) *
+              0.621371,
           0
         ) /
-        historyPoints.length
+        pointsWithSpeed.length
       : 0
+
+  const selectedHistoryTrip =
+    selectedHistoryTripId === 'all'
+      ? null
+      : historyTrips.find(
+          (trip) =>
+            trip.id === selectedHistoryTripId
+        ) || null
+
+  const displayedTemperaturePoints =
+    selectedHistoryTrip == null
+      ? historyPoints
+      : historyPoints.filter((point) => {
+          const time = new Date(
+            point.timestamp
+          ).getTime()
+          return (
+            time >= new Date(
+              selectedHistoryTrip.start
+            ).getTime() &&
+            time <= new Date(
+              selectedHistoryTrip.end
+            ).getTime()
+          )
+        })
+
+  const historyTemperaturesF =
+    displayedTemperaturePoints
+      .map(
+        (point) =>
+          point.temperature *
+            9 /
+            5 +
+          32
+      )
+      .filter(Number.isFinite)
+
+  const historyMinTemperatureF =
+    historyTemperaturesF.length > 0
+      ? Math.min(
+          ...historyTemperaturesF
+        )
+      : null
+
+  const historyMaxTemperatureF =
+    historyTemperaturesF.length > 0
+      ? Math.max(
+          ...historyTemperaturesF
+        )
+      : null
+
+  const historyAverageTemperatureF =
+    historyTemperaturesF.length > 0
+      ? historyTemperaturesF.reduce(
+          (total, value) =>
+            total + value,
+          0
+        ) /
+        historyTemperaturesF.length
+      : null
+
+  const temperatureChartWidth = 820
+  const temperatureChartHeight = 230
+  const temperatureChartPadding = 34
+
+  const temperatureMinLimitF =
+    selectedAsset?.temperatureMinC == null
+      ? null
+      : selectedAsset.temperatureMinC *
+          9 /
+          5 +
+        32
+
+  const temperatureMaxLimitF =
+    selectedAsset?.temperatureMaxC == null
+      ? null
+      : selectedAsset.temperatureMaxC *
+          9 /
+          5 +
+        32
+
+  const chartTemperatures =
+    historyTemperaturesF.length > 0
+      ? [
+          ...historyTemperaturesF,
+          ...(temperatureMinLimitF == null
+            ? []
+            : [temperatureMinLimitF]),
+          ...(temperatureMaxLimitF == null
+            ? []
+            : [temperatureMaxLimitF])
+        ]
+      : []
+
+  const chartMin =
+    chartTemperatures.length > 0
+      ? Math.floor(
+          Math.min(...chartTemperatures) -
+            2
+        )
+      : 0
+
+  const chartMax =
+    chartTemperatures.length > 0
+      ? Math.ceil(
+          Math.max(...chartTemperatures) +
+            2
+        )
+      : 1
+
+  const chartRange =
+    Math.max(
+      1,
+      chartMax - chartMin
+    )
+
+  const temperatureChartPoints =
+    displayedTemperaturePoints
+      .map((point, index) => {
+        const temperatureF =
+          point.temperature * 9 / 5 + 32
+
+        const x =
+          temperatureChartPadding +
+          (displayedTemperaturePoints.length <= 1
+            ? 0
+            : index /
+                (displayedTemperaturePoints.length - 1)) *
+            (temperatureChartWidth -
+              temperatureChartPadding * 2)
+
+        const y =
+          temperatureChartPadding +
+          (chartMax - temperatureF) /
+            chartRange *
+            (temperatureChartHeight -
+              temperatureChartPadding * 2)
+
+        return {
+          ...point,
+          temperatureF,
+          x,
+          y
+        }
+      })
+      .filter(
+        (point) =>
+          Number.isFinite(
+            point.temperatureF
+          )
+      )
+
+  const temperaturePolyline =
+    temperatureChartPoints
+      .map(
+        (point) =>
+          `${point.x},${point.y}`
+      )
+      .join(' ')
+
+  const getLimitY = (
+    limitF: number
+  ) =>
+    temperatureChartPadding +
+    (chartMax - limitF) /
+      chartRange *
+      (temperatureChartHeight -
+        temperatureChartPadding * 2)
 
   const openAssetOnMap = () => {
     setSearchTerm('')
@@ -4071,22 +4493,7 @@ function App() {
                 }
               </div>
 
-              <div className="modal-actions temperature-modal-actions">
-                <button
-                  className="danger-action"
-                  onClick={
-                    handleClearTemperatureLimits
-                  }
-                  type="button"
-                  disabled={
-                    temperatureLimitsSaving
-                  }
-                >
-                  Remove Limits
-                </button>
-
-                <span className="modal-action-spacer" />
-
+              <div className="modal-actions">
                 <button
                   className="secondary-action"
                   onClick={() => {
@@ -4094,18 +4501,14 @@ function App() {
                     setRenameError('')
                   }}
                   type="button"
-                  disabled={
-                    renameSaving
-                  }
+                  disabled={renameSaving}
                 >
                   Cancel
                 </button>
 
                 <button
                   className="primary-action"
-                  onClick={
-                    handleRenameAsset
-                  }
+                  onClick={handleRenameAsset}
                   type="button"
                   disabled={
                     renameSaving ||
@@ -4125,7 +4528,7 @@ function App() {
       }
 
       {/* ================================= */}
-      {/* TRIP HISTORY MODAL */}
+      {/* TRIP + TEMPERATURE HISTORY MODAL */}
       {/* ================================= */}
 
       {
@@ -4146,7 +4549,7 @@ function App() {
               <div className="modal-header">
                 <div>
                   <span className="page-kicker">
-                    Trip History
+                    Trip & Temperature History
                   </span>
 
                   <h2>
@@ -4194,14 +4597,37 @@ function App() {
                     <option value="7days">
                       Last 7 days
                     </option>
+                    <option value="custom">
+                      Custom date
+                    </option>
                   </select>
                 </label>
+
+                {
+                  historyRange ===
+                    'custom' && (
+                    <label>
+                      Date
+                      <input
+                        className="history-date-input"
+                        type="date"
+                        value={historyCustomDate}
+                        onChange={(event) =>
+                          setHistoryCustomDate(
+                            event.target.value
+                          )
+                        }
+                      />
+                    </label>
+                  )
+                }
 
                 <button
                   className="secondary-action"
                   onClick={() =>
                     loadHistory(
-                      historyRange
+                      historyRange,
+                      historyCustomDate
                     )
                   }
                   type="button"
@@ -4210,7 +4636,10 @@ function App() {
                   {
                     historyLoading
                       ? 'Loading...'
-                      : 'Refresh'
+                      : historyRange ===
+                          'custom'
+                        ? 'Load Date'
+                        : 'Refresh'
                   }
                 </button>
               </div>
@@ -4229,14 +4658,13 @@ function App() {
                 historyPoints.length ===
                   0 && (
                   <div className="history-empty">
-                    No GPS history is available for this range yet.
+                    No telemetry history is available for this range yet.
                   </div>
                 )
               }
 
               {
-                historyPoints.length >
-                  0 && (
+                historyPoints.length > 0 && (
                   <>
                     <div className="history-stats">
                       <div>
@@ -4244,9 +4672,7 @@ function App() {
                           GPS Points
                         </span>
                         <strong>
-                          {
-                            historyPoints.length
-                          }
+                          {historyGpsPoints.length}
                         </strong>
                       </div>
 
@@ -4275,101 +4701,347 @@ function App() {
                       </div>
                     </div>
 
-                    <div className="history-map">
-                      <MapContainer
-                        center={
-                          historyLatLngs[
-                            historyLatLngs.length -
-                              1
-                          ]
-                        }
-                        zoom={12}
-                        scrollWheelZoom
-                        className="history-leaflet-map"
-                      >
-                        <TileLayer
-                          attribution='&copy; OpenStreetMap contributors'
-                          url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-                        />
+                    {
+                      historyTrips.length > 0 && (
+                        <div className="history-trip-strip">
+                          <button
+                            className={
+                              selectedHistoryTripId ===
+                                'all'
+                                ? 'active'
+                                : ''
+                            }
+                            onClick={() =>
+                              setSelectedHistoryTripId(
+                                'all'
+                              )
+                            }
+                            type="button"
+                          >
+                            All activity
+                          </button>
 
-                        {
-                          historyLatLngs.length >
-                            1 && (
-                            <Polyline
-                              positions={
-                                historyLatLngs
-                              }
+                          {
+                            historyTrips.map(
+                              (trip) => (
+                                <button
+                                  key={trip.id}
+                                  className={
+                                    selectedHistoryTripId ===
+                                      trip.id
+                                      ? 'active'
+                                      : ''
+                                  }
+                                  onClick={() =>
+                                    setSelectedHistoryTripId(
+                                      trip.id
+                                    )
+                                  }
+                                  type="button"
+                                >
+                                  Trip {trip.id}
+                                  <small>
+                                    {trip.distanceMiles.toFixed(1)} mi
+                                  </small>
+                                </button>
+                              )
+                            )
+                          }
+                        </div>
+                      )
+                    }
+
+                    <div className="history-content-grid">
+                      <div className="history-route-column">
+                    {
+                      historyLatLngs.length > 0 ? (
+                        <div className="history-map">
+                          <MapContainer
+                            key={
+                              `${historyRange}-${historyCustomDate}-${selectedHistoryTripId}`
+                            }
+                            center={
+                              historyLatLngs[
+                                historyLatLngs.length - 1
+                              ]
+                            }
+                            zoom={12}
+                            scrollWheelZoom
+                            className="history-leaflet-map"
+                          >
+                            <TileLayer
+                              attribution='&copy; OpenStreetMap contributors'
+                              url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
                             />
-                          )
-                        }
 
-                        <Marker
-                          position={
-                            historyLatLngs[0]
-                          }
-                        >
-                          <Popup>
-                            Trip start
-                            <br />
                             {
-                              formatDateTime(
-                                historyPoints[0]
-                                  .timestamp
+                              historyLatLngs.length > 1 && (
+                                <Polyline
+                                  positions={historyLatLngs}
+                                />
                               )
                             }
-                          </Popup>
-                        </Marker>
 
-                        <Marker
-                          position={
-                            historyLatLngs[
-                              historyLatLngs.length -
-                                1
-                            ]
-                          }
-                        >
-                          <Popup>
-                            Last point
-                            <br />
+                            <Marker
+                              position={historyLatLngs[0]}
+                            >
+                              <Popup>
+                                Start
+                                <br />
+                                {
+                                  formatDateTime(
+                                    displayedHistoryPoints[0]
+                                      .timestamp
+                                  )
+                                }
+                              </Popup>
+                            </Marker>
+
+                            <Marker
+                              position={
+                                historyLatLngs[
+                                  historyLatLngs.length - 1
+                                ]
+                              }
+                            >
+                              <Popup>
+                                Last point
+                                <br />
+                                {
+                                  formatDateTime(
+                                    displayedHistoryPoints[
+                                      displayedHistoryPoints.length - 1
+                                    ].timestamp
+                                  )
+                                }
+                              </Popup>
+                            </Marker>
+                          </MapContainer>
+                        </div>
+                      ) : (
+                        <div className="history-empty compact">
+                          Temperature readings exist, but there are no GPS points for this selection.
+                        </div>
+                      )
+                    }
+
+                    {
+                      displayedHistoryPoints.length > 0 && (
+                        <div className="history-time-row">
+                          <span>
+                            Start:{' '}
+                            <strong>
+                              {
+                                formatDateTime(
+                                  displayedHistoryPoints[0]
+                                    .timestamp
+                                )
+                              }
+                            </strong>
+                          </span>
+
+                          <span>
+                            Last point:{' '}
+                            <strong>
+                              {
+                                formatDateTime(
+                                  displayedHistoryPoints[
+                                    displayedHistoryPoints.length - 1
+                                  ].timestamp
+                                )
+                              }
+                            </strong>
+                          </span>
+                        </div>
+                      )
+                    }
+
+                      </div>
+
+                    <div className="temperature-history-section history-temperature-column">
+                      <div className="temperature-history-header">
+                        <div>
+                          <span className="page-kicker">
+                            Temperature History
+                          </span>
+                          <h3>
+                            Reefer temperature over time
+                          </h3>
+                        </div>
+
+                        <span className="temperature-reading-count">
+                          {displayedTemperaturePoints.length} readings
+                        </span>
+                      </div>
+
+                      <div className="temperature-history-stats">
+                        <div>
+                          <span>Minimum</span>
+                          <strong>
                             {
-                              formatDateTime(
-                                historyPoints[
-                                  historyPoints.length -
-                                    1
-                                ].timestamp
+                              historyMinTemperatureF == null
+                                ? '--'
+                                : historyMinTemperatureF.toFixed(1)
+                            }°F
+                          </strong>
+                        </div>
+                        <div>
+                          <span>Average</span>
+                          <strong>
+                            {
+                              historyAverageTemperatureF == null
+                                ? '--'
+                                : historyAverageTemperatureF.toFixed(1)
+                            }°F
+                          </strong>
+                        </div>
+                        <div>
+                          <span>Maximum</span>
+                          <strong>
+                            {
+                              historyMaxTemperatureF == null
+                                ? '--'
+                                : historyMaxTemperatureF.toFixed(1)
+                            }°F
+                          </strong>
+                        </div>
+                      </div>
+
+                      {
+                        temperatureChartPoints.length > 0 && (
+                          <div className="temperature-chart-wrap">
+                            <svg
+                              className="temperature-chart"
+                              viewBox={`0 0 ${temperatureChartWidth} ${temperatureChartHeight}`}
+                              role="img"
+                              aria-label="Temperature history chart"
+                            >
+                              <line
+                                className="temperature-chart-grid"
+                                x1={temperatureChartPadding}
+                                x2={temperatureChartWidth - temperatureChartPadding}
+                                y1={temperatureChartPadding}
+                                y2={temperatureChartPadding}
+                              />
+                              <line
+                                className="temperature-chart-grid"
+                                x1={temperatureChartPadding}
+                                x2={temperatureChartWidth - temperatureChartPadding}
+                                y1={temperatureChartHeight - temperatureChartPadding}
+                                y2={temperatureChartHeight - temperatureChartPadding}
+                              />
+
+                              {
+                                temperatureMinLimitF != null && (
+                                  <line
+                                    className="temperature-limit-line minimum"
+                                    x1={temperatureChartPadding}
+                                    x2={temperatureChartWidth - temperatureChartPadding}
+                                    y1={getLimitY(temperatureMinLimitF)}
+                                    y2={getLimitY(temperatureMinLimitF)}
+                                  />
+                                )
+                              }
+
+                              {
+                                temperatureMaxLimitF != null && (
+                                  <line
+                                    className="temperature-limit-line maximum"
+                                    x1={temperatureChartPadding}
+                                    x2={temperatureChartWidth - temperatureChartPadding}
+                                    y1={getLimitY(temperatureMaxLimitF)}
+                                    y2={getLimitY(temperatureMaxLimitF)}
+                                  />
+                                )
+                              }
+
+                              <polyline
+                                className="temperature-history-line"
+                                points={temperaturePolyline}
+                              />
+
+                              {
+                                temperatureChartPoints.map(
+                                  (point, index) => {
+                                    const outOfRange =
+                                      (temperatureMinLimitF != null &&
+                                        point.temperatureF < temperatureMinLimitF) ||
+                                      (temperatureMaxLimitF != null &&
+                                        point.temperatureF > temperatureMaxLimitF)
+
+                                    const showPoint =
+                                      outOfRange ||
+                                      index === 0 ||
+                                      index === temperatureChartPoints.length - 1 ||
+                                      index % Math.max(
+                                        1,
+                                        Math.ceil(
+                                          temperatureChartPoints.length / 45
+                                        )
+                                      ) === 0
+
+                                    return showPoint ? (
+                                      <circle
+                                        key={point.id}
+                                        className={
+                                          outOfRange
+                                            ? 'temperature-chart-point alert'
+                                            : 'temperature-chart-point'
+                                        }
+                                        cx={point.x}
+                                        cy={point.y}
+                                        r={outOfRange ? 4.5 : 3}
+                                      >
+                                        <title>
+                                          {`${formatDateTime(point.timestamp)} • ${point.temperatureF.toFixed(1)}°F${point.speedKph != null ? ` • ${(point.speedKph * 0.621371).toFixed(1)} mph` : ''}${point.movementStatus ? ` • ${String(point.movementStatus)}` : ''}${point.latitude != null && point.longitude != null ? ` • ${Number(point.latitude).toFixed(5)}, ${Number(point.longitude).toFixed(5)}` : ''}`}
+                                        </title>
+                                      </circle>
+                                    ) : null
+                                  }
+                                )
+                              }
+
+                              <text
+                                className="temperature-axis-label"
+                                x="4"
+                                y={temperatureChartPadding + 4}
+                              >
+                                {chartMax}°F
+                              </text>
+                              <text
+                                className="temperature-axis-label"
+                                x="4"
+                                y={temperatureChartHeight - temperatureChartPadding + 4}
+                              >
+                                {chartMin}°F
+                              </text>
+                            </svg>
+                          </div>
+                        )
+                      }
+
+                      {
+                        (temperatureMinLimitF != null ||
+                          temperatureMaxLimitF != null) && (
+                          <div className="temperature-limit-legend">
+                            {
+                              temperatureMinLimitF != null && (
+                                <span>
+                                  Min limit {temperatureMinLimitF.toFixed(1)}°F
+                                </span>
                               )
                             }
-                          </Popup>
-                        </Marker>
-                      </MapContainer>
+                            {
+                              temperatureMaxLimitF != null && (
+                                <span>
+                                  Max limit {temperatureMaxLimitF.toFixed(1)}°F
+                                </span>
+                              )
+                            }
+                          </div>
+                        )
+                      }
                     </div>
-
-                    <div className="history-time-row">
-                      <span>
-                        Start:{' '}
-                        <strong>
-                          {
-                            formatDateTime(
-                              historyPoints[0]
-                                .timestamp
-                            )
-                          }
-                        </strong>
-                      </span>
-
-                      <span>
-                        Last point:{' '}
-                        <strong>
-                          {
-                            formatDateTime(
-                              historyPoints[
-                                historyPoints.length -
-                                  1
-                              ].timestamp
-                            )
-                          }
-                        </strong>
-                      </span>
                     </div>
                   </>
                 )
@@ -4539,7 +5211,22 @@ function App() {
                 }
               </div>
 
-              <div className="modal-actions">
+              <div className="modal-actions temperature-modal-actions">
+                <button
+                  className="danger-action"
+                  onClick={handleClearTemperatureLimits}
+                  type="button"
+                  disabled={temperatureLimitsSaving}
+                >
+                  {
+                    temperatureLimitsSaving
+                      ? 'Removing...'
+                      : 'Remove Limits'
+                  }
+                </button>
+
+                <span className="modal-action-spacer" />
+
                 <button
                   className="secondary-action"
                   onClick={() => {

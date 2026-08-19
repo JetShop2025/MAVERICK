@@ -2038,3 +2038,421 @@ button:disabled {
     height: 300px;
   }
 }
+
+/* =====================================================
+   MAVERICK HISTORY V2 — TRIPS + TEMPERATURE
+   ===================================================== */
+
+.history-date-input {
+  min-height: 38px;
+  padding: 0 10px;
+  border: 1px solid rgba(148, 163, 184, 0.16);
+  border-radius: 8px;
+  background: #172338;
+  color: #e6eef8;
+}
+
+.history-trip-strip {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 14px;
+  overflow-x: auto;
+  padding-bottom: 3px;
+}
+
+.history-trip-strip button {
+  min-width: 110px;
+  display: grid;
+  gap: 3px;
+  padding: 9px 11px;
+  border: 1px solid rgba(148, 163, 184, 0.15);
+  border-radius: 8px;
+  background: #162236;
+  color: #cbd5e1;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.history-trip-strip button.active {
+  border-color: rgba(96, 165, 250, 0.5);
+  background: rgba(37, 99, 235, 0.18);
+  color: #ffffff;
+}
+
+.history-trip-strip small {
+  color: #8292a7;
+  font-size: 0.65rem;
+}
+
+.history-empty.compact {
+  margin-top: 10px;
+  padding: 16px;
+}
+
+.temperature-history-section {
+  margin-top: 22px;
+  padding-top: 20px;
+  border-top: 1px solid rgba(148, 163, 184, 0.12);
+}
+
+.temperature-history-header {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 14px;
+}
+
+.temperature-history-header h3 {
+  margin: 5px 0 0;
+  font-size: 1rem;
+}
+
+.temperature-reading-count {
+  color: #8292a7;
+  font-size: 0.7rem;
+}
+
+.temperature-history-stats {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.temperature-history-stats > div {
+  display: grid;
+  gap: 4px;
+  padding: 11px 12px;
+  border: 1px solid rgba(148, 163, 184, 0.12);
+  border-radius: 9px;
+  background: #162236;
+}
+
+.temperature-history-stats span {
+  color: #8292a7;
+  font-size: 0.68rem;
+}
+
+.temperature-history-stats strong {
+  font-size: 1rem;
+}
+
+.temperature-chart-wrap {
+  width: 100%;
+  overflow-x: auto;
+  border: 1px solid rgba(148, 163, 184, 0.12);
+  border-radius: 12px;
+  background: #0d1828;
+}
+
+.temperature-chart {
+  width: 100%;
+  min-width: 650px;
+  height: 250px;
+  display: block;
+}
+
+.temperature-chart-grid {
+  stroke: rgba(148, 163, 184, 0.14);
+  stroke-width: 1;
+}
+
+.temperature-history-line {
+  fill: none;
+  stroke: #60a5fa;
+  stroke-width: 3;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+}
+
+.temperature-chart-point {
+  fill: #93c5fd;
+  stroke: #0d1828;
+  stroke-width: 1.5;
+}
+
+.temperature-chart-point.alert {
+  fill: #ef4444;
+}
+
+.temperature-limit-line {
+  stroke-width: 1.5;
+  stroke-dasharray: 7 6;
+}
+
+.temperature-limit-line.minimum {
+  stroke: #f59e0b;
+}
+
+.temperature-limit-line.maximum {
+  stroke: #ef4444;
+}
+
+.temperature-axis-label {
+  fill: #8292a7;
+  font-size: 12px;
+}
+
+.temperature-limit-legend {
+  display: flex;
+  gap: 16px;
+  margin-top: 9px;
+  color: #94a3b8;
+  font-size: 0.68rem;
+}
+
+@media (max-width: 700px) {
+  .history-toolbar {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .temperature-history-stats {
+    grid-template-columns: 1fr;
+  }
+
+  .temperature-history-header {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+}
+
+/* =====================================================
+   MAVERICK HISTORY DESKTOP WIDE LAYOUT — V6
+   ===================================================== */
+
+.history-modal {
+  width: min(1480px, calc(100vw - 48px)) !important;
+  max-width: none !important;
+  max-height: calc(100vh - 48px) !important;
+  overflow: hidden !important;
+  display: flex;
+  flex-direction: column;
+}
+
+.history-modal > .modal-header,
+.history-modal > .history-toolbar,
+.history-modal > .rename-error,
+.history-modal > .history-empty,
+.history-modal > .history-stats,
+.history-modal > .history-trip-strip {
+  flex: 0 0 auto;
+}
+
+.history-content-grid {
+  min-height: 0;
+  flex: 1 1 auto;
+  display: grid;
+  grid-template-columns: minmax(0, 1.15fr) minmax(430px, 0.85fr);
+  gap: 16px;
+  align-items: stretch;
+}
+
+.history-route-column,
+.history-temperature-column {
+  min-width: 0;
+  min-height: 0;
+}
+
+.history-route-column {
+  display: flex;
+  flex-direction: column;
+}
+
+.history-route-column .history-map {
+  height: clamp(330px, 46vh, 520px);
+  flex: 1 1 auto;
+}
+
+.history-route-column .history-time-row {
+  flex: 0 0 auto;
+  margin-top: 10px;
+}
+
+.temperature-history-section.history-temperature-column {
+  margin-top: 0;
+  padding-top: 0;
+  border-top: 0;
+  border-left: 1px solid rgba(148, 163, 184, 0.12);
+  padding-left: 16px;
+  display: flex;
+  flex-direction: column;
+}
+
+.history-temperature-column .temperature-history-header {
+  margin-bottom: 10px;
+}
+
+.history-temperature-column .temperature-history-stats {
+  margin-bottom: 10px;
+}
+
+.history-temperature-column .temperature-chart-wrap {
+  flex: 1 1 auto;
+  min-height: 330px;
+  overflow: hidden;
+}
+
+.history-temperature-column .temperature-chart {
+  width: 100%;
+  min-width: 0;
+  height: 100%;
+  min-height: 330px;
+}
+
+@media (max-width: 1050px) {
+  .history-modal {
+    overflow: auto !important;
+  }
+
+  .history-content-grid {
+    display: block;
+  }
+
+  .temperature-history-section.history-temperature-column {
+    margin-top: 22px;
+    padding-top: 20px;
+    padding-left: 0;
+    border-left: 0;
+    border-top: 1px solid rgba(148, 163, 184, 0.12);
+  }
+}
+
+/* =====================================================
+   MAVERICK HISTORY FIT-TO-SCREEN + CLEAN TRIPS — V7
+   Keeps all primary history information visible without
+   vertical scrolling on a normal desktop viewport.
+   ===================================================== */
+
+.history-modal {
+  width: min(1500px, calc(100vw - 24px)) !important;
+  height: min(840px, calc(100vh - 18px)) !important;
+  max-height: calc(100vh - 18px) !important;
+  padding: 14px 16px !important;
+  overflow: hidden !important;
+}
+
+.history-modal .modal-header {
+  margin-bottom: 8px;
+}
+
+.history-modal .modal-header h2 {
+  margin: 2px 0 0;
+  font-size: 1.25rem;
+}
+
+.history-modal .history-toolbar {
+  margin-bottom: 8px;
+  gap: 10px;
+}
+
+.history-modal .history-toolbar select,
+.history-modal .history-date-input,
+.history-modal .history-toolbar .secondary-action {
+  min-height: 34px;
+  height: 34px;
+}
+
+.history-modal .history-stats {
+  margin-bottom: 8px;
+  gap: 8px;
+}
+
+.history-modal .history-stats > div {
+  padding: 8px 10px;
+}
+
+.history-modal .history-trip-strip {
+  margin-bottom: 8px;
+  padding-bottom: 2px;
+  gap: 7px;
+  max-height: 58px;
+}
+
+.history-modal .history-trip-strip button {
+  min-width: 100px;
+  padding: 7px 9px;
+}
+
+.history-content-grid {
+  gap: 14px !important;
+  min-height: 0;
+}
+
+.history-route-column .history-map {
+  height: auto !important;
+  min-height: 0 !important;
+  flex: 1 1 0 !important;
+}
+
+.history-route-column .history-time-row {
+  margin-top: 7px !important;
+  font-size: 0.68rem;
+}
+
+.temperature-history-section.history-temperature-column {
+  padding-left: 14px !important;
+  min-height: 0;
+}
+
+.history-temperature-column .temperature-history-header {
+  margin-bottom: 7px !important;
+}
+
+.history-temperature-column .temperature-history-header h3 {
+  margin: 2px 0 0;
+  font-size: 0.9rem;
+}
+
+.history-temperature-column .temperature-history-stats {
+  margin-bottom: 7px !important;
+  gap: 7px;
+}
+
+.history-temperature-column .temperature-history-stats > div {
+  padding: 8px 9px;
+}
+
+.history-temperature-column .temperature-chart-wrap {
+  flex: 1 1 0 !important;
+  min-height: 0 !important;
+  overflow: hidden !important;
+}
+
+.history-temperature-column .temperature-chart {
+  width: 100% !important;
+  height: 100% !important;
+  min-width: 0 !important;
+  min-height: 0 !important;
+  display: block;
+}
+
+.history-temperature-column .temperature-limit-legend {
+  margin-top: 5px;
+  font-size: 0.64rem;
+}
+
+@media (min-width: 1051px) {
+  .history-content-grid {
+    grid-template-columns: minmax(0, 1.25fr) minmax(420px, 0.9fr) !important;
+  }
+}
+
+@media (max-height: 760px) and (min-width: 1051px) {
+  .history-modal {
+    height: calc(100vh - 10px) !important;
+    max-height: calc(100vh - 10px) !important;
+    padding-top: 10px !important;
+    padding-bottom: 10px !important;
+  }
+
+  .history-modal .page-kicker,
+  .history-modal .modal-device-id {
+    font-size: 0.62rem;
+  }
+
+  .history-modal .history-trip-strip {
+    max-height: 52px;
+  }
+}

@@ -148,6 +148,54 @@ function MapController({
     map
   ])
 
+  useEffect(() => {
+    let resizeTimer: number | undefined
+
+    const refreshMapSize = () => {
+      window.clearTimeout(resizeTimer)
+      resizeTimer = window.setTimeout(() => {
+        map.invalidateSize({ animate: false })
+      }, 80)
+    }
+
+    refreshMapSize()
+    window.addEventListener('resize', refreshMapSize)
+    window.addEventListener('orientationchange', refreshMapSize)
+
+    return () => {
+      window.clearTimeout(resizeTimer)
+      window.removeEventListener('resize', refreshMapSize)
+      window.removeEventListener('orientationchange', refreshMapSize)
+    }
+  }, [map])
+
+  return null
+}
+
+function ResponsiveMapSize() {
+  const map = useMap()
+
+  useEffect(() => {
+    let resizeTimer: number | undefined
+
+    const refreshMapSize = () => {
+      window.clearTimeout(resizeTimer)
+      resizeTimer = window.setTimeout(() => {
+        map.invalidateSize({ animate: false })
+      }, 80)
+    }
+
+    refreshMapSize()
+    window.addEventListener('resize', refreshMapSize)
+    window.addEventListener('orientationchange', refreshMapSize)
+
+    return () => {
+      window.clearTimeout(resizeTimer)
+      window.removeEventListener('resize', refreshMapSize)
+      window.removeEventListener('orientationchange', refreshMapSize)
+    }
+  }, [map])
+
   return null
 }
 
@@ -3025,6 +3073,8 @@ function App() {
                   }
                 />
 
+                <ResponsiveMapSize />
+
                 <TileLayer
                   attribution={
                     '&copy; OpenStreetMap contributors'
@@ -5319,6 +5369,8 @@ function App() {
                             scrollWheelZoom
                             className="history-leaflet-map"
                           >
+                            <ResponsiveMapSize />
+
                             <TileLayer
                               attribution='&copy; OpenStreetMap contributors'
                               url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"

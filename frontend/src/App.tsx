@@ -5117,104 +5117,32 @@ function App() {
                   event.stopPropagation()
               }
             >
-              <div className="modal-header">
-                <div>
-                  <span className="page-kicker">
-                    Trip & Temperature History
-                  </span>
-
-                  <h2>
-                    {selectedAssetName}
-                  </h2>
-
-                  <small className="modal-device-id">
-                    {
-                      telemetry?.deviceId ||
-                      selectedDeviceId
-                    }
-                  </small>
+              <div className="modal-header history-hero-header">
+                <div className="history-asset-summary">
+                  <div className="history-asset-icon" aria-hidden="true">▰</div>
+                  <div>
+                    <span className="page-kicker">Trip & Temperature History</span>
+                    <div className="history-asset-title-row">
+                      <h2>{selectedAssetName}</h2>
+                      <span className={`history-status-pill ${deviceStatus}`}>
+                        {statusLabel}
+                      </span>
+                    </div>
+                    <small className="modal-device-id">
+                      {telemetry?.deviceId || selectedDeviceId}
+                    </small>
+                  </div>
                 </div>
 
                 <button
                   className="modal-close"
-                  onClick={() =>
-                    setHistoryOpen(false)
-                  }
+                  onClick={() => setHistoryOpen(false)}
                   type="button"
+                  aria-label="Close history"
                 >
                   ×
                 </button>
               </div>
-
-              <div className="history-toolbar">
-                <label>
-                  Range
-                  <select
-                    value={historyRange}
-                    onChange={
-                      (event) =>
-                        handleHistoryRangeChange(
-                          event.target.value as
-                            HistoryRange
-                        )
-                    }
-                  >
-                    <option value="today">
-                      Today
-                    </option>
-                    <option value="yesterday">
-                      Yesterday
-                    </option>
-                    <option value="7days">
-                      Last 7 days
-                    </option>
-                    <option value="custom">
-                      Custom date
-                    </option>
-                  </select>
-                </label>
-
-                {
-                  historyRange ===
-                    'custom' && (
-                    <label>
-                      Date
-                      <input
-                        className="history-date-input"
-                        type="date"
-                        value={historyCustomDate}
-                        onChange={(event) =>
-                          setHistoryCustomDate(
-                            event.target.value
-                          )
-                        }
-                      />
-                    </label>
-                  )
-                }
-
-                <button
-                  className="secondary-action"
-                  onClick={() =>
-                    loadHistory(
-                      historyRange,
-                      historyCustomDate
-                    )
-                  }
-                  type="button"
-                  disabled={historyLoading}
-                >
-                  {
-                    historyLoading
-                      ? 'Loading...'
-                      : historyRange ===
-                          'custom'
-                        ? 'Load Date'
-                        : 'Refresh'
-                  }
-                </button>
-              </div>
-
               {
                 historyError && (
                   <div className="rename-error">
@@ -5237,6 +5165,98 @@ function App() {
               {
                 historyPoints.length > 0 && (
                   <>
+                    <div className="history-controls-panel">
+                      <div className="history-control-group history-trip-group">
+                        <span className="history-control-label">Trip</span>
+                        <div className="history-trip-strip">
+                          <button
+                            className={selectedHistoryTripId === 'all' ? 'active' : ''}
+                            onClick={() => {
+                              setSelectedHistoryTripId('all')
+                              setSelectedHistoryLegId('all')
+                            }}
+                            type="button"
+                          >
+                            <strong>All activity</strong>
+                          </button>
+                          {historyTrips.map((trip) => (
+                            <button
+                              key={trip.id}
+                              className={selectedHistoryTripId === trip.id ? 'active' : ''}
+                              onClick={() => {
+                                setSelectedHistoryTripId(trip.id)
+                                setSelectedHistoryLegId('all')
+                              }}
+                              type="button"
+                            >
+                              <strong>Trip {trip.id}</strong>
+                              <small>{trip.distanceMiles.toFixed(1)} mi</small>
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+
+                      <div className="history-control-group history-direction-group">
+                        <span className="history-control-label">Direction</span>
+                        <div className="history-leg-strip">
+                          <button
+                            type="button"
+                            className={selectedHistoryLegId === 'all' ? 'active' : ''}
+                            onClick={() => setSelectedHistoryLegId('all')}
+                            disabled={!selectedHistoryTrip || selectedTripLegs.length !== 2}
+                          >
+                            <strong>Entire trip</strong>
+                          </button>
+                          {selectedHistoryTrip && selectedTripLegs.length === 2 && selectedTripLegs.map((leg) => (
+                            <button
+                              key={leg.id}
+                              type="button"
+                              className={selectedHistoryLegId === leg.id ? `active ${leg.id}` : leg.id}
+                              onClick={() => setSelectedHistoryLegId(leg.id)}
+                            >
+                              <strong>{leg.label}</strong>
+                              <small>
+                                {leg.distanceMiles.toFixed(1)} mi · {new Date(leg.start).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}–{new Date(leg.end).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}
+                              </small>
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+
+                      <div className="history-control-group history-range-group">
+                        <span className="history-control-label">Date range</span>
+                        <div className="history-range-controls">
+                          <select
+                            aria-label="History range"
+                            value={historyRange}
+                            onChange={(event) => handleHistoryRangeChange(event.target.value as HistoryRange)}
+                          >
+                            <option value="today">Today</option>
+                            <option value="yesterday">Yesterday</option>
+                            <option value="7days">Last 7 days</option>
+                            <option value="custom">Custom date</option>
+                          </select>
+                          {historyRange === 'custom' && (
+                            <input
+                              className="history-date-input"
+                              aria-label="History date"
+                              type="date"
+                              value={historyCustomDate}
+                              onChange={(event) => setHistoryCustomDate(event.target.value)}
+                            />
+                          )}
+                          <button
+                            className="secondary-action history-refresh-button"
+                            onClick={() => loadHistory(historyRange, historyCustomDate)}
+                            type="button"
+                            disabled={historyLoading}
+                          >
+                            {historyLoading ? 'Loading...' : historyRange === 'custom' ? 'Load Date' : 'Refresh'}
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+
                     <div className="history-stats">
                       <div>
                         <span>
@@ -5271,113 +5291,6 @@ function App() {
                         </strong>
                       </div>
                     </div>
-
-                    {
-                      historyTrips.length > 0 && (
-                        <div className="history-trip-strip">
-                          <button
-                            className={
-                              selectedHistoryTripId ===
-                                'all'
-                                ? 'active'
-                                : ''
-                            }
-                            onClick={() => {
-                              setSelectedHistoryTripId(
-                                'all'
-                              )
-                              setSelectedHistoryLegId('all')
-                            }}
-                            type="button"
-                          >
-                            All activity
-                          </button>
-
-                          {
-                            historyTrips.map(
-                              (trip) => (
-                                <button
-                                  key={trip.id}
-                                  className={
-                                    selectedHistoryTripId ===
-                                      trip.id
-                                      ? 'active'
-                                      : ''
-                                  }
-                                  onClick={() => {
-                                    setSelectedHistoryTripId(
-                                      trip.id
-                                    )
-                                    setSelectedHistoryLegId('all')
-                                  }}
-                                  type="button"
-                                >
-                                  Trip {trip.id}
-                                  <small>
-                                    {trip.distanceMiles.toFixed(1)} mi
-                                  </small>
-                                </button>
-                              )
-                            )
-                          }
-                        </div>
-                      )
-                    }
-
-                    {
-                      selectedHistoryTrip &&
-                      selectedTripLegs.length === 2 && (
-                        <div className="history-leg-strip">
-                          <span className="history-leg-label">
-                            Direction
-                          </span>
-                          <button
-                            type="button"
-                            className={
-                              selectedHistoryLegId === 'all'
-                                ? 'active'
-                                : ''
-                            }
-                            onClick={() =>
-                              setSelectedHistoryLegId('all')
-                            }
-                          >
-                            Entire trip
-                          </button>
-                          {
-                            selectedTripLegs.map((leg) => (
-                              <button
-                                key={leg.id}
-                                type="button"
-                                className={
-                                  selectedHistoryLegId === leg.id
-                                    ? `active ${leg.id}`
-                                    : leg.id
-                                }
-                                onClick={() =>
-                                  setSelectedHistoryLegId(leg.id)
-                                }
-                              >
-                                <strong>{leg.label}</strong>
-                                <small>
-                                  {leg.distanceMiles.toFixed(1)} mi · {
-                                    new Date(leg.start).toLocaleTimeString([], {
-                                      hour: 'numeric',
-                                      minute: '2-digit'
-                                    })
-                                  }–{
-                                    new Date(leg.end).toLocaleTimeString([], {
-                                      hour: 'numeric',
-                                      minute: '2-digit'
-                                    })
-                                  }
-                                </small>
-                              </button>
-                            ))
-                          }
-                        </div>
-                      )
-                    }
 
                     <div className="history-content-grid">
                       <div className="history-route-column">

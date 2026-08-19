@@ -1399,6 +1399,453 @@ app.get(
   }
 )
 
+
+
+// =====================================================
+// ROAD MATCHING (OSRM)
+// =====================================================
+
+type RoadMatchInputPoint = {
+  latitude: number
+  longitude: number
+  timestamp?: string | null
+}
+
+type RoadMatchInputTrack = {
+  id: string
+  points: RoadMatchInputPoint[]
+}
+
+const OSRM_BASE =
+  process.env.OSRM_BASE_URL ||
+  'https://router.project-osrm.org'
+
+function metersBetween(
+  a: RoadMatchInputPoint,
+  b: RoadMatchInputPoint
+) {
+  const toRad = (value: number) =>
+    value * Math.PI / 180
+
+  const earthRadius = 6371000
+  const dLat = toRad(b.latitude - a.latitude)
+  const dLon = toRad(b.longitude - a.longitude)
+  const lat1 = toRad(a.latitude)
+  const lat2 = toRad(b.latitude)
+
+  const h =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(lat1) *
+      Math.cos(lat2) *
+      Math.sin(dLon / 2) ** 2
+
+  return earthRadius *
+    2 *
+    Math.atan2(
+      Math.sqrt(h),
+      Math.sqrt(1 - h)
+    )
+}
+
+function cleanRoadTrack(
+  points: RoadMatchInputPoint[]
+) {
+  const sorted = [...points]
+    .filter((point) =>
+      Number.isFinite(point.latitude) &&
+      Number.isFinite(point.longitude) &&
+      Math.abs(point.latitude) <= 90 &&
+      Math.abs(point.longitude) <= 180
+    )
+    .sort((a, b) => {
+      const ta = a.timestamp
+        ? new Date(a.timestamp).getTime()
+        : 0
+      const tb = b.timestamp
+        ? new Date(b.timestamp).getTime()
+        : 0
+      return ta - tb
+    })
+
+  const cleaned: RoadMatchInputPoint[] = []
+
+  for (const point of sorted) {
+    const previous = cleaned[cleaned.length - 1]
+
+    if (
+      previous &&
+      metersBetween(previous, point) < 8
+    ) {
+      continue
+    }
+
+    cleaned.push(point)
+  }
+
+  return cleaned
+}
+
+function toMonotonicTimestamps(
+  points: RoadMatchInputPoint[]
+) {
+  let previous = 0
+
+  return points.map((point, index) => {
+    const parsed = point.timestamp
+      ? Math.floor(
+          new Date(point.timestamp).getTime() /
+            1000
+        )
+      : 0
+
+    const candidate =
+      Number.isFinite(parsed) && parsed > 0
+        ? parsed
+        : previous + 1 || index + 1
+
+    const next = Math.max(
+      candidate,
+      previous + 1
+    )
+
+    previous = next
+    return next
+  })
+}
+
+async function osrmMatchChunk(
+  points: RoadMatchInputPoint[]
+) {
+  if (points.length < 2) {
+    return null
+  }
+
+  const coordinates = points
+    .map(
+      (point) =>
+        `${point.longitude},${point.latitude}`
+    )
+    .join(';')
+
+  const timestamps =
+    toMonotonicTimestamps(points).join(';')
+
+  const radiuses = points
+    .map(() => '35')
+    .join(';')
+
+  const url =
+    `${OSRM_BASE}/match/v1/driving/${coordinates}` +
+    `?geometries=geojson&overview=full` +
+    `&gaps=ignore&tidy=true` +
+    `&timestamps=${timestamps}` +
+    `&radiuses=${radiuses}`
+
+  const response = await fetch(url)
+
+  if (!response.ok) {
+    return null
+  }
+
+  const data = await response.json() as any
+
+  if (
+    data?.code !== 'Ok' ||
+    !Array.isArray(data?.matchings) ||
+    data.matchings.length === 0
+  ) {
+    return null
+  }
+
+  const tracepoints =
+    Array.isArray(data.tracepoints)
+      ? data.tracepoints
+      : []
+
+  const matchedCount =
+    tracepoints.filter(Boolean).length
+
+  const coverage =
+    points.length > 0
+      ? matchedCount / points.length
+      : 0
+
+  const usefulMatchings =
+    data.matchings.filter(
+      (matching: any) =>
+        matching?.geometry?.coordinates?.length > 1 &&
+        Number(matching?.confidence ?? 0) >= 0.2
+    )
+
+  if (
+    usefulMatchings.length === 0 ||
+    coverage < 0.45
+  ) {
+    return null
+  }
+
+  const segments = usefulMatchings.map(
+    (matching: any) =>
+      matching.geometry.coordinates.map(
+        ([longitude, latitude]: [number, number]) =>
+          [latitude, longitude] as [number, number]
+      )
+  )
+
+  const confidence =
+    usefulMatchings.reduce(
+      (total: number, matching: any) =>
+        total + Number(matching.confidence ?? 0),
+      0
+    ) / usefulMatchings.length
+
+  return {
+    segments,
+    source: 'match' as const,
+    confidence,
+    coverage
+  }
+}
+
+async function osrmRouteChunk(
+  points: RoadMatchInputPoint[]
+) {
+  if (points.length < 2) {
+    return null
+  }
+
+  const coordinates = points
+    .map(
+      (point) =>
+        `${point.longitude},${point.latitude}`
+    )
+    .join(';')
+
+  const url =
+    `${OSRM_BASE}/route/v1/driving/${coordinates}` +
+    '?alternatives=false&steps=false' +
+    '&geometries=geojson&overview=full'
+
+  const response = await fetch(url)
+
+  if (!response.ok) {
+    return null
+  }
+
+  const data = await response.json() as any
+
+  const coordinatesOut =
+    data?.routes?.[0]?.geometry?.coordinates
+
+  if (
+    data?.code !== 'Ok' ||
+    !Array.isArray(coordinatesOut) ||
+    coordinatesOut.length < 2
+  ) {
+    return null
+  }
+
+  return {
+    segments: [
+      coordinatesOut.map(
+        ([longitude, latitude]: [number, number]) =>
+          [latitude, longitude] as [number, number]
+      )
+    ],
+    source: 'route' as const,
+    confidence: null,
+    coverage: 1
+  }
+}
+
+async function matchRoadTrack(
+  track: RoadMatchInputTrack
+) {
+  const cleaned = cleanRoadTrack(track.points)
+
+  if (cleaned.length < 2) {
+    return {
+      id: track.id,
+      source: 'raw',
+      confidence: null,
+      coverage: 0,
+      segments: [] as [number, number][][]
+    }
+  }
+
+  const chunks: RoadMatchInputPoint[][] = []
+  const chunkSize = 70
+  const overlap = 1
+
+  for (
+    let start = 0;
+    start < cleaned.length - 1;
+    start += chunkSize - overlap
+  ) {
+    const chunk = cleaned.slice(
+      start,
+      start + chunkSize
+    )
+
+    if (chunk.length >= 2) {
+      chunks.push(chunk)
+    }
+  }
+
+  const segments: [number, number][][] = []
+  const sources: string[] = []
+  const confidences: number[] = []
+  const coverages: number[] = []
+
+  for (const chunk of chunks) {
+    let result = null
+
+    try {
+      result = await osrmMatchChunk(chunk)
+    } catch (error) {
+      console.warn(
+        'OSRM match failed, trying route fallback:',
+        error
+      )
+    }
+
+    if (!result) {
+      try {
+        result = await osrmRouteChunk(chunk)
+      } catch (error) {
+        console.warn(
+          'OSRM route fallback failed:',
+          error
+        )
+      }
+    }
+
+    if (!result) {
+      continue
+    }
+
+    segments.push(...result.segments)
+    sources.push(result.source)
+    coverages.push(result.coverage)
+
+    if (result.confidence != null) {
+      confidences.push(result.confidence)
+    }
+  }
+
+  return {
+    id: track.id,
+    source:
+      sources.length === 0
+        ? 'raw'
+        : sources.every(
+            (source) => source === 'match'
+          )
+          ? 'match'
+          : 'road',
+    confidence:
+      confidences.length > 0
+        ? confidences.reduce(
+            (total, value) => total + value,
+            0
+          ) / confidences.length
+        : null,
+    coverage:
+      coverages.length > 0
+        ? coverages.reduce(
+            (total, value) => total + value,
+            0
+          ) / coverages.length
+        : 0,
+    segments
+  }
+}
+
+app.post(
+  '/api/road-match',
+  requireAuth,
+  async (
+    req: AuthenticatedRequest,
+    res: Response
+  ) => {
+    try {
+      const tracks =
+        Array.isArray(req.body?.tracks)
+          ? req.body.tracks
+          : []
+
+      if (
+        tracks.length === 0 ||
+        tracks.length > 20
+      ) {
+        return res.status(400).json({
+          ok: false,
+          message: 'Invalid road matching request'
+        })
+      }
+
+      let totalPoints = 0
+
+      const sanitizedTracks: RoadMatchInputTrack[] =
+        tracks.map((track: any, index: number) => {
+          const points =
+            Array.isArray(track?.points)
+              ? track.points
+                  .slice(0, 1500)
+                  .map((point: any) => ({
+                    latitude: Number(point.latitude),
+                    longitude: Number(point.longitude),
+                    timestamp:
+                      point.timestamp == null
+                        ? null
+                        : String(point.timestamp)
+                  }))
+              : []
+
+          totalPoints += points.length
+
+          return {
+            id: String(track?.id ?? index),
+            points
+          }
+        })
+
+      if (totalPoints > 5000) {
+        return res.status(400).json({
+          ok: false,
+          message: 'Too many GPS points for one request'
+        })
+      }
+
+      const results = []
+
+      // Keep calls sequential so the public OSRM service is not
+      // flooded while Maverick is still in prototype/development.
+      for (const track of sanitizedTracks) {
+        results.push(
+          await matchRoadTrack(track)
+        )
+      }
+
+      return res.json({
+        ok: true,
+        tracks: results
+      })
+    } catch (error) {
+      console.error(
+        'Road matching error:',
+        error
+      )
+
+      return res.status(502).json({
+        ok: false,
+        message: 'Road matching is temporarily unavailable'
+      })
+    }
+  }
+)
+
+
 // =====================================================
 // ARRANCAR SERVIDOR
 // =====================================================

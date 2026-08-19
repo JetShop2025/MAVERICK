@@ -2456,3 +2456,16 @@ button:disabled {
     max-height: 52px;
   }
 }
+
+/* Road matching status */
+.history-road-status {
+  min-height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  margin: 0 0 6px;
+  color: #93c5fd;
+  font-size: 0.68rem;
+  font-weight: 750;
+  letter-spacing: 0.02em;
+}

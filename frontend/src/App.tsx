@@ -15,6 +15,7 @@ import markerShadow from 'leaflet/dist/images/marker-shadow.png'
 import {
   useCallback,
   useEffect,
+  useRef,
   useState
 } from 'react'
 
@@ -73,6 +74,14 @@ type HistoryTrip = {
   start: string
   end: string
   distanceMiles: number
+}
+
+type RoadMatchedTrack = {
+  id: string
+  source: 'match' | 'road' | 'raw'
+  confidence: number | null
+  coverage: number
+  segments: [number, number][][]
 }
 
 const API_BASE = 'https://maverick-1z64.onrender.com'
@@ -281,6 +290,24 @@ function App() {
     routePoints,
     setRoutePoints
   ] = useState<RoutePoint[]>([])
+
+  const [
+    liveRoadSegments,
+    setLiveRoadSegments
+  ] = useState<[number, number][][]>([])
+
+  const [
+    historyRoadTracks,
+    setHistoryRoadTracks
+  ] = useState<RoadMatchedTrack[]>([])
+
+  const [
+    roadMatchLoading,
+    setRoadMatchLoading
+  ] = useState(false)
+
+  const liveRoadProcessedRef =
+    useRef<string | null>(null)
 
   const [
     showRoute,
@@ -940,6 +967,98 @@ function App() {
       movementStatus
     )
 
+  const requestRoadMatch =
+    useCallback(
+      async (
+        tracks: Array<{
+          id: string
+          points: Array<{
+            latitude: number
+            longitude: number
+            timestamp: string
+          }>
+        }>
+      ): Promise<RoadMatchedTrack[]> => {
+        const token =
+          localStorage.getItem(
+            'maverick_token'
+          )
+
+        if (!token || tracks.length === 0) {
+          return []
+        }
+
+        const res = await fetch(
+          `${API_BASE}/api/road-match`,
+          {
+            method: 'POST',
+            headers: {
+              'Content-Type':
+                'application/json',
+              Authorization:
+                `Bearer ${token}`
+            },
+            body: JSON.stringify({ tracks })
+          }
+        )
+
+        const data = await res.json()
+
+        if (res.status === 401) {
+          handleLogout()
+          return []
+        }
+
+        if (!res.ok || !data.ok) {
+          return []
+        }
+
+        return (data.tracks || [])
+          .map((track: any) => ({
+            id: String(track.id),
+            source:
+              track.source === 'match' ||
+              track.source === 'road'
+                ? track.source
+                : 'raw',
+            confidence:
+              track.confidence == null
+                ? null
+                : Number(track.confidence),
+            coverage:
+              Number(track.coverage || 0),
+            segments:
+              Array.isArray(track.segments)
+                ? track.segments
+                    .map((segment: any) =>
+                      Array.isArray(segment)
+                        ? segment
+                            .map((pair: any) => [
+                              Number(pair[0]),
+                              Number(pair[1])
+                            ] as [number, number])
+                            .filter(
+                              (pair: [number, number]) =>
+                                Number.isFinite(pair[0]) &&
+                                Number.isFinite(pair[1])
+                            )
+                        : []
+                    )
+                    .filter(
+                      (segment: [number, number][]) =>
+                        segment.length > 1
+                    )
+                : []
+          }))
+          .filter(
+            (track: RoadMatchedTrack) =>
+              track.segments.length > 0
+          )
+      },
+      []
+    )
+
+
   const routeLatLngs =
     routePoints.map(
       (point) => [
@@ -947,6 +1066,66 @@ function App() {
         point.longitude
       ] as [number, number]
     )
+
+  useEffect(() => {
+    if (routePoints.length < 2) {
+      setLiveRoadSegments([])
+      liveRoadProcessedRef.current = null
+      return
+    }
+
+    const lastPoint =
+      routePoints[routePoints.length - 1]
+
+    if (
+      liveRoadProcessedRef.current ===
+      lastPoint.timestamp
+    ) {
+      return
+    }
+
+    liveRoadProcessedRef.current =
+      lastPoint.timestamp
+
+    // Use recent context for matching the newest road segment.
+    // The previously matched geometry stays on screen, so we do
+    // not re-send the entire trip to OSRM every minute.
+    const contextPoints =
+      routePoints.slice(-6)
+
+    requestRoadMatch([
+      {
+        id: 'live',
+        points: contextPoints
+      }
+    ])
+      .then((matched) => {
+        const newest = matched[0]
+
+        if (!newest?.segments?.length) {
+          return
+        }
+
+        const newestSegment =
+          newest.segments[
+            newest.segments.length - 1
+          ]
+
+        if (!newestSegment?.length) {
+          return
+        }
+
+        setLiveRoadSegments(
+          (current) => [
+            ...current,
+            newestSegment
+          ].slice(-320)
+        )
+      })
+      .catch(() => {
+        // Keep the raw breadcrumb as a fallback.
+      })
+  }, [routePoints, requestRoadMatch])
 
   const normalizedSearch =
     searchTerm
@@ -1825,6 +2004,98 @@ function App() {
       ] as [number, number]
     )
 
+  const rawHistorySegments =
+    selectedHistoryTripId === 'all'
+      ? historyTrips.map(
+          (trip) =>
+            trip.points.map(
+              (point) => [
+                point.latitude as number,
+                point.longitude as number
+              ] as [number, number]
+            )
+        )
+      : historyLatLngs.length > 1
+        ? [historyLatLngs]
+        : []
+
+  useEffect(() => {
+    if (!historyOpen) {
+      setHistoryRoadTracks([])
+      return
+    }
+
+    const tracks =
+      selectedHistoryTripId === 'all'
+        ? historyTrips.map((trip) => ({
+            id: `trip-${trip.id}`,
+            points: trip.points.map((point) => ({
+              latitude: point.latitude as number,
+              longitude: point.longitude as number,
+              timestamp: point.timestamp
+            }))
+          }))
+        : (() => {
+            const trip = historyTrips.find(
+              (candidate) =>
+                candidate.id ===
+                selectedHistoryTripId
+            )
+
+            return trip
+              ? [{
+                  id: `trip-${trip.id}`,
+                  points: trip.points.map((point) => ({
+                    latitude: point.latitude as number,
+                    longitude: point.longitude as number,
+                    timestamp: point.timestamp
+                  }))
+                }]
+              : []
+          })()
+
+    if (tracks.length === 0) {
+      setHistoryRoadTracks([])
+      return
+    }
+
+    let cancelled = false
+    setRoadMatchLoading(true)
+
+    requestRoadMatch(tracks)
+      .then((matched) => {
+        if (!cancelled) {
+          setHistoryRoadTracks(matched)
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setHistoryRoadTracks([])
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setRoadMatchLoading(false)
+        }
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [
+    historyOpen,
+    historyPoints,
+    selectedHistoryTripId,
+    requestRoadMatch
+  ])
+
+  const historyDisplaySegments =
+    historyRoadTracks.length > 0
+      ? historyRoadTracks.flatMap(
+          (track) => track.segments
+        )
+      : rawHistorySegments
+
   const historyDistanceMiles =
     displayedHistoryPoints.reduce(
       (total, point, index) => {
@@ -2483,16 +2754,34 @@ function App() {
 
                 {
                   showRoute &&
-                  routeLatLngs.length > 1 && (
-                    <Polyline
-                      positions={routeLatLngs}
-                      pathOptions={{
-                        color: '#22c55e',
-                        weight: 4,
-                        opacity: 0.82
-                      }}
-                    />
-                  )
+                  liveRoadSegments.length > 0
+                    ? liveRoadSegments.map(
+                        (segment, index) => (
+                          <Polyline
+                            key={`live-road-${index}`}
+                            positions={segment}
+                            pathOptions={{
+                              color: '#22c55e',
+                              weight: 5,
+                              opacity: 0.9
+                            }}
+                          />
+                        )
+                      )
+                    : showRoute &&
+                      routeLatLngs.length > 1
+                      ? (
+                        <Polyline
+                          positions={routeLatLngs}
+                          pathOptions={{
+                            color: '#22c55e',
+                            weight: 4,
+                            opacity: 0.65,
+                            dashArray: '6 7'
+                          }}
+                        />
+                      )
+                      : null
                 }
 
                 {
@@ -4753,6 +5042,15 @@ function App() {
 
                     <div className="history-content-grid">
                       <div className="history-route-column">
+                        <div className="history-road-status">
+                          {
+                            roadMatchLoading
+                              ? 'Aligning route to roads…'
+                              : historyRoadTracks.length > 0
+                                ? 'Road-matched route'
+                                : 'Raw GPS route'
+                          }
+                        </div>
                     {
                       historyLatLngs.length > 0 ? (
                         <div className="history-map">
@@ -4775,10 +5073,31 @@ function App() {
                             />
 
                             {
-                              historyLatLngs.length > 1 && (
-                                <Polyline
-                                  positions={historyLatLngs}
-                                />
+                              historyDisplaySegments.map(
+                                (segment, index) => (
+                                  <Polyline
+                                    key={`history-road-${index}`}
+                                    positions={segment}
+                                    pathOptions={{
+                                      color:
+                                        historyRoadTracks.length > 0
+                                          ? '#2563eb'
+                                          : '#64748b',
+                                      weight:
+                                        historyRoadTracks.length > 0
+                                          ? 5
+                                          : 3,
+                                      opacity:
+                                        historyRoadTracks.length > 0
+                                          ? 0.92
+                                          : 0.7,
+                                      dashArray:
+                                        historyRoadTracks.length > 0
+                                          ? undefined
+                                          : '6 7'
+                                    }}
+                                  />
+                                )
                               )
                             }
 

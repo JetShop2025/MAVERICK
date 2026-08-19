@@ -76,6 +76,20 @@ type HistoryTrip = {
   distanceMiles: number
 }
 
+type HistoryLegId =
+  | 'all'
+  | 'outbound'
+  | 'return'
+
+type HistoryLeg = {
+  id: Exclude<HistoryLegId, 'all'>
+  label: string
+  points: HistoryPoint[]
+  start: string
+  end: string
+  distanceMiles: number
+}
+
 type RoadMatchedTrack = {
   id: string
   source: 'match' | 'road' | 'raw'
@@ -339,6 +353,11 @@ function App() {
     selectedHistoryTripId,
     setSelectedHistoryTripId
   ] = useState<number | 'all'>('all')
+
+  const [
+    selectedHistoryLegId,
+    setSelectedHistoryLegId
+  ] = useState<HistoryLegId>('all')
 
   const [
     historyPoints,
@@ -1987,14 +2006,193 @@ function App() {
       historyGpsPoints
     )
 
+  const calculateHistoryDistance = (
+    points: HistoryPoint[]
+  ) =>
+    points.reduce(
+      (total, point, index) => {
+        if (index === 0) {
+          return 0
+        }
+
+        const previous =
+          points[index - 1]
+
+        if (
+          previous.latitude == null ||
+          previous.longitude == null ||
+          point.latitude == null ||
+          point.longitude == null
+        ) {
+          return total
+        }
+
+        return total +
+          distanceMiles(
+            previous.latitude,
+            previous.longitude,
+            point.latitude,
+            point.longitude
+          )
+      },
+      0
+    )
+
+  const buildTripLegs = (
+    trip: HistoryTrip | null
+  ): HistoryLeg[] => {
+    if (!trip || trip.points.length < 6) {
+      return []
+    }
+
+    const startPoint = trip.points[0]
+
+    if (
+      startPoint.latitude == null ||
+      startPoint.longitude == null
+    ) {
+      return []
+    }
+
+    const distancesFromStart =
+      trip.points.map((point) =>
+        point.latitude == null ||
+        point.longitude == null
+          ? 0
+          : distanceMiles(
+              startPoint.latitude as number,
+              startPoint.longitude as number,
+              point.latitude,
+              point.longitude
+            )
+      )
+
+    const maxDistance =
+      Math.max(...distancesFromStart)
+
+    if (maxDistance < 1) {
+      return []
+    }
+
+    const nearTurnaroundIndexes =
+      distancesFromStart
+        .map((value, index) => ({
+          value,
+          index
+        }))
+        .filter(
+          ({ value }) =>
+            value >= maxDistance * 0.97
+        )
+        .map(({ index }) => index)
+
+    if (nearTurnaroundIndexes.length === 0) {
+      return []
+    }
+
+    const firstTurn =
+      nearTurnaroundIndexes[0]
+    const lastTurn =
+      nearTurnaroundIndexes[
+        nearTurnaroundIndexes.length - 1
+      ]
+    const turnaroundIndex =
+      Math.round(
+        (firstTurn + lastTurn) / 2
+      )
+
+    const minEdge =
+      Math.max(2, Math.floor(trip.points.length * 0.15))
+    const maxEdge =
+      Math.min(
+        trip.points.length - 3,
+        Math.ceil(trip.points.length * 0.85)
+      )
+
+    if (
+      turnaroundIndex < minEdge ||
+      turnaroundIndex > maxEdge
+    ) {
+      return []
+    }
+
+    const outboundPoints =
+      trip.points.slice(0, turnaroundIndex + 1)
+    const returnPoints =
+      trip.points.slice(turnaroundIndex)
+
+    const outboundDistance =
+      calculateHistoryDistance(outboundPoints)
+    const returnDistance =
+      calculateHistoryDistance(returnPoints)
+
+    const endPoint =
+      trip.points[trip.points.length - 1]
+    const endDistanceFromStart =
+      endPoint.latitude == null ||
+      endPoint.longitude == null
+        ? maxDistance
+        : distanceMiles(
+            startPoint.latitude,
+            startPoint.longitude,
+            endPoint.latitude,
+            endPoint.longitude
+          )
+
+    const looksLikeReturn =
+      endDistanceFromStart <= maxDistance * 0.65 &&
+      outboundDistance >= 0.75 &&
+      returnDistance >= 0.75
+
+    if (!looksLikeReturn) {
+      return []
+    }
+
+    return [
+      {
+        id: 'outbound',
+        label: 'Outbound',
+        points: outboundPoints,
+        start: outboundPoints[0].timestamp,
+        end: outboundPoints[outboundPoints.length - 1].timestamp,
+        distanceMiles: outboundDistance
+      },
+      {
+        id: 'return',
+        label: 'Return',
+        points: returnPoints,
+        start: returnPoints[0].timestamp,
+        end: returnPoints[returnPoints.length - 1].timestamp,
+        distanceMiles: returnDistance
+      }
+    ]
+  }
+
+  const selectedHistoryTrip =
+    selectedHistoryTripId === 'all'
+      ? null
+      : historyTrips.find(
+          (trip) =>
+            trip.id === selectedHistoryTripId
+        ) || null
+
+  const selectedTripLegs =
+    buildTripLegs(selectedHistoryTrip)
+
+  const selectedHistoryLeg =
+    selectedHistoryLegId === 'all'
+      ? null
+      : selectedTripLegs.find(
+          (leg) =>
+            leg.id === selectedHistoryLegId
+        ) || null
+
   const displayedHistoryPoints =
     selectedHistoryTripId === 'all'
       ? historyGpsPoints
-      : historyTrips.find(
-          (trip) =>
-            trip.id ===
-            selectedHistoryTripId
-        )?.points || []
+      : selectedHistoryLeg?.points ||
+        selectedHistoryTrip?.points ||
+        []
 
   const historyLatLngs =
     displayedHistoryPoints.map(
@@ -2042,10 +2240,15 @@ function App() {
                 selectedHistoryTripId
             )
 
-            return trip
+            const activePoints =
+              selectedHistoryLeg?.points ||
+              trip?.points ||
+              []
+
+            return trip && activePoints.length > 1
               ? [{
-                  id: `trip-${trip.id}`,
-                  points: trip.points.map((point) => ({
+                  id: `trip-${trip.id}-${selectedHistoryLegId}`,
+                  points: activePoints.map((point) => ({
                     latitude: point.latitude as number,
                     longitude: point.longitude as number,
                     timestamp: point.timestamp
@@ -2086,6 +2289,7 @@ function App() {
     historyOpen,
     historyPoints,
     selectedHistoryTripId,
+    selectedHistoryLegId,
     requestRoadMatch
   ])
 
@@ -2140,16 +2344,12 @@ function App() {
         pointsWithSpeed.length
       : 0
 
-  const selectedHistoryTrip =
-    selectedHistoryTripId === 'all'
-      ? null
-      : historyTrips.find(
-          (trip) =>
-            trip.id === selectedHistoryTripId
-        ) || null
+  const temperatureHistoryWindow =
+    selectedHistoryLeg ||
+    selectedHistoryTrip
 
   const displayedTemperaturePoints =
-    selectedHistoryTrip == null
+    temperatureHistoryWindow == null
       ? historyPoints
       : historyPoints.filter((point) => {
           const time = new Date(
@@ -2157,10 +2357,10 @@ function App() {
           ).getTime()
           return (
             time >= new Date(
-              selectedHistoryTrip.start
+              temperatureHistoryWindow.start
             ).getTime() &&
             time <= new Date(
-              selectedHistoryTrip.end
+              temperatureHistoryWindow.end
             ).getTime()
           )
         })
@@ -2201,8 +2401,31 @@ function App() {
       : null
 
   const temperatureChartWidth = 820
-  const temperatureChartHeight = 230
-  const temperatureChartPadding = 34
+  const temperatureChartHeight = 250
+  const temperatureChartPadding = 38
+
+  const temperatureChartStartMs =
+    displayedTemperaturePoints.length > 0
+      ? new Date(
+          displayedTemperaturePoints[0].timestamp
+        ).getTime()
+      : 0
+
+  const temperatureChartEndMs =
+    displayedTemperaturePoints.length > 0
+      ? new Date(
+          displayedTemperaturePoints[
+            displayedTemperaturePoints.length - 1
+          ].timestamp
+        ).getTime()
+      : temperatureChartStartMs + 1
+
+  const temperatureChartDurationMs =
+    Math.max(
+      1,
+      temperatureChartEndMs -
+        temperatureChartStartMs
+    )
 
   const temperatureMinLimitF =
     selectedAsset?.temperatureMinC == null
@@ -2261,14 +2484,25 @@ function App() {
         const temperatureF =
           point.temperature * 9 / 5 + 32
 
+        const pointTimeMs =
+          new Date(point.timestamp).getTime()
+
         const x =
           temperatureChartPadding +
-          (displayedTemperaturePoints.length <= 1
-            ? 0
-            : index /
-                (displayedTemperaturePoints.length - 1)) *
+          (pointTimeMs - temperatureChartStartMs) /
+            temperatureChartDurationMs *
             (temperatureChartWidth -
               temperatureChartPadding * 2)
+
+        const previousTemperatureF =
+          index === 0
+            ? null
+            : displayedTemperaturePoints[index - 1].temperature * 9 / 5 + 32
+
+        const deltaF =
+          previousTemperatureF == null
+            ? null
+            : temperatureF - previousTemperatureF
 
         const y =
           temperatureChartPadding +
@@ -2280,6 +2514,7 @@ function App() {
         return {
           ...point,
           temperatureF,
+          deltaF,
           x,
           y
         }
@@ -2298,6 +2533,53 @@ function App() {
           `${point.x},${point.y}`
       )
       .join(' ')
+
+  const temperatureTimeTicks =
+    Array.from({ length: 5 }, (_, index) => {
+      const ratio = index / 4
+      const timestampMs =
+        temperatureChartStartMs +
+        temperatureChartDurationMs * ratio
+
+      return {
+        x:
+          temperatureChartPadding +
+          ratio *
+            (temperatureChartWidth -
+              temperatureChartPadding * 2),
+        label: new Date(timestampMs)
+          .toLocaleTimeString([], {
+            hour: 'numeric',
+            minute: '2-digit'
+          })
+      }
+    })
+
+  const significantTemperatureChanges =
+    temperatureChartPoints
+      .filter(
+        (point) =>
+          point.deltaF != null &&
+          Math.abs(point.deltaF) >= 1.5
+      )
+      .sort(
+        (a, b) =>
+          Math.abs(b.deltaF as number) -
+          Math.abs(a.deltaF as number)
+      )
+      .slice(0, 8)
+      .sort(
+        (a, b) =>
+          new Date(a.timestamp).getTime() -
+          new Date(b.timestamp).getTime()
+      )
+
+  const significantTemperatureChangeIds =
+    new Set(
+      significantTemperatureChanges.map(
+        (point) => point.id
+      )
+    )
 
   const getLimitY = (
     limitF: number
@@ -5000,11 +5282,12 @@ function App() {
                                 ? 'active'
                                 : ''
                             }
-                            onClick={() =>
+                            onClick={() => {
                               setSelectedHistoryTripId(
                                 'all'
                               )
-                            }
+                              setSelectedHistoryLegId('all')
+                            }}
                             type="button"
                           >
                             All activity
@@ -5021,11 +5304,12 @@ function App() {
                                       ? 'active'
                                       : ''
                                   }
-                                  onClick={() =>
+                                  onClick={() => {
                                     setSelectedHistoryTripId(
                                       trip.id
                                     )
-                                  }
+                                    setSelectedHistoryLegId('all')
+                                  }}
                                   type="button"
                                 >
                                   Trip {trip.id}
@@ -5035,6 +5319,61 @@ function App() {
                                 </button>
                               )
                             )
+                          }
+                        </div>
+                      )
+                    }
+
+                    {
+                      selectedHistoryTrip &&
+                      selectedTripLegs.length === 2 && (
+                        <div className="history-leg-strip">
+                          <span className="history-leg-label">
+                            Direction
+                          </span>
+                          <button
+                            type="button"
+                            className={
+                              selectedHistoryLegId === 'all'
+                                ? 'active'
+                                : ''
+                            }
+                            onClick={() =>
+                              setSelectedHistoryLegId('all')
+                            }
+                          >
+                            Entire trip
+                          </button>
+                          {
+                            selectedTripLegs.map((leg) => (
+                              <button
+                                key={leg.id}
+                                type="button"
+                                className={
+                                  selectedHistoryLegId === leg.id
+                                    ? `active ${leg.id}`
+                                    : leg.id
+                                }
+                                onClick={() =>
+                                  setSelectedHistoryLegId(leg.id)
+                                }
+                              >
+                                <strong>{leg.label}</strong>
+                                <small>
+                                  {leg.distanceMiles.toFixed(1)} mi · {
+                                    new Date(leg.start).toLocaleTimeString([], {
+                                      hour: 'numeric',
+                                      minute: '2-digit'
+                                    })
+                                  }–{
+                                    new Date(leg.end).toLocaleTimeString([], {
+                                      hour: 'numeric',
+                                      minute: '2-digit'
+                                    })
+                                  }
+                                </small>
+                              </button>
+                            ))
                           }
                         </div>
                       )
@@ -5056,7 +5395,7 @@ function App() {
                         <div className="history-map">
                           <MapContainer
                             key={
-                              `${historyRange}-${historyCustomDate}-${selectedHistoryTripId}`
+                              `${historyRange}-${historyCustomDate}-${selectedHistoryTripId}-${selectedHistoryLegId}`
                             }
                             center={
                               historyLatLngs[
@@ -5193,6 +5532,10 @@ function App() {
                         </span>
                       </div>
 
+                      <div className="temperature-chart-note">
+                        Time is shown along the bottom. Changes of ±1.5°F or more are highlighted.
+                      </div>
+
                       <div className="temperature-history-stats">
                         <div>
                           <span>Minimum</span>
@@ -5251,6 +5594,28 @@ function App() {
                               />
 
                               {
+                                temperatureTimeTicks.map((tick) => (
+                                  <g key={tick.label + tick.x}>
+                                    <line
+                                      className="temperature-time-grid"
+                                      x1={tick.x}
+                                      x2={tick.x}
+                                      y1={temperatureChartPadding}
+                                      y2={temperatureChartHeight - temperatureChartPadding}
+                                    />
+                                    <text
+                                      className="temperature-time-label"
+                                      x={tick.x}
+                                      y={temperatureChartHeight - 8}
+                                      textAnchor="middle"
+                                    >
+                                      {tick.label}
+                                    </text>
+                                  </g>
+                                ))
+                              }
+
+                              {
                                 temperatureMinLimitF != null && (
                                   <line
                                     className="temperature-limit-line minimum"
@@ -5300,21 +5665,49 @@ function App() {
                                       ) === 0
 
                                     return showPoint ? (
-                                      <circle
-                                        key={point.id}
-                                        className={
-                                          outOfRange
-                                            ? 'temperature-chart-point alert'
-                                            : 'temperature-chart-point'
+                                      <g key={point.id}>
+                                        <circle
+                                          className={
+                                            outOfRange
+                                              ? 'temperature-chart-point alert'
+                                              : significantTemperatureChangeIds.has(point.id)
+                                                ? 'temperature-chart-point change'
+                                                : 'temperature-chart-point'
+                                          }
+                                          cx={point.x}
+                                          cy={point.y}
+                                          r={
+                                            outOfRange || significantTemperatureChangeIds.has(point.id)
+                                              ? 4.5
+                                              : 3
+                                          }
+                                        >
+                                          <title>
+                                            {`${formatDateTime(point.timestamp)} • ${point.temperatureF.toFixed(1)}°F${point.deltaF != null ? ` • Change ${point.deltaF >= 0 ? '+' : ''}${point.deltaF.toFixed(1)}°F` : ''}${point.speedKph != null ? ` • ${(point.speedKph * 0.621371).toFixed(1)} mph` : ''}${point.movementStatus ? ` • ${String(point.movementStatus)}` : ''}${point.latitude != null && point.longitude != null ? ` • ${Number(point.latitude).toFixed(5)}, ${Number(point.longitude).toFixed(5)}` : ''}`}
+                                          </title>
+                                        </circle>
+                                        {
+                                          significantTemperatureChangeIds.has(point.id) &&
+                                          point.deltaF != null && (
+                                            <text
+                                              className={
+                                                point.deltaF >= 0
+                                                  ? 'temperature-change-label rise'
+                                                  : 'temperature-change-label drop'
+                                              }
+                                              x={point.x}
+                                              y={
+                                                point.deltaF >= 0
+                                                  ? Math.max(14, point.y - 10)
+                                                  : Math.min(temperatureChartHeight - 28, point.y + 16)
+                                              }
+                                              textAnchor="middle"
+                                            >
+                                              {point.deltaF >= 0 ? '+' : ''}{point.deltaF.toFixed(1)}°
+                                            </text>
+                                          )
                                         }
-                                        cx={point.x}
-                                        cy={point.y}
-                                        r={outOfRange ? 4.5 : 3}
-                                      >
-                                        <title>
-                                          {`${formatDateTime(point.timestamp)} • ${point.temperatureF.toFixed(1)}°F${point.speedKph != null ? ` • ${(point.speedKph * 0.621371).toFixed(1)} mph` : ''}${point.movementStatus ? ` • ${String(point.movementStatus)}` : ''}${point.latitude != null && point.longitude != null ? ` • ${Number(point.latitude).toFixed(5)}, ${Number(point.longitude).toFixed(5)}` : ''}`}
-                                        </title>
-                                      </circle>
+                                      </g>
                                     ) : null
                                   }
                                 )

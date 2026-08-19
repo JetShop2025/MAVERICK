@@ -2469,3 +2469,113 @@ button:disabled {
   font-weight: 750;
   letter-spacing: 0.02em;
 }
+
+
+/* =====================================================
+   MAVERICK TRIP LEGS + TEMPERATURE TIMELINE V1
+   ===================================================== */
+
+.history-leg-strip {
+  display: flex;
+  align-items: stretch;
+  gap: 7px;
+  margin: -1px 0 8px;
+  overflow-x: auto;
+  padding-bottom: 2px;
+}
+
+.history-leg-label {
+  display: flex;
+  align-items: center;
+  padding: 0 4px 0 1px;
+  color: #8292a7;
+  font-size: 0.66rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.history-leg-strip button {
+  min-height: 36px;
+  display: grid;
+  align-content: center;
+  gap: 1px;
+  padding: 5px 10px;
+  border: 1px solid rgba(148, 163, 184, 0.15);
+  border-radius: 8px;
+  background: #132035;
+  color: #cbd5e1;
+  white-space: nowrap;
+}
+
+.history-leg-strip button strong {
+  font-size: 0.7rem;
+}
+
+.history-leg-strip button small {
+  color: #8292a7;
+  font-size: 0.6rem;
+}
+
+.history-leg-strip button.active {
+  border-color: rgba(96, 165, 250, 0.58);
+  background: rgba(37, 99, 235, 0.2);
+  color: #fff;
+}
+
+.history-leg-strip button.outbound.active {
+  box-shadow: inset 3px 0 0 #60a5fa;
+}
+
+.history-leg-strip button.return.active {
+  box-shadow: inset 3px 0 0 #a78bfa;
+}
+
+.temperature-chart-note {
+  margin: -2px 0 7px;
+  color: #8292a7;
+  font-size: 0.62rem;
+}
+
+.temperature-time-grid {
+  stroke: rgba(148, 163, 184, 0.08);
+  stroke-width: 1;
+}
+
+.temperature-time-label {
+  fill: #8fa0b7;
+  font-size: 11px;
+}
+
+.temperature-chart-point.change {
+  fill: #f8fafc;
+  stroke: #60a5fa;
+  stroke-width: 2;
+}
+
+.temperature-change-label {
+  font-size: 10px;
+  font-weight: 800;
+  paint-order: stroke;
+  stroke: #0d1828;
+  stroke-width: 3px;
+}
+
+.temperature-change-label.rise {
+  fill: #fbbf24;
+}
+
+.temperature-change-label.drop {
+  fill: #7dd3fc;
+}
+
+@media (max-height: 760px) and (min-width: 1051px) {
+  .history-leg-strip {
+    margin-bottom: 5px;
+  }
+
+  .history-leg-strip button {
+    min-height: 32px;
+    padding-top: 3px;
+    padding-bottom: 3px;
+  }
+}

@@ -1048,171 +1048,170 @@ app.post(
 )
 
 // =====================================================
-// ULTIMA TELEMETRIA
+// ULTIMA TELEMETRIA POR ASSET
 // =====================================================
 
 app.get(
   '/api/telemetry/latest',
   requireAuth,
-  async (req: AuthenticatedRequest, res) => {
-
+  async (
+    req: AuthenticatedRequest,
+    res: Response
+  ) => {
     try {
-
       const companyId =
-  req.user?.companyId
+        req.user?.companyId
 
-if (!companyId) {
-  return res.status(401).json({
-    ok: false,
-    message: 'Invalid session'
-  })
-}
-
-const companyAssets =
-  await prisma.asset.findMany({
-    where: {
-      companyId,
-      active: true
-    },
-    select: {
-      id: true,
-      deviceId: true
-    }
-  })
-
-const assetIds =
-  companyAssets.map(
-    (asset) => asset.id
-  )
-
-if (assetIds.length === 0) {
-  return res.status(404).json({
-    ok: false,
-    message: 'No assets assigned to this company'
-  })
-}
-
-      // ---------------------------------
-      // ULTIMA TELEMETRIA
-      // ---------------------------------
-
-      const latestTelemetry =
-  await prisma.telemetry.findFirst({
-    where: {
-      assetId: {
-        in: assetIds
-      },
-
-      // Una lectura reenviada desde SD es historial,
-      // no el estado actual del trailer.
-      isBackfill: false
-    },
-    orderBy: {
-      receivedAt: 'desc'
-    }
-  })
-
-      if (!latestTelemetry) {
-
-        return res.status(404).json({
+      if (!companyId) {
+        return res.status(401).json({
           ok: false,
-          message:
-            'No telemetry available'
+          message: 'Invalid session'
         })
       }
 
-      // ---------------------------------
-      // ULTIMA UBICACION GPS VALIDA
-      // ---------------------------------
+      const requestedDeviceId =
+        typeof req.query.deviceId === 'string'
+          ? req.query.deviceId.trim()
+          : ''
 
-      const latestLocation =
+      const companyAssets =
+        await prisma.asset.findMany({
+          where: {
+            companyId,
+            active: true
+          },
+          select: {
+            id: true,
+            deviceId: true,
+            name: true
+          }
+        })
+
+      if (companyAssets.length === 0) {
+        return res.status(404).json({
+          ok: false,
+          message: 'No assets assigned to this company'
+        })
+      }
+
+      // If deviceId is present, it MUST belong to the authenticated company.
+      // Keeping the query optional preserves compatibility while the new
+      // frontend and backend are deployed one after the other.
+      const requestedAsset =
+        requestedDeviceId
+          ? companyAssets.find(
+              (asset) =>
+                asset.deviceId === requestedDeviceId
+            )
+          : null
+
+      if (
+        requestedDeviceId &&
+        !requestedAsset
+      ) {
+        return res.status(404).json({
+          ok: false,
+          message: 'Asset not found'
+        })
+      }
+
+      const targetAssetIds =
+        requestedAsset
+          ? [requestedAsset.id]
+          : companyAssets.map(
+              (asset) => asset.id
+            )
+
+      // Current state must never come from SD/backfill history.
+      const latestTelemetry =
         await prisma.telemetry.findFirst({
           where: {
             assetId: {
-              in: assetIds
+              in: targetAssetIds
             },
-
-            // No usar reenvios historicos para mover
-            // el marcador del mapa en tiempo real.
-            isBackfill: false,
-
-            latitude: {
-              not: null
-            },
-
-            longitude: {
-              not: null
-            },
-
-            // Solo ubicaciones con hora real capturada
-            // por GNSS. Evita que datos viejos anteriores
-            // a esta correccion parezcan ubicacion nueva.
-            recordedAt: {
-              not: null
-            }
+            isBackfill: false
           },
-
-          orderBy: [
-            {
-              recordedAt: 'desc'
-            },
-            {
-              receivedAt: 'desc'
-            }
-          ]
+          orderBy: {
+            receivedAt: 'desc'
+          }
         })
 
-      // ---------------------------------
-      // GPS ACTUAL
-      // ---------------------------------
+      if (!latestTelemetry) {
+        return res.status(404).json({
+          ok: false,
+          message: requestedDeviceId
+            ? 'No telemetry available for this asset'
+            : 'No telemetry available'
+        })
+      }
+
+      // Important in a multi-asset account:
+      // last-known GPS must come from the SAME asset as latestTelemetry.
+      const latestAssetId =
+        latestTelemetry.assetId
+
+      const latestLocation =
+        latestAssetId == null
+          ? null
+          : await prisma.telemetry.findFirst({
+              where: {
+                assetId: latestAssetId,
+                isBackfill: false,
+                latitude: {
+                  not: null
+                },
+                longitude: {
+                  not: null
+                },
+                recordedAt: {
+                  not: null
+                }
+              },
+              orderBy: [
+                {
+                  recordedAt: 'desc'
+                },
+                {
+                  receivedAt: 'desc'
+                }
+              ]
+            })
 
       const hasCurrentGps =
-        latestTelemetry.latitude !==
-          null &&
-        latestTelemetry.longitude !==
-          null &&
-        latestTelemetry.recordedAt !==
-          null
+        latestTelemetry.latitude !== null &&
+        latestTelemetry.longitude !== null &&
+        latestTelemetry.recordedAt !== null
 
-      // ---------------------------------
-      // RESPUESTA
-      // ---------------------------------
+      const responseAsset =
+        companyAssets.find(
+          (asset) =>
+            asset.id === latestTelemetry.assetId
+        ) ?? requestedAsset
 
       return res.json({
         ok: true,
-
+        asset: responseAsset ?? null,
         telemetry: {
-
           ...latestTelemetry,
-
           latitude:
             latestTelemetry.latitude ??
             latestLocation?.latitude ??
             null,
-
           longitude:
             latestTelemetry.longitude ??
             latestLocation?.longitude ??
             null,
-
           altitude:
             latestTelemetry.altitude ??
             latestLocation?.altitude ??
             null,
-
           hasCurrentGps,
-
-          // Compatibilidad con el frontend actual:
-          // conservamos el nombre locationReceivedAt,
-          // pero ahora representa la hora REAL de captura GPS.
           locationReceivedAt:
             latestLocation?.recordedAt ??
             null
         }
       })
-
     } catch (error) {
-
       console.error(
         'Error loading latest telemetry:',
         error
@@ -1220,13 +1219,11 @@ if (assetIds.length === 0) {
 
       return res.status(500).json({
         ok: false,
-        message:
-          'Database error'
+        message: 'Database error'
       })
     }
   }
 )
-
 
 // =====================================================
 // HISTORIAL GPS / RECORRIDOS

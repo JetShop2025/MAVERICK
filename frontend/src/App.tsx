@@ -98,8 +98,10 @@ type RoadMatchedTrack = {
   segments: [number, number][][]
 }
 
-const API_BASE = 'https://maverick-1z64.onrender.com'
-
+const API_BASE =
+  import.meta.env.DEV
+    ? 'http://localhost:3000'
+    : 'https://maverick-1z64.onrender.com'
 // Keep Leaflet's default marker assets available for compatibility.
 // Maverick uses a custom status-aware trailer icon below.
 void markerIcon2x
@@ -425,7 +427,7 @@ function App() {
   const [
     selectedDeviceId,
     setSelectedDeviceId
-  ] = useState('TRAILER-001')
+  ] = useState('')
 
   const [
     now,
@@ -553,6 +555,18 @@ function App() {
   // TELEMETRY
   // =====================================================
 
+  // Clear every device-specific view immediately when the user changes asset.
+  useEffect(() => {
+    setTelemetry(null)
+    setRoutePoints([])
+    setLiveRoadSegments([])
+    setHistoryPoints([])
+    setHistoryRoadTracks([])
+    liveRoadProcessedRef.current = null
+    setDetailsOpen(false)
+    setHistoryOpen(false)
+  }, [selectedDeviceId])
+
   const loadTelemetry =
     useCallback(
       async () => {
@@ -566,10 +580,16 @@ function App() {
           return
         }
 
+        // Nothing is selected on initial load.
+        if (!selectedDeviceId) {
+          setTelemetry(null)
+          return
+        }
+
         try {
           const res =
             await fetch(
-              `${API_BASE}/api/telemetry/latest`,
+              `${API_BASE}/api/telemetry/latest?deviceId=${encodeURIComponent(selectedDeviceId)}`,
               {
                 headers: {
                   Authorization:
@@ -598,37 +618,41 @@ function App() {
             return
           }
 
-          if (data.ok) {
+          if (res.ok && data.ok) {
             setTelemetry(
               data.telemetry
             )
 
-            if (
-              data.telemetry?.deviceId
-            ) {
-              setSelectedDeviceId(
-                data.telemetry.deviceId
-              )
-            }
-
+            // IMPORTANT:
+            // Do not setSelectedDeviceId here.
+            // The selected asset belongs to the user's choice,
+            // not whichever trailer transmitted most recently.
             setApiStatus(
               'online'
             )
           } else {
+            setTelemetry(null)
             setApiStatus(
-              'offline'
+              res.status === 404
+                ? 'online'
+                : 'offline'
             )
           }
         } catch {
+          setTelemetry(null)
           setApiStatus(
             'offline'
           )
         }
       },
-      []
+      [selectedDeviceId]
     )
 
   useEffect(() => {
+    if (!selectedDeviceId) {
+      return
+    }
+
     loadTelemetry()
 
     const interval =
@@ -641,7 +665,10 @@ function App() {
       clearInterval(
         interval
       )
-  }, [loadTelemetry])
+  }, [
+    selectedDeviceId,
+    loadTelemetry
+  ])
 
 
   // =====================================================
@@ -931,17 +958,12 @@ function App() {
       (asset) =>
         asset.deviceId ===
         selectedDeviceId
-    ) ||
-    assets.find(
-      (asset) =>
-        asset.deviceId ===
-        telemetry?.deviceId
     )
 
   const selectedAssetName =
     selectedAsset?.name ||
-    telemetry?.deviceId ||
-    selectedDeviceId
+    selectedDeviceId ||
+    'Select an asset'
 
   const hasLocation =
     telemetry?.latitude != null &&
@@ -1772,8 +1794,8 @@ function App() {
         )
 
       const deviceId =
-        telemetry?.deviceId ||
-        selectedDeviceId
+        selectedDeviceId ||
+        telemetry?.deviceId
 
       if (!token || !deviceId) {
         return
@@ -2908,23 +2930,38 @@ function App() {
       <section className="mav-statusbar">
 
         <select
-          value="all"
-          aria-label="Fleet selector"
-          onChange={() => {
+          value={selectedDeviceId}
+          aria-label="Asset selector"
+          onChange={(event) => {
+            setSelectedDeviceId(
+              event.target.value
+            )
             setSearchTerm('')
             setStatusFilter('all')
           }}
         >
-          <option value="all">
-            All Fleets
+          <option value="">
+            Select Asset
           </option>
+
+          {assets.map((asset) => (
+            <option
+              key={asset.id}
+              value={asset.deviceId}
+            >
+              {asset.name || asset.deviceId}
+              {asset.name && asset.name !== asset.deviceId
+                ? ` (${asset.deviceId})`
+                : ''}
+            </option>
+          ))}
         </select>
 
         <div className="metric-pill neutral">
           <span className="metric-dot" />
 
           <strong>
-            {telemetry ? 1 : 0}
+            {assets.length}
           </strong>
 
           Assets
@@ -4219,7 +4256,8 @@ function App() {
 
                   <strong className="large-value">
                     {
-                      selectedDeviceId
+                      selectedDeviceId ||
+                      'No asset selected'
                     }
                   </strong>
 

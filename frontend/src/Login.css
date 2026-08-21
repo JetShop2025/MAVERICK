@@ -1,93 +1,1034 @@
-.login-page {
+/* =====================================================
+   MAVERICK MODERN LOGIN
+   ===================================================== */
+
+* {
+  box-sizing: border-box;
+}
+
+.mav-login-page {
+  --login-bg: #06111f;
+  --login-panel: rgba(11, 24, 42, 0.88);
+  --login-panel-soft: rgba(15, 32, 55, 0.74);
+  --login-line: rgba(132, 171, 218, 0.17);
+  --login-line-strong: rgba(105, 165, 234, 0.34);
+  --login-text: #f7fbff;
+  --login-muted: #8297b2;
+  --login-blue: #2f86ff;
+  --login-blue-light: #5bc8ff;
+  --login-green: #3fe393;
+
+  position: relative;
   min-height: 100vh;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 24px;
+  overflow: hidden;
   background:
+    radial-gradient(
+      circle at 54% 43%,
+      rgba(20, 89, 190, 0.18),
+      transparent 27%
+    ),
+    radial-gradient(
+      circle at 92% 12%,
+      rgba(45, 116, 255, 0.08),
+      transparent 27%
+    ),
     linear-gradient(
-      135deg,
-      #07111f 0%,
-      #0f1f35 55%,
-      #162a46 100%
+      125deg,
+      #03101c 0%,
+      #071523 50%,
+      #09182a 100%
+    );
+  color: var(--login-text);
+  font-family:
+    Inter,
+    ui-sans-serif,
+    system-ui,
+    -apple-system,
+    BlinkMacSystemFont,
+    "Segoe UI",
+    sans-serif;
+}
+
+.mav-login-page::before,
+.mav-login-page::after {
+  content: "";
+  position: absolute;
+  pointer-events: none;
+}
+
+.mav-login-page::before {
+  inset: 0;
+  opacity: 0.19;
+  background-image:
+    linear-gradient(
+      rgba(89, 147, 211, 0.06) 1px,
+      transparent 1px
+    ),
+    linear-gradient(
+      90deg,
+      rgba(89, 147, 211, 0.06) 1px,
+      transparent 1px
+    );
+  background-size: 64px 64px;
+  mask-image:
+    linear-gradient(
+      to right,
+      transparent,
+      black 20%,
+      black 75%,
+      transparent
     );
 }
 
-.login-card {
-  width: 100%;
-  max-width: 420px;
-  padding: 36px;
-  border-radius: 20px;
-  background: rgba(15, 23, 42, 0.96);
-  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.35);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+.mav-login-page::after {
+  width: 720px;
+  height: 720px;
+  right: -240px;
+  bottom: -320px;
+  border-radius: 50%;
+  background:
+    radial-gradient(
+      circle,
+      rgba(47, 134, 255, 0.13),
+      transparent 63%
+    );
+  filter: blur(8px);
 }
 
-.login-logo {
-  display: block;
-  width: 92px;
-  height: 92px;
-  object-fit: cover;
-  margin: 0 auto 18px;
-  border-radius: 18px;
+.mav-login-aurora {
+  position: absolute;
+  border-radius: 999px;
+  pointer-events: none;
+  filter: blur(70px);
+  opacity: 0.36;
 }
 
-.login-card h1 {
-  margin: 0;
-  text-align: center;
-  font-size: 32px;
-  color: #ffffff;
+.mav-login-aurora-one {
+  width: 420px;
+  height: 260px;
+  left: 32%;
+  top: 26%;
+  background:
+    rgba(16, 104, 255, 0.16);
+  transform: rotate(-24deg);
 }
 
-.login-subtitle {
-  margin: 8px 0 28px;
-  text-align: center;
-  color: #94a3b8;
-  font-size: 14px;
+.mav-login-aurora-two {
+  width: 360px;
+  height: 260px;
+  right: 8%;
+  top: 12%;
+  background:
+    rgba(27, 87, 176, 0.13);
 }
 
-.login-card form {
+.mav-login-shell {
+  position: relative;
+  z-index: 2;
+  width: min(1640px, 100%);
+  min-height: 100vh;
+  margin: 0 auto;
+  display: grid;
+  grid-template-columns:
+    minmax(0, 1.12fr)
+    minmax(440px, 0.88fr);
+}
+
+/* =====================================================
+   LEFT / HERO
+   ===================================================== */
+
+.mav-login-hero {
+  position: relative;
+  min-width: 0;
+  min-height: 100vh;
+  padding:
+    clamp(32px, 4vw, 62px)
+    clamp(34px, 5vw, 78px)
+    34px;
   display: flex;
   flex-direction: column;
+  overflow: hidden;
+  border-right:
+    1px solid
+    rgba(112, 154, 204, 0.09);
+}
+
+.mav-login-brand {
+  position: relative;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  gap: 13px;
+}
+
+.mav-login-brand img {
+  width: 72px;
+  height: 72px;
+  object-fit: contain;
+  padding: 5px;
+  border-radius: 18px;
+  background:
+    rgba(255, 255, 255, 0.96);
+  box-shadow:
+    0 12px 40px
+    rgba(0, 0, 0, 0.2);
+}
+
+.mav-login-brand > div {
+  display: grid;
+  gap: 2px;
+}
+
+.mav-login-brand strong {
+  letter-spacing: 0.16em;
+  font-size: 1.1rem;
+}
+
+.mav-login-brand span {
+  color: #718ba9;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  font-size: 0.59rem;
+  font-weight: 700;
+}
+
+.mav-login-hero-copy {
+  position: relative;
+  z-index: 5;
+  width: min(510px, 75%);
+  margin-top:
+    clamp(68px, 9vh, 120px);
+}
+
+.mav-login-eyebrow,
+.mav-login-card-kicker {
+  color: #5bacff;
+  font-size: 0.65rem;
+  font-weight: 850;
+  letter-spacing: 0.15em;
+}
+
+.mav-login-hero-copy h1 {
+  margin: 12px 0 14px;
+  font-size:
+    clamp(2.4rem, 4vw, 4.7rem);
+  line-height: 0.98;
+  letter-spacing: -0.055em;
+}
+
+.mav-login-hero-copy h1 em {
+  color: #3f91ff;
+  font-style: normal;
+  text-shadow:
+    0 0 34px
+    rgba(63, 145, 255, 0.2);
+}
+
+.mav-login-hero-copy p {
+  width: min(460px, 100%);
+  margin: 0;
+  color: #8ba0ba;
+  font-size:
+    clamp(0.88rem, 1.15vw, 1.04rem);
+  line-height: 1.72;
+}
+
+.mav-login-map-visual {
+  position: absolute;
+  z-index: 1;
+  top: 7%;
+  right: -8%;
+  width: 69%;
+  height: 67%;
+  opacity: 0.9;
+  pointer-events: none;
+}
+
+.mav-login-map-visual::before {
+  content: "";
+  position: absolute;
+  inset: 4% 0 0 2%;
+  opacity: 0.35;
+  background:
+    radial-gradient(
+      circle at 67% 50%,
+      rgba(34, 115, 255, 0.38),
+      transparent 12%
+    ),
+    radial-gradient(
+      circle at 58% 48%,
+      rgba(44, 120, 220, 0.18),
+      transparent 34%
+    );
+}
+
+.mav-map-grid {
+  position: absolute;
+  inset: 0;
+  opacity: 0.26;
+  transform:
+    perspective(700px)
+    rotateX(61deg)
+    rotateZ(-7deg)
+    scale(1.25);
+  background-image:
+    linear-gradient(
+      rgba(60, 125, 203, 0.22) 1px,
+      transparent 1px
+    ),
+    linear-gradient(
+      90deg,
+      rgba(60, 125, 203, 0.22) 1px,
+      transparent 1px
+    );
+  background-size:
+    50px 50px;
+  mask-image:
+    radial-gradient(
+      ellipse,
+      black 25%,
+      transparent 72%
+    );
+}
+
+.mav-route-svg {
+  position: absolute;
+  inset: 8% 0 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  filter:
+    drop-shadow(
+      0 0 14px
+      rgba(47, 134, 255, 0.45)
+    );
+}
+
+.mav-route-shadow {
+  fill: none;
+  stroke:
+    rgba(35, 95, 196, 0.25);
+  stroke-width: 14;
+  stroke-linecap: round;
+}
+
+.mav-route-line {
+  fill: none;
+  stroke: url("#none");
+  stroke: #2989ff;
+  stroke-width: 5;
+  stroke-linecap: round;
+  stroke-dasharray: 7 5;
+  animation:
+    mav-route-flow
+    1.2s linear infinite;
+}
+
+@keyframes mav-route-flow {
+  to {
+    stroke-dashoffset: -24;
+  }
+}
+
+.mav-route-point {
+  position: absolute;
+  width: 18px;
+  height: 18px;
+  border:
+    3px solid
+    #72cbff;
+  border-radius: 50%;
+  background: #2c8bff;
+  box-shadow:
+    0 0 0 7px
+    rgba(44, 139, 255, 0.13),
+    0 0 28px
+    rgba(44, 139, 255, 0.8);
+}
+
+.mav-route-point-one {
+  right: 52%;
+  bottom: 24%;
+}
+
+.mav-route-point-two {
+  right: 28%;
+  bottom: 39%;
+}
+
+.mav-route-point-three {
+  right: 16%;
+  top: 20%;
+}
+
+.mav-route-truck {
+  position: absolute;
+  right: 31%;
+  bottom: 33%;
+  width: 47px;
+  height: 47px;
+  display: grid;
+  place-items: center;
+  border:
+    1px solid
+    rgba(116, 206, 255, 0.68);
+  border-radius: 13px;
+  background:
+    linear-gradient(
+      145deg,
+      #55ccff,
+      #1c76ff
+    );
+  color: white;
+  box-shadow:
+    0 0 34px
+    rgba(36, 132, 255, 0.68);
+  transform: rotate(21deg);
+}
+
+.mav-route-truck span {
+  transform: rotate(-21deg);
+}
+
+.mav-login-features {
+  position: relative;
+  z-index: 5;
+  width: min(430px, 56%);
+  display: grid;
+  gap: 18px;
+  margin-top:
+    clamp(42px, 5vh, 68px);
+}
+
+.mav-login-features article {
+  display: flex;
+  align-items: center;
+  gap: 13px;
+}
+
+.mav-feature-icon {
+  width: 42px;
+  height: 42px;
+  flex: 0 0 42px;
+  display: grid;
+  place-items: center;
+  border:
+    1px solid
+    rgba(80, 160, 255, 0.2);
+  border-radius: 50%;
+  background:
+    rgba(38, 117, 214, 0.11);
+  color: #5cc6ff;
+  font-size: 0.7rem;
+  font-weight: 900;
+  box-shadow:
+    inset 0 0 18px
+    rgba(49, 137, 255, 0.08);
+}
+
+.mav-login-features strong {
+  display: block;
+  margin-bottom: 2px;
+  font-size: 0.76rem;
+}
+
+.mav-login-features p {
+  margin: 0;
+  color: #7087a4;
+  font-size: 0.65rem;
+  line-height: 1.45;
+}
+
+.mav-overview-heading,
+.mav-login-system {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
   gap: 10px;
 }
 
-.login-card label {
-  margin-top: 8px;
-  color: #cbd5e1;
-  font-size: 14px;
-  font-weight: 600;
+.mav-overview-heading > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--login-green);
+  font-size: 0.58rem;
+  font-weight: 800;
 }
 
-.login-card input {
-  width: 100%;
-  box-sizing: border-box;
-  padding: 13px 14px;
-  border-radius: 10px;
-  border: 1px solid #334155;
-  background: #0b1220;
-  color: #ffffff;
-  outline: none;
-  font-size: 15px;
+.mav-overview-heading i,
+.mav-login-system i {
+  width: 7px;
+  height: 7px;
+  display: block;
+  border-radius: 50%;
+  background: var(--login-green);
+  box-shadow:
+    0 0 10px
+    rgba(63, 227, 147, 0.65);
 }
 
-.login-card input:focus {
-  border-color: #38bdf8;
-  box-shadow: 0 0 0 3px rgba(56, 189, 248, 0.12);
+.mav-login-overview {
+  position: absolute;
+  z-index: 4;
+  right: 7%;
+  bottom: 12%;
+  width: min(400px, 43%);
+  padding: 15px 17px;
+  border:
+    1px solid
+    rgba(92, 153, 229, 0.2);
+  border-radius: 13px;
+  background:
+    linear-gradient(
+      145deg,
+      rgba(13, 35, 66, 0.84),
+      rgba(6, 22, 43, 0.75)
+    );
+  backdrop-filter: blur(17px);
+  box-shadow:
+    0 22px 60px
+    rgba(0, 0, 0, 0.22);
 }
 
-.login-card button {
-  margin-top: 18px;
-  padding: 13px 16px;
-  border: none;
-  border-radius: 10px;
-  background: #0ea5e9;
-  color: #ffffff;
-  font-size: 15px;
+.mav-overview-heading strong {
+  font-size: 0.78rem;
+}
+
+.mav-overview-grid {
+  display: grid;
+  grid-template-columns:
+    repeat(4, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 13px;
+}
+
+.mav-overview-grid > div {
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+  text-align: center;
+}
+
+.mav-overview-grid strong {
+  font-size: 0.74rem;
+}
+
+.mav-overview-grid span {
+  color: #7187a3;
+  font-size: 0.52rem;
+  line-height: 1.3;
+}
+
+.mav-login-hero-footer {
+  position: absolute;
+  z-index: 5;
+  left:
+    clamp(34px, 5vw, 78px);
+  bottom: 34px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #7187a3;
+  font-size: 0.64rem;
+}
+
+.mav-login-hero-footer strong {
+  color: #3f9eff;
+}
+
+/* =====================================================
+   RIGHT / FORM
+   ===================================================== */
+
+.mav-login-form-side {
+  min-width: 0;
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  align-content: center;
+  gap: 24px;
+  padding:
+    48px
+    clamp(42px, 5vw, 84px);
+}
+
+.mav-login-card {
+  position: relative;
+  width: min(520px, 100%);
+  padding:
+    clamp(30px, 4vw, 48px);
+  overflow: hidden;
+  border:
+    1px solid
+    rgba(126, 170, 221, 0.26);
+  border-radius: 22px;
+  background:
+    linear-gradient(
+      145deg,
+      rgba(20, 38, 65, 0.91),
+      rgba(8, 21, 39, 0.94)
+    );
+  box-shadow:
+    0 34px 90px
+    rgba(0, 0, 0, 0.38),
+    inset 0 1px 0
+    rgba(255, 255, 255, 0.035);
+  backdrop-filter: blur(22px);
+}
+
+.mav-login-card::before {
+  content: "";
+  position: absolute;
+  width: 320px;
+  height: 210px;
+  top: -140px;
+  left: 50%;
+  transform:
+    translateX(-50%);
+  border-radius: 50%;
+  background:
+    rgba(61, 137, 255, 0.14);
+  filter: blur(55px);
+  pointer-events: none;
+}
+
+.mav-login-card-logo {
+  position: relative;
+  display: flex;
+  justify-content: center;
+  margin-bottom: 17px;
+}
+
+.mav-login-card-logo img {
+  width: 92px;
+  height: 92px;
+  object-fit: contain;
+  padding: 6px;
+  border-radius: 22px;
+  background:
+    rgba(255, 255, 255, 0.97);
+  box-shadow:
+    0 15px 45px
+    rgba(0, 0, 0, 0.24),
+    0 0 34px
+    rgba(69, 153, 255, 0.1);
+}
+
+.mav-login-card-kicker {
+  position: relative;
+  display: block;
+  text-align: center;
+}
+
+.mav-login-card h2 {
+  position: relative;
+  margin: 8px 0 5px;
+  text-align: center;
+  font-size:
+    clamp(1.65rem, 2vw, 2rem);
+  letter-spacing: -0.035em;
+}
+
+.mav-login-card-subtitle {
+  position: relative;
+  margin: 0 0 27px;
+  color: #8497b0;
+  text-align: center;
+  font-size: 0.78rem;
+}
+
+.mav-login-form {
+  position: relative;
+  display: grid;
+  gap: 17px;
+}
+
+.mav-login-form label {
+  display: grid;
+  gap: 7px;
+}
+
+.mav-login-form label > span {
+  color: #dce8f5;
+  font-size: 0.71rem;
   font-weight: 700;
-  cursor: pointer;
 }
 
-.login-card button:hover {
-  background: #0284c7;
+.mav-login-input-wrap {
+  min-height: 52px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 13px;
+  border:
+    1px solid
+    rgba(122, 164, 214, 0.32);
+  border-radius: 10px;
+  background:
+    rgba(5, 18, 35, 0.64);
+  transition:
+    border-color 160ms ease,
+    box-shadow 160ms ease,
+    background 160ms ease;
+}
+
+.mav-login-input-wrap:focus-within {
+  border-color:
+    rgba(75, 153, 255, 0.78);
+  background:
+    rgba(8, 24, 45, 0.88);
+  box-shadow:
+    0 0 0 3px
+    rgba(51, 134, 255, 0.1),
+    0 0 26px
+    rgba(34, 119, 255, 0.08);
+}
+
+.mav-login-input-icon {
+  width: 24px;
+  flex: 0 0 24px;
+  color: #66809f;
+  text-align: center;
+  font-size: 0.78rem;
+  font-weight: 800;
+}
+
+.mav-login-input-wrap input {
+  min-width: 0;
+  width: 100%;
+  height: 50px;
+  padding: 0;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: #f7fbff;
+  font: inherit;
+  font-size: 0.82rem;
+}
+
+.mav-login-input-wrap input::placeholder {
+  color: #63758e;
+}
+
+.mav-password-toggle {
+  height: 30px;
+  padding: 0 7px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: #7f93ac;
+  font-size: 0.65rem;
+  font-weight: 700;
+}
+
+.mav-password-toggle:hover:not(:disabled) {
+  background:
+    rgba(94, 153, 220, 0.08);
+  color: #b9d9ff;
+}
+
+.mav-login-error {
+  min-height: 38px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border:
+    1px solid
+    rgba(244, 91, 91, 0.28);
+  border-radius: 8px;
+  background:
+    rgba(139, 31, 45, 0.12);
+  color: #ff9a9a;
+  font-size: 0.7rem;
+}
+
+.mav-login-error span {
+  width: 20px;
+  height: 20px;
+  display: grid;
+  place-items: center;
+  flex: 0 0 20px;
+  border-radius: 50%;
+  background:
+    rgba(239, 68, 68, 0.18);
+  font-weight: 900;
+}
+
+.mav-login-submit {
+  position: relative;
+  height: 54px;
+  margin-top: 2px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  border:
+    1px solid
+    rgba(106, 192, 255, 0.4);
+  border-radius: 10px;
+  background:
+    linear-gradient(
+      95deg,
+      #38aef0,
+      #2368ef
+    );
+  color: white;
+  font-size: 0.82rem;
+  font-weight: 850;
+  box-shadow:
+    0 12px 34px
+    rgba(31, 106, 235, 0.31),
+    0 0 24px
+    rgba(57, 157, 255, 0.15);
+  transition:
+    transform 160ms ease,
+    box-shadow 160ms ease,
+    filter 160ms ease;
+}
+
+.mav-login-submit:hover:not(:disabled) {
+  transform:
+    translateY(-1px);
+  filter: brightness(1.06);
+  box-shadow:
+    0 16px 40px
+    rgba(31, 106, 235, 0.39),
+    0 0 30px
+    rgba(57, 157, 255, 0.2);
+}
+
+.mav-login-submit:active:not(:disabled) {
+  transform:
+    translateY(0);
+}
+
+.mav-login-submit:disabled,
+.mav-password-toggle:disabled {
+  cursor: not-allowed;
+  opacity: 0.65;
+}
+
+.mav-login-submit strong {
+  font-size: 1.1rem;
+  font-weight: 500;
+}
+
+.mav-login-divider {
+  display: grid;
+  grid-template-columns:
+    1fr auto 1fr;
+  align-items: center;
+  gap: 12px;
+  margin: 25px 0 18px;
+}
+
+.mav-login-divider span {
+  height: 1px;
+  background:
+    rgba(129, 167, 211, 0.14);
+}
+
+.mav-login-divider strong {
+  color: #657b98;
+  font-size: 0.55rem;
+  letter-spacing: 0.12em;
+}
+
+.mav-login-security {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.mav-security-icon {
+  width: 42px;
+  height: 42px;
+  flex: 0 0 42px;
+  display: grid;
+  place-items: center;
+  border:
+    1px solid
+    rgba(77, 161, 255, 0.25);
+  border-radius: 50%;
+  background:
+    rgba(41, 121, 229, 0.12);
+  color: #5bc8ff;
+  box-shadow:
+    inset 0 0 18px
+    rgba(49, 137, 255, 0.08);
+}
+
+.mav-login-security strong {
+  display: block;
+  margin-bottom: 2px;
+  color: #a9d8ff;
+  font-size: 0.72rem;
+}
+
+.mav-login-security p {
+  margin: 0;
+  color: #6f829b;
+  font-size: 0.64rem;
+  line-height: 1.45;
+}
+
+.mav-login-system {
+  margin-top: 21px;
+  padding-top: 14px;
+  border-top:
+    1px solid
+    rgba(129, 167, 211, 0.1);
+  color: #6e829d;
+  font-size: 0.62rem;
+}
+
+.mav-login-system > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.mav-login-system strong {
+  color: #51d996;
+}
+
+.mav-login-copyright {
+  color: #536882;
+  font-size: 0.6rem;
+  text-align: center;
+}
+
+/* =====================================================
+   RESPONSIVE
+   ===================================================== */
+
+@media (max-width: 1180px) {
+  .mav-login-shell {
+    grid-template-columns:
+      minmax(0, 0.9fr)
+      minmax(410px, 1.1fr);
+  }
+
+  .mav-login-map-visual,
+  .mav-login-overview {
+    opacity: 0.55;
+  }
+
+  .mav-login-features {
+    width: 75%;
+  }
+}
+
+@media (max-width: 900px) {
+  .mav-login-shell {
+    display: block;
+  }
+
+  .mav-login-hero {
+    min-height: auto;
+    padding:
+      26px 28px
+      32px;
+    border-right: 0;
+    border-bottom:
+      1px solid
+      rgba(112, 154, 204, 0.09);
+  }
+
+  .mav-login-brand img {
+    width: 58px;
+    height: 58px;
+    border-radius: 15px;
+  }
+
+  .mav-login-hero-copy {
+    width: min(600px, 100%);
+    margin-top: 48px;
+  }
+
+  .mav-login-hero-copy h1 {
+    font-size:
+      clamp(2.55rem, 9vw, 4.2rem);
+  }
+
+  .mav-login-features {
+    width: 100%;
+    grid-template-columns:
+      repeat(3, minmax(0, 1fr));
+    gap: 10px;
+    margin-top: 36px;
+  }
+
+  .mav-login-features article {
+    align-items: flex-start;
+    padding: 12px;
+    border:
+      1px solid
+      rgba(108, 153, 205, 0.1);
+    border-radius: 10px;
+    background:
+      rgba(10, 27, 49, 0.46);
+  }
+
+  .mav-feature-icon {
+    width: 34px;
+    height: 34px;
+    flex-basis: 34px;
+  }
+
+  .mav-login-map-visual,
+  .mav-login-overview,
+  .mav-login-hero-footer {
+    display: none;
+  }
+
+  .mav-login-form-side {
+    min-height: auto;
+    padding: 52px 24px;
+  }
+}
+
+@media (max-width: 620px) {
+  .mav-login-hero {
+    padding:
+      20px 18px 24px;
+  }
+
+  .mav-login-hero-copy {
+    margin-top: 36px;
+  }
+
+  .mav-login-features {
+    grid-template-columns: 1fr;
+  }
+
+  .mav-login-form-side {
+    padding:
+      32px 14px;
+  }
+
+  .mav-login-card {
+    padding:
+      28px 20px;
+    border-radius: 17px;
+  }
+
+  .mav-login-card-logo img {
+    width: 78px;
+    height: 78px;
+    border-radius: 18px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .mav-route-line {
+    animation: none;
+  }
+
+  .mav-login-submit {
+    transition: none;
+  }
 }

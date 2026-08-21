@@ -842,6 +842,798 @@ app.patch(
   }
 )
 
+
+// =====================================================
+// DISPATCH / OPERATIONS
+// =====================================================
+
+const DISPATCH_STATUSES = [
+  'ASSIGNED',
+  'EN_ROUTE_TO_PICKUP',
+  'AT_PICKUP',
+  'LOADED',
+  'IN_TRANSIT',
+  'AT_DELIVERY',
+  'DELIVERED',
+  'CANCELLED'
+] as const
+
+type DispatchStatusValue =
+  typeof DISPATCH_STATUSES[number]
+
+function isDispatchStatus(
+  value: unknown
+): value is DispatchStatusValue {
+  return (
+    typeof value === 'string' &&
+    DISPATCH_STATUSES.includes(
+      value as DispatchStatusValue
+    )
+  )
+}
+
+function optionalString(value: unknown) {
+  if (typeof value !== 'string') {
+    return null
+  }
+
+  const trimmed = value.trim()
+  return trimmed.length > 0
+    ? trimmed
+    : null
+}
+
+function optionalNumber(value: unknown) {
+  if (
+    value === null ||
+    value === undefined ||
+    value === ''
+  ) {
+    return null
+  }
+
+  const parsed = Number(value)
+  return Number.isFinite(parsed)
+    ? parsed
+    : null
+}
+
+function optionalDate(value: unknown) {
+  if (
+    typeof value !== 'string' ||
+    !value.trim()
+  ) {
+    return null
+  }
+
+  const parsed = new Date(value)
+
+  return Number.isNaN(parsed.getTime())
+    ? null
+    : parsed
+}
+
+app.get(
+  '/api/dispatches',
+  requireAuth,
+  async (
+    req: AuthenticatedRequest,
+    res: Response
+  ) => {
+    try {
+      const companyId =
+        req.user?.companyId
+
+      if (!companyId) {
+        return res.status(401).json({
+          ok: false,
+          message: 'Invalid session'
+        })
+      }
+
+      const dispatches =
+        await prisma.dispatch.findMany({
+          where: {
+            companyId
+          },
+          include: {
+            asset: {
+              select: {
+                id: true,
+                deviceId: true,
+                name: true,
+                active: true
+              }
+            },
+            statusEvents: {
+              orderBy: {
+                createdAt: 'desc'
+              },
+              take: 20
+            }
+          },
+          orderBy: [
+            {
+              completedAt: 'asc'
+            },
+            {
+              updatedAt: 'desc'
+            }
+          ]
+        })
+
+      return res.json({
+        ok: true,
+        dispatches
+      })
+    } catch (error) {
+      console.error(
+        'Get dispatches error:',
+        error
+      )
+
+      return res.status(500).json({
+        ok: false,
+        message:
+          'Unable to load dispatches'
+      })
+    }
+  }
+)
+
+app.get(
+  '/api/dispatches/:id',
+  requireAuth,
+  async (
+    req: AuthenticatedRequest,
+    res: Response
+  ) => {
+    try {
+      const companyId =
+        req.user?.companyId
+
+      const dispatchId =
+        Number(req.params.id)
+
+      if (
+        !companyId ||
+        !Number.isInteger(dispatchId)
+      ) {
+        return res.status(400).json({
+          ok: false,
+          message: 'Invalid dispatch'
+        })
+      }
+
+      const dispatch =
+        await prisma.dispatch.findFirst({
+          where: {
+            id: dispatchId,
+            companyId
+          },
+          include: {
+            asset: true,
+            statusEvents: {
+              orderBy: {
+                createdAt: 'desc'
+              }
+            }
+          }
+        })
+
+      if (!dispatch) {
+        return res.status(404).json({
+          ok: false,
+          message: 'Dispatch not found'
+        })
+      }
+
+      return res.json({
+        ok: true,
+        dispatch
+      })
+    } catch (error) {
+      console.error(
+        'Get dispatch error:',
+        error
+      )
+
+      return res.status(500).json({
+        ok: false,
+        message:
+          'Unable to load dispatch'
+      })
+    }
+  }
+)
+
+app.post(
+  '/api/dispatches',
+  requireAuth,
+  async (
+    req: AuthenticatedRequest,
+    res: Response
+  ) => {
+    try {
+      const companyId =
+        req.user?.companyId
+
+      if (!companyId) {
+        return res.status(401).json({
+          ok: false,
+          message: 'Invalid session'
+        })
+      }
+
+      const loadNumber =
+        optionalString(
+          req.body?.loadNumber
+        )
+
+      const pickupName =
+        optionalString(
+          req.body?.pickupName
+        )
+
+      const pickupAddress =
+        optionalString(
+          req.body?.pickupAddress
+        )
+
+      const deliveryName =
+        optionalString(
+          req.body?.deliveryName
+        )
+
+      const deliveryAddress =
+        optionalString(
+          req.body?.deliveryAddress
+        )
+
+      if (
+        !loadNumber ||
+        !pickupName ||
+        !pickupAddress ||
+        !deliveryName ||
+        !deliveryAddress
+      ) {
+        return res.status(400).json({
+          ok: false,
+          message:
+            'Load number, pickup and delivery are required'
+        })
+      }
+
+      let assetId: number | null = null
+
+      if (
+        req.body?.assetId !== null &&
+        req.body?.assetId !== undefined &&
+        req.body?.assetId !== ''
+      ) {
+        const requestedAssetId =
+          Number(req.body.assetId)
+
+        if (
+          !Number.isInteger(
+            requestedAssetId
+          )
+        ) {
+          return res.status(400).json({
+            ok: false,
+            message: 'Invalid asset'
+          })
+        }
+
+        const asset =
+          await prisma.asset.findFirst({
+            where: {
+              id: requestedAssetId,
+              companyId,
+              active: true
+            }
+          })
+
+        if (!asset) {
+          return res.status(404).json({
+            ok: false,
+            message: 'Asset not found'
+          })
+        }
+
+        const conflicting =
+          await prisma.dispatch.findFirst({
+            where: {
+              companyId,
+              assetId: asset.id,
+              status: {
+                notIn: [
+                  'DELIVERED',
+                  'CANCELLED'
+                ]
+              }
+            },
+            select: {
+              id: true,
+              loadNumber: true
+            }
+          })
+
+        if (conflicting) {
+          return res.status(409).json({
+            ok: false,
+            message:
+              `Asset is already assigned to ${conflicting.loadNumber}`
+          })
+        }
+
+        assetId = asset.id
+      }
+
+      const requestedStatus =
+        isDispatchStatus(
+          req.body?.status
+        )
+          ? req.body.status
+          : 'ASSIGNED'
+
+      const temperatureSetpointC =
+        optionalNumber(
+          req.body?.temperatureSetpointC
+        )
+
+      const temperatureMinC =
+        optionalNumber(
+          req.body?.temperatureMinC
+        )
+
+      const temperatureMaxC =
+        optionalNumber(
+          req.body?.temperatureMaxC
+        )
+
+      if (
+        temperatureMinC !== null &&
+        temperatureMaxC !== null &&
+        temperatureMinC >=
+          temperatureMaxC
+      ) {
+        return res.status(400).json({
+          ok: false,
+          message:
+            'Minimum temperature must be lower than maximum temperature'
+        })
+      }
+
+      const dispatch =
+        await prisma.dispatch.create({
+          data: {
+            companyId,
+            assetId,
+            loadNumber,
+            status: requestedStatus,
+
+            pickupName,
+            pickupAddress,
+            pickupLatitude:
+              optionalNumber(
+                req.body?.pickupLatitude
+              ),
+            pickupLongitude:
+              optionalNumber(
+                req.body?.pickupLongitude
+              ),
+            pickupScheduledAt:
+              optionalDate(
+                req.body?.pickupScheduledAt
+              ),
+
+            deliveryName,
+            deliveryAddress,
+            deliveryLatitude:
+              optionalNumber(
+                req.body?.deliveryLatitude
+              ),
+            deliveryLongitude:
+              optionalNumber(
+                req.body?.deliveryLongitude
+              ),
+            deliveryScheduledAt:
+              optionalDate(
+                req.body?.deliveryScheduledAt
+              ),
+
+            commodity:
+              optionalString(
+                req.body?.commodity
+              ),
+            referenceNumber:
+              optionalString(
+                req.body?.referenceNumber
+              ),
+
+            temperatureSetpointC,
+            temperatureMinC,
+            temperatureMaxC,
+
+            notes:
+              optionalString(
+                req.body?.notes
+              ),
+
+            completedAt:
+              requestedStatus === 'DELIVERED' ||
+              requestedStatus === 'CANCELLED'
+                ? new Date()
+                : null,
+
+            statusEvents: {
+              create: {
+                status:
+                  requestedStatus,
+                notes:
+                  'Dispatch created'
+              }
+            }
+          },
+          include: {
+            asset: true,
+            statusEvents: {
+              orderBy: {
+                createdAt: 'desc'
+              }
+            }
+          }
+        })
+
+      return res.status(201).json({
+        ok: true,
+        dispatch
+      })
+    } catch (error: any) {
+      console.error(
+        'Create dispatch error:',
+        error
+      )
+
+      if (
+        error?.code === 'P2002'
+      ) {
+        return res.status(409).json({
+          ok: false,
+          message:
+            'That load number already exists'
+        })
+      }
+
+      return res.status(500).json({
+        ok: false,
+        message:
+          'Unable to create dispatch'
+      })
+    }
+  }
+)
+
+app.patch(
+  '/api/dispatches/:id',
+  requireAuth,
+  async (
+    req: AuthenticatedRequest,
+    res: Response
+  ) => {
+    try {
+      const companyId =
+        req.user?.companyId
+
+      const dispatchId =
+        Number(req.params.id)
+
+      if (
+        !companyId ||
+        !Number.isInteger(dispatchId)
+      ) {
+        return res.status(400).json({
+          ok: false,
+          message: 'Invalid dispatch'
+        })
+      }
+
+      const existing =
+        await prisma.dispatch.findFirst({
+          where: {
+            id: dispatchId,
+            companyId
+          }
+        })
+
+      if (!existing) {
+        return res.status(404).json({
+          ok: false,
+          message: 'Dispatch not found'
+        })
+      }
+
+      const data: Record<string, any> = {}
+
+      if (
+        req.body?.assetId !== undefined
+      ) {
+        if (
+          req.body.assetId === null ||
+          req.body.assetId === ''
+        ) {
+          data.assetId = null
+        } else {
+          const requestedAssetId =
+            Number(req.body.assetId)
+
+          if (
+            !Number.isInteger(
+              requestedAssetId
+            )
+          ) {
+            return res.status(400).json({
+              ok: false,
+              message: 'Invalid asset'
+            })
+          }
+
+          const asset =
+            await prisma.asset.findFirst({
+              where: {
+                id: requestedAssetId,
+                companyId,
+                active: true
+              }
+            })
+
+          if (!asset) {
+            return res.status(404).json({
+              ok: false,
+              message: 'Asset not found'
+            })
+          }
+
+          const conflicting =
+            await prisma.dispatch.findFirst({
+              where: {
+                companyId,
+                assetId: asset.id,
+                id: {
+                  not: dispatchId
+                },
+                status: {
+                  notIn: [
+                    'DELIVERED',
+                    'CANCELLED'
+                  ]
+                }
+              }
+            })
+
+          if (conflicting) {
+            return res.status(409).json({
+              ok: false,
+              message:
+                `Asset is already assigned to ${conflicting.loadNumber}`
+            })
+          }
+
+          data.assetId = asset.id
+        }
+      }
+
+      const stringFields = [
+        'loadNumber',
+        'pickupName',
+        'pickupAddress',
+        'deliveryName',
+        'deliveryAddress',
+        'commodity',
+        'referenceNumber',
+        'notes'
+      ] as const
+
+      for (const field of stringFields) {
+        if (
+          req.body?.[field] !== undefined
+        ) {
+          data[field] =
+            optionalString(
+              req.body[field]
+            )
+        }
+      }
+
+      const numberFields = [
+        'pickupLatitude',
+        'pickupLongitude',
+        'deliveryLatitude',
+        'deliveryLongitude',
+        'temperatureSetpointC',
+        'temperatureMinC',
+        'temperatureMaxC'
+      ] as const
+
+      for (const field of numberFields) {
+        if (
+          req.body?.[field] !== undefined
+        ) {
+          data[field] =
+            optionalNumber(
+              req.body[field]
+            )
+        }
+      }
+
+      if (
+        req.body?.pickupScheduledAt !==
+        undefined
+      ) {
+        data.pickupScheduledAt =
+          optionalDate(
+            req.body.pickupScheduledAt
+          )
+      }
+
+      if (
+        req.body?.deliveryScheduledAt !==
+        undefined
+      ) {
+        data.deliveryScheduledAt =
+          optionalDate(
+            req.body.deliveryScheduledAt
+          )
+      }
+
+      const updated =
+        await prisma.dispatch.update({
+          where: {
+            id: existing.id
+          },
+          data,
+          include: {
+            asset: true,
+            statusEvents: {
+              orderBy: {
+                createdAt: 'desc'
+              }
+            }
+          }
+        })
+
+      return res.json({
+        ok: true,
+        dispatch: updated
+      })
+    } catch (error: any) {
+      console.error(
+        'Update dispatch error:',
+        error
+      )
+
+      if (
+        error?.code === 'P2002'
+      ) {
+        return res.status(409).json({
+          ok: false,
+          message:
+            'That load number already exists'
+        })
+      }
+
+      return res.status(500).json({
+        ok: false,
+        message:
+          'Unable to update dispatch'
+      })
+    }
+  }
+)
+
+app.post(
+  '/api/dispatches/:id/status',
+  requireAuth,
+  async (
+    req: AuthenticatedRequest,
+    res: Response
+  ) => {
+    try {
+      const companyId =
+        req.user?.companyId
+
+      const dispatchId =
+        Number(req.params.id)
+
+      const status =
+        req.body?.status
+
+      if (
+        !companyId ||
+        !Number.isInteger(dispatchId)
+      ) {
+        return res.status(400).json({
+          ok: false,
+          message: 'Invalid dispatch'
+        })
+      }
+
+      if (!isDispatchStatus(status)) {
+        return res.status(400).json({
+          ok: false,
+          message:
+            'Invalid dispatch status'
+        })
+      }
+
+      const existing =
+        await prisma.dispatch.findFirst({
+          where: {
+            id: dispatchId,
+            companyId
+          }
+        })
+
+      if (!existing) {
+        return res.status(404).json({
+          ok: false,
+          message: 'Dispatch not found'
+        })
+      }
+
+      const updated =
+        await prisma.dispatch.update({
+          where: {
+            id: existing.id
+          },
+          data: {
+            status,
+            completedAt:
+              status === 'DELIVERED' ||
+              status === 'CANCELLED'
+                ? new Date()
+                : null,
+            statusEvents: {
+              create: {
+                status,
+                notes:
+                  optionalString(
+                    req.body?.notes
+                  )
+              }
+            }
+          },
+          include: {
+            asset: true,
+            statusEvents: {
+              orderBy: {
+                createdAt: 'desc'
+              }
+            }
+          }
+        })
+
+      return res.json({
+        ok: true,
+        dispatch: updated
+      })
+    } catch (error) {
+      console.error(
+        'Dispatch status error:',
+        error
+      )
+
+      return res.status(500).json({
+        ok: false,
+        message:
+          'Unable to update dispatch status'
+      })
+    }
+  }
+)
+
+
 // =====================================================
 // RECIBIR TELEMETRIA
 // =====================================================
@@ -1048,7 +1840,7 @@ app.post(
 )
 
 // =====================================================
-// ULTIMA TELEMETRIA POR ASSET
+// ULTIMA TELEMETRIA
 // =====================================================
 
 app.get(
@@ -1069,66 +1861,50 @@ app.get(
         })
       }
 
-      const requestedDeviceId =
+      const deviceId =
         typeof req.query.deviceId === 'string'
           ? req.query.deviceId.trim()
           : ''
 
-      const companyAssets =
-        await prisma.asset.findMany({
+      if (!deviceId) {
+        return res.status(400).json({
+          ok: false,
+          message: 'deviceId is required'
+        })
+      }
+
+      // The requested asset MUST belong to the
+      // authenticated company. This also prevents
+      // telemetry from one trailer being returned
+      // for another trailer.
+      const asset =
+        await prisma.asset.findFirst({
           where: {
             companyId,
+            deviceId,
             active: true
           },
           select: {
             id: true,
-            deviceId: true,
-            name: true
+            deviceId: true
           }
         })
 
-      if (companyAssets.length === 0) {
-        return res.status(404).json({
-          ok: false,
-          message: 'No assets assigned to this company'
-        })
-      }
-
-      // If deviceId is present, it MUST belong to the authenticated company.
-      // Keeping the query optional preserves compatibility while the new
-      // frontend and backend are deployed one after the other.
-      const requestedAsset =
-        requestedDeviceId
-          ? companyAssets.find(
-              (asset) =>
-                asset.deviceId === requestedDeviceId
-            )
-          : null
-
-      if (
-        requestedDeviceId &&
-        !requestedAsset
-      ) {
+      if (!asset) {
         return res.status(404).json({
           ok: false,
           message: 'Asset not found'
         })
       }
 
-      const targetAssetIds =
-        requestedAsset
-          ? [requestedAsset.id]
-          : companyAssets.map(
-              (asset) => asset.id
-            )
+      // ---------------------------------
+      // LATEST LIVE TELEMETRY FOR THIS ASSET
+      // ---------------------------------
 
-      // Current state must never come from SD/backfill history.
       const latestTelemetry =
         await prisma.telemetry.findFirst({
           where: {
-            assetId: {
-              in: targetAssetIds
-            },
+            assetId: asset.id,
             isBackfill: false
           },
           orderBy: {
@@ -1139,73 +1915,70 @@ app.get(
       if (!latestTelemetry) {
         return res.status(404).json({
           ok: false,
-          message: requestedDeviceId
-            ? 'No telemetry available for this asset'
-            : 'No telemetry available'
+          message:
+            'No telemetry available for this asset'
         })
       }
 
-      // Important in a multi-asset account:
-      // last-known GPS must come from the SAME asset as latestTelemetry.
-      const latestAssetId =
-        latestTelemetry.assetId
+      // ---------------------------------
+      // LAST VALID GPS LOCATION FOR THIS ASSET
+      // ---------------------------------
 
       const latestLocation =
-        latestAssetId == null
-          ? null
-          : await prisma.telemetry.findFirst({
-              where: {
-                assetId: latestAssetId,
-                isBackfill: false,
-                latitude: {
-                  not: null
-                },
-                longitude: {
-                  not: null
-                },
-                recordedAt: {
-                  not: null
-                }
-              },
-              orderBy: [
-                {
-                  recordedAt: 'desc'
-                },
-                {
-                  receivedAt: 'desc'
-                }
-              ]
-            })
+        await prisma.telemetry.findFirst({
+          where: {
+            assetId: asset.id,
+            isBackfill: false,
+            latitude: {
+              not: null
+            },
+            longitude: {
+              not: null
+            },
+            recordedAt: {
+              not: null
+            }
+          },
+          orderBy: [
+            {
+              recordedAt: 'desc'
+            },
+            {
+              receivedAt: 'desc'
+            }
+          ]
+        })
 
       const hasCurrentGps =
         latestTelemetry.latitude !== null &&
         latestTelemetry.longitude !== null &&
         latestTelemetry.recordedAt !== null
 
-      const responseAsset =
-        companyAssets.find(
-          (asset) =>
-            asset.id === latestTelemetry.assetId
-        ) ?? requestedAsset
-
       return res.json({
         ok: true,
-        asset: responseAsset ?? null,
         telemetry: {
           ...latestTelemetry,
+
+          // Always identify the requested device.
+          deviceId: asset.deviceId,
+
           latitude:
             latestTelemetry.latitude ??
             latestLocation?.latitude ??
             null,
+
           longitude:
             latestTelemetry.longitude ??
             latestLocation?.longitude ??
             null,
+
           altitude:
             latestTelemetry.altitude ??
             latestLocation?.altitude ??
             null,
+
           hasCurrentGps,
+
           locationReceivedAt:
             latestLocation?.recordedAt ??
             null
@@ -1224,6 +1997,7 @@ app.get(
     }
   }
 )
+
 
 // =====================================================
 // HISTORIAL GPS / RECORRIDOS

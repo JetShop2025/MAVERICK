@@ -20,7 +20,7 @@ import {
 } from 'react'
 
 import './App.css'
-import maverickLogo from './assets/maverick-logo.jpeg'
+import maverickLogo from './assets/maverick-logo.svg'
 import Login from './Login'
 
 type ViewName =
@@ -44,6 +44,47 @@ type MovementStatus =
   | 'parked'
   | 'acquiring'
   | 'offline'
+
+
+type DispatchStatus =
+  | 'ASSIGNED'
+  | 'EN_ROUTE_TO_PICKUP'
+  | 'AT_PICKUP'
+  | 'LOADED'
+  | 'IN_TRANSIT'
+  | 'AT_DELIVERY'
+  | 'DELIVERED'
+  | 'CANCELLED'
+
+type DispatchStatusEvent = {
+  id: number
+  status: DispatchStatus
+  notes: string | null
+  createdAt: string
+}
+
+type DispatchRecord = {
+  id: number
+  loadNumber: string
+  status: DispatchStatus
+  pickupName: string
+  pickupAddress: string
+  pickupScheduledAt: string | null
+  deliveryName: string
+  deliveryAddress: string
+  deliveryScheduledAt: string | null
+  commodity: string | null
+  referenceNumber: string | null
+  temperatureSetpointC: number | null
+  temperatureMinC: number | null
+  temperatureMaxC: number | null
+  notes: string | null
+  completedAt: string | null
+  createdAt: string
+  updatedAt: string
+  asset: any | null
+  statusEvents: DispatchStatusEvent[]
+}
 
 type RoutePoint = {
   latitude: number
@@ -102,6 +143,17 @@ const API_BASE =
   import.meta.env.DEV
     ? 'http://localhost:3000'
     : 'https://maverick-1z64.onrender.com'
+
+const celsiusToFahrenheit = (
+  value: number
+) =>
+  (value * 9) / 5 + 32
+
+const fahrenheitToCelsius = (
+  value: number
+) =>
+  ((value - 32) * 5) / 9
+
 // Keep Leaflet's default marker assets available for compatibility.
 // Maverick uses a custom status-aware trailer icon below.
 void markerIcon2x
@@ -109,28 +161,35 @@ void markerIcon
 void markerShadow
 
 function createTrailerIcon(
-  movementStatus: MovementStatus
+  movementStatus: MovementStatus,
+  selected = false,
+  hasDispatch = false
 ) {
   return L.divIcon({
     className: 'mav-trailer-marker-wrapper',
     html: `
-      <div class="mav-trailer-marker ${movementStatus}">
+      <div class="mav-trailer-marker ${movementStatus}${selected ? ' selected' : ''}${hasDispatch ? ' has-dispatch' : ''}">
         <span class="mav-trailer-marker-pulse"></span>
         <span class="mav-trailer-marker-icon">▰</span>
+        ${hasDispatch ? '<span class="mav-trailer-load-badge">L</span>' : ''}
       </div>
     `,
-    iconSize: [46, 46],
-    iconAnchor: [23, 23],
-    popupAnchor: [0, -26]
+    iconSize: [50, 50],
+    iconAnchor: [25, 25],
+    popupAnchor: [0, -28]
   })
 }
 
 function MapController({
   latitude,
-  longitude
+  longitude,
+  fleetPoints,
+  fleetBoundsKey
 }: {
   latitude: number | null
   longitude: number | null
+  fleetPoints: [number, number][]
+  fleetBoundsKey: string
 }) {
   const map = useMap()
 
@@ -143,10 +202,30 @@ function MapController({
         [latitude, longitude],
         13
       )
+      return
+    }
+
+    if (fleetPoints.length === 1) {
+      map.setView(
+        fleetPoints[0],
+        10
+      )
+      return
+    }
+
+    if (fleetPoints.length > 1) {
+      map.fitBounds(
+        L.latLngBounds(fleetPoints),
+        {
+          padding: [70, 70],
+          maxZoom: 9
+        }
+      )
     }
   }, [
     latitude,
     longitude,
+    fleetBoundsKey,
     map
   ])
 
@@ -349,6 +428,106 @@ function App() {
     setAssets
   ] = useState<any[]>([])
 
+  const [
+    fleetTelemetry,
+    setFleetTelemetry
+  ] = useState<Record<string, any | null>>({})
+
+
+
+  // =====================================================
+  // DISPATCH / OPERATIONS STATE
+  // =====================================================
+
+  const [
+    dispatches,
+    setDispatches
+  ] = useState<DispatchRecord[]>([])
+
+  const [
+    dispatchLoading,
+    setDispatchLoading
+  ] = useState(false)
+
+  const [
+    dispatchError,
+    setDispatchError
+  ] = useState('')
+
+  const [
+    dispatchSearch,
+    setDispatchSearch
+  ] = useState('')
+
+  const [
+    dispatchStatusFilter,
+    setDispatchStatusFilter
+  ] = useState<'all' | DispatchStatus>('all')
+
+  const [
+    newDispatchOpen,
+    setNewDispatchOpen
+  ] = useState(false)
+
+  const [
+    newDispatchSaving,
+    setNewDispatchSaving
+  ] = useState(false)
+
+  const [
+    newDispatchForm,
+    setNewDispatchForm
+  ] = useState({
+    loadNumber: '',
+    assetId: '',
+    pickupName: '',
+    pickupAddress: '',
+    pickupScheduledAt: '',
+    deliveryName: '',
+    deliveryAddress: '',
+    deliveryScheduledAt: '',
+    commodity: '',
+    referenceNumber: '',
+    temperatureSetpointF: '',
+    temperatureMinF: '',
+    temperatureMaxF: '',
+    notes: ''
+  })
+
+  const [
+    editDispatchOpen,
+    setEditDispatchOpen
+  ] = useState(false)
+
+  const [
+    editDispatchSaving,
+    setEditDispatchSaving
+  ] = useState(false)
+
+  const [
+    editingDispatchId,
+    setEditingDispatchId
+  ] = useState<number | null>(null)
+
+  const [
+    editDispatchForm,
+    setEditDispatchForm
+  ] = useState({
+    loadNumber: '',
+    assetId: '',
+    pickupName: '',
+    pickupAddress: '',
+    pickupScheduledAt: '',
+    deliveryName: '',
+    deliveryAddress: '',
+    deliveryScheduledAt: '',
+    commodity: '',
+    referenceNumber: '',
+    temperatureSetpointF: '',
+    temperatureMinF: '',
+    temperatureMaxF: '',
+    notes: ''
+  })
 
   const [
     routePoints,
@@ -425,6 +604,36 @@ function App() {
   ] = useState('')
 
   const [
+    reportRange,
+    setReportRange
+  ] = useState<HistoryRange>('today')
+
+  const [
+    reportCustomDate,
+    setReportCustomDate
+  ] = useState('')
+
+  const [
+    reportPoints,
+    setReportPoints
+  ] = useState<HistoryPoint[]>([])
+
+  const [
+    reportLoading,
+    setReportLoading
+  ] = useState(false)
+
+  const [
+    reportError,
+    setReportError
+  ] = useState('')
+
+  const [
+    reportGeneratedAt,
+    setReportGeneratedAt
+  ] = useState<string | null>(null)
+
+  const [
     selectedDeviceId,
     setSelectedDeviceId
   ] = useState('')
@@ -437,6 +646,11 @@ function App() {
   const [
     searchTerm,
     setSearchTerm
+  ] = useState('')
+
+  const [
+    assetSearchTerm,
+    setAssetSearchTerm
   ] = useState('')
 
   const [
@@ -455,11 +669,6 @@ function App() {
     filtersOpen,
     setFiltersOpen
   ] = useState(true)
-
-  const [
-  bottomDockOpen,
-  setBottomDockOpen
-] = useState(false)
 
   const [
     detailsOpen,
@@ -789,21 +998,777 @@ function App() {
   ])
 
   // =====================================================
+  // FLEET TELEMETRY
+  // =====================================================
+  // Fleet view needs the latest reading for every asset,
+  // not only the currently selected trailer.
+
+  const loadFleetTelemetry =
+    useCallback(
+      async () => {
+        const token =
+          localStorage.getItem(
+            'maverick_token'
+          )
+
+        if (!token || assets.length === 0) {
+          setFleetTelemetry({})
+          return
+        }
+
+        try {
+          const entries =
+            await Promise.all(
+              assets.map(async (asset) => {
+                const res = await fetch(
+                  `${API_BASE}/api/telemetry/latest?deviceId=${encodeURIComponent(asset.deviceId)}`,
+                  {
+                    headers: {
+                      Authorization:
+                        `Bearer ${token}`
+                    }
+                  }
+                )
+
+                if (res.status === 401) {
+                  throw new Error('AUTH_EXPIRED')
+                }
+
+                const data =
+                  await res.json()
+
+                return [
+                  asset.deviceId,
+                  res.ok && data.ok
+                    ? data.telemetry
+                    : null
+                ] as const
+              })
+            )
+
+          setFleetTelemetry(
+            Object.fromEntries(entries)
+          )
+        } catch (error) {
+          if (
+            error instanceof Error &&
+            error.message === 'AUTH_EXPIRED'
+          ) {
+            handleLogout()
+            return
+          }
+
+          console.error(
+            'Unable to load fleet telemetry:',
+            error
+          )
+        }
+      },
+      [assets]
+    )
+
+  useEffect(() => {
+    if (!isLoggedIn || assets.length === 0) {
+      return
+    }
+
+    loadFleetTelemetry()
+
+    const interval =
+      setInterval(
+        loadFleetTelemetry,
+        5000
+      )
+
+    return () =>
+      clearInterval(interval)
+  }, [
+    isLoggedIn,
+    assets.length,
+    loadFleetTelemetry
+  ])
+
+
+  // =====================================================
+  // DISPATCH / OPERATIONS
+  // =====================================================
+
+  const dispatchStatusLabel = (
+    status: DispatchStatus
+  ) =>
+    status === 'ASSIGNED'
+      ? 'Assigned'
+      : status === 'EN_ROUTE_TO_PICKUP'
+        ? 'En Route to Pickup'
+        : status === 'AT_PICKUP'
+          ? 'At Pickup'
+          : status === 'LOADED'
+            ? 'Loaded'
+            : status === 'IN_TRANSIT'
+              ? 'In Transit'
+              : status === 'AT_DELIVERY'
+                ? 'At Delivery'
+                : status === 'DELIVERED'
+                  ? 'Delivered'
+                  : 'Cancelled'
+
+  const dispatchStatusOptions:
+    DispatchStatus[] = [
+      'ASSIGNED',
+      'EN_ROUTE_TO_PICKUP',
+      'AT_PICKUP',
+      'LOADED',
+      'IN_TRANSIT',
+      'AT_DELIVERY',
+      'DELIVERED',
+      'CANCELLED'
+    ]
+
+  const loadDispatches =
+    useCallback(
+      async () => {
+        const token =
+          localStorage.getItem(
+            'maverick_token'
+          )
+
+        if (!token) {
+          return
+        }
+
+        setDispatchLoading(true)
+        setDispatchError('')
+
+        try {
+          const res =
+            await fetch(
+              `${API_BASE}/api/dispatches`,
+              {
+                headers: {
+                  Authorization:
+                    `Bearer ${token}`
+                }
+              }
+            )
+
+          const data =
+            await res.json()
+
+          if (res.status === 401) {
+            handleLogout()
+            return
+          }
+
+          if (!res.ok || !data.ok) {
+            setDispatchError(
+              data.message ||
+              'Unable to load dispatches.'
+            )
+            return
+          }
+
+          setDispatches(
+            data.dispatches || []
+          )
+        } catch {
+          setDispatchError(
+            'Unable to connect to Maverick.'
+          )
+        } finally {
+          setDispatchLoading(false)
+        }
+      },
+      []
+    )
+
+  useEffect(() => {
+    if (!isLoggedIn) {
+      return
+    }
+
+    loadDispatches()
+
+    const interval =
+      setInterval(
+        loadDispatches,
+        15000
+      )
+
+    return () =>
+      clearInterval(interval)
+  }, [
+    isLoggedIn,
+    loadDispatches
+  ])
+
+  const resetNewDispatchForm = () => {
+    setNewDispatchForm({
+      loadNumber: '',
+      assetId: '',
+      pickupName: '',
+      pickupAddress: '',
+      pickupScheduledAt: '',
+      deliveryName: '',
+      deliveryAddress: '',
+      deliveryScheduledAt: '',
+      commodity: '',
+      referenceNumber: '',
+      temperatureSetpointF: '',
+      temperatureMinF: '',
+      temperatureMaxF: '',
+      notes: ''
+    })
+  }
+
+  const createDispatch =
+    async () => {
+      const token =
+        localStorage.getItem(
+          'maverick_token'
+        )
+
+      if (!token) {
+        return
+      }
+
+      const toCelsius = (
+        value: string
+      ) => {
+        if (!value.trim()) {
+          return null
+        }
+
+        const fahrenheit =
+          Number(value)
+
+        return Number.isFinite(fahrenheit)
+          ? (fahrenheit - 32) * 5 / 9
+          : null
+      }
+
+      if (
+        !newDispatchForm.loadNumber.trim() ||
+        !newDispatchForm.pickupName.trim() ||
+        !newDispatchForm.pickupAddress.trim() ||
+        !newDispatchForm.deliveryName.trim() ||
+        !newDispatchForm.deliveryAddress.trim()
+      ) {
+        setDispatchError(
+          'Load number, pickup and delivery are required.'
+        )
+        return
+      }
+
+      setNewDispatchSaving(true)
+      setDispatchError('')
+
+      try {
+        const res =
+          await fetch(
+            `${API_BASE}/api/dispatches`,
+            {
+              method: 'POST',
+              headers: {
+                'Content-Type':
+                  'application/json',
+                Authorization:
+                  `Bearer ${token}`
+              },
+              body: JSON.stringify({
+                loadNumber:
+                  newDispatchForm.loadNumber,
+                assetId:
+                  newDispatchForm.assetId
+                    ? Number(
+                        newDispatchForm.assetId
+                      )
+                    : null,
+                pickupName:
+                  newDispatchForm.pickupName,
+                pickupAddress:
+                  newDispatchForm.pickupAddress,
+                pickupScheduledAt:
+                  newDispatchForm.pickupScheduledAt
+                    ? new Date(
+                        newDispatchForm.pickupScheduledAt
+                      ).toISOString()
+                    : null,
+                deliveryName:
+                  newDispatchForm.deliveryName,
+                deliveryAddress:
+                  newDispatchForm.deliveryAddress,
+                deliveryScheduledAt:
+                  newDispatchForm.deliveryScheduledAt
+                    ? new Date(
+                        newDispatchForm.deliveryScheduledAt
+                      ).toISOString()
+                    : null,
+                commodity:
+                  newDispatchForm.commodity,
+                referenceNumber:
+                  newDispatchForm.referenceNumber,
+                temperatureSetpointC:
+                  toCelsius(
+                    newDispatchForm.temperatureSetpointF
+                  ),
+                temperatureMinC:
+                  toCelsius(
+                    newDispatchForm.temperatureMinF
+                  ),
+                temperatureMaxC:
+                  toCelsius(
+                    newDispatchForm.temperatureMaxF
+                  ),
+                notes:
+                  newDispatchForm.notes
+              })
+            }
+          )
+
+        const data =
+          await res.json()
+
+        if (!res.ok || !data.ok) {
+          setDispatchError(
+            data.message ||
+            'Unable to create dispatch.'
+          )
+          return
+        }
+
+        setNewDispatchOpen(false)
+        resetNewDispatchForm()
+        await loadDispatches()
+      } catch {
+        setDispatchError(
+          'Unable to connect to Maverick.'
+        )
+      } finally {
+        setNewDispatchSaving(false)
+      }
+    }
+
+  const toDateTimeLocalValue = (
+    value?: string | null
+  ) => {
+    if (!value) {
+      return ''
+    }
+
+    const date =
+      new Date(value)
+
+    if (
+      Number.isNaN(
+        date.getTime()
+      )
+    ) {
+      return ''
+    }
+
+    const pad = (
+      number: number
+    ) =>
+      String(number).padStart(
+        2,
+        '0'
+      )
+
+    return (
+      `${date.getFullYear()}-` +
+      `${pad(
+        date.getMonth() + 1
+      )}-` +
+      `${pad(
+        date.getDate()
+      )}T` +
+      `${pad(
+        date.getHours()
+      )}:` +
+      `${pad(
+        date.getMinutes()
+      )}`
+    )
+  }
+
+  const openEditDispatch = (
+    dispatch: DispatchRecord
+  ) => {
+    setDispatchError('')
+    setEditingDispatchId(
+      dispatch.id
+    )
+
+    setEditDispatchForm({
+      loadNumber:
+        dispatch.loadNumber || '',
+      assetId:
+        dispatch.asset?.id != null
+          ? String(
+              dispatch.asset.id
+            )
+          : '',
+      pickupName:
+        dispatch.pickupName || '',
+      pickupAddress:
+        dispatch.pickupAddress || '',
+      pickupScheduledAt:
+        toDateTimeLocalValue(
+          dispatch.pickupScheduledAt
+        ),
+      deliveryName:
+        dispatch.deliveryName || '',
+      deliveryAddress:
+        dispatch.deliveryAddress || '',
+      deliveryScheduledAt:
+        toDateTimeLocalValue(
+          dispatch.deliveryScheduledAt
+        ),
+      commodity:
+        dispatch.commodity || '',
+      referenceNumber:
+        dispatch.referenceNumber || '',
+      temperatureSetpointF:
+        dispatch.temperatureSetpointC != null
+          ? celsiusToFahrenheit(
+              Number(
+                dispatch.temperatureSetpointC
+              )
+            ).toFixed(1)
+          : '',
+      temperatureMinF:
+        dispatch.temperatureMinC != null
+          ? celsiusToFahrenheit(
+              Number(
+                dispatch.temperatureMinC
+              )
+            ).toFixed(1)
+          : '',
+      temperatureMaxF:
+        dispatch.temperatureMaxC != null
+          ? celsiusToFahrenheit(
+              Number(
+                dispatch.temperatureMaxC
+              )
+            ).toFixed(1)
+          : '',
+      notes:
+        dispatch.notes || ''
+    })
+
+    setEditDispatchOpen(true)
+  }
+
+  const saveEditedDispatch =
+    async () => {
+      const token =
+        localStorage.getItem(
+          'maverick_token'
+        )
+
+      if (
+        !token ||
+        editingDispatchId == null
+      ) {
+        return
+      }
+
+      const toCelsius = (
+        value: string
+      ) => {
+        if (!value.trim()) {
+          return null
+        }
+
+        const fahrenheit =
+          Number(value)
+
+        return Number.isFinite(
+          fahrenheit
+        )
+          ? (
+              fahrenheit - 32
+            ) * 5 / 9
+          : null
+      }
+
+      if (
+        !editDispatchForm.loadNumber.trim() ||
+        !editDispatchForm.pickupName.trim() ||
+        !editDispatchForm.pickupAddress.trim() ||
+        !editDispatchForm.deliveryName.trim() ||
+        !editDispatchForm.deliveryAddress.trim()
+      ) {
+        setDispatchError(
+          'Load number, pickup and delivery are required.'
+        )
+        return
+      }
+
+      const minF =
+        editDispatchForm
+          .temperatureMinF.trim()
+          ? Number(
+              editDispatchForm.temperatureMinF
+            )
+          : null
+
+      const maxF =
+        editDispatchForm
+          .temperatureMaxF.trim()
+          ? Number(
+              editDispatchForm.temperatureMaxF
+            )
+          : null
+
+      if (
+        minF != null &&
+        maxF != null &&
+        (
+          !Number.isFinite(minF) ||
+          !Number.isFinite(maxF) ||
+          minF >= maxF
+        )
+      ) {
+        setDispatchError(
+          'Minimum temperature must be lower than maximum temperature.'
+        )
+        return
+      }
+
+      setEditDispatchSaving(true)
+      setDispatchError('')
+
+      try {
+        const res =
+          await fetch(
+            `${API_BASE}/api/dispatches/${editingDispatchId}`,
+            {
+              method: 'PATCH',
+              headers: {
+                'Content-Type':
+                  'application/json',
+                Authorization:
+                  `Bearer ${token}`
+              },
+              body: JSON.stringify({
+                loadNumber:
+                  editDispatchForm.loadNumber,
+                assetId:
+                  editDispatchForm.assetId
+                    ? Number(
+                        editDispatchForm.assetId
+                      )
+                    : null,
+                pickupName:
+                  editDispatchForm.pickupName,
+                pickupAddress:
+                  editDispatchForm.pickupAddress,
+                pickupScheduledAt:
+                  editDispatchForm.pickupScheduledAt
+                    ? new Date(
+                        editDispatchForm.pickupScheduledAt
+                      ).toISOString()
+                    : null,
+                deliveryName:
+                  editDispatchForm.deliveryName,
+                deliveryAddress:
+                  editDispatchForm.deliveryAddress,
+                deliveryScheduledAt:
+                  editDispatchForm.deliveryScheduledAt
+                    ? new Date(
+                        editDispatchForm.deliveryScheduledAt
+                      ).toISOString()
+                    : null,
+                commodity:
+                  editDispatchForm.commodity,
+                referenceNumber:
+                  editDispatchForm.referenceNumber,
+                temperatureSetpointC:
+                  toCelsius(
+                    editDispatchForm.temperatureSetpointF
+                  ),
+                temperatureMinC:
+                  toCelsius(
+                    editDispatchForm.temperatureMinF
+                  ),
+                temperatureMaxC:
+                  toCelsius(
+                    editDispatchForm.temperatureMaxF
+                  ),
+                notes:
+                  editDispatchForm.notes
+              })
+            }
+          )
+
+        const data =
+          await res.json()
+
+        if (!res.ok || !data.ok) {
+          setDispatchError(
+            data.message ||
+            'Unable to update dispatch.'
+          )
+          return
+        }
+
+        setEditDispatchOpen(false)
+        setEditingDispatchId(null)
+
+        await loadDispatches()
+      } catch {
+        setDispatchError(
+          'Unable to connect to Maverick.'
+        )
+      } finally {
+        setEditDispatchSaving(false)
+      }
+    }
+
+  const updateDispatchStatus =
+    async (
+      dispatchId: number,
+      status: DispatchStatus
+    ) => {
+      const token =
+        localStorage.getItem(
+          'maverick_token'
+        )
+
+      if (!token) {
+        return
+      }
+
+      setDispatchError('')
+
+      try {
+        const res =
+          await fetch(
+            `${API_BASE}/api/dispatches/${dispatchId}/status`,
+            {
+              method: 'POST',
+              headers: {
+                'Content-Type':
+                  'application/json',
+                Authorization:
+                  `Bearer ${token}`
+              },
+              body: JSON.stringify({
+                status
+              })
+            }
+          )
+
+        const data =
+          await res.json()
+
+        if (!res.ok || !data.ok) {
+          setDispatchError(
+            data.message ||
+            'Unable to update dispatch status.'
+          )
+          return
+        }
+
+        setDispatches((current) =>
+          current.map((item) =>
+            item.id === dispatchId
+              ? data.dispatch
+              : item
+          )
+        )
+      } catch {
+        setDispatchError(
+          'Unable to connect to Maverick.'
+        )
+      }
+    }
+
+  const activeDispatches =
+    dispatches.filter(
+      (dispatch) =>
+        dispatch.status !== 'DELIVERED' &&
+        dispatch.status !== 'CANCELLED'
+    )
+
+  const selectedActiveDispatch =
+    activeDispatches.find(
+      (dispatch) =>
+        dispatch.asset?.deviceId ===
+        (
+          selectedDeviceId ||
+          telemetry?.deviceId
+        )
+    ) || null
+
+  const filteredDispatches =
+    dispatches.filter(
+      (dispatch) => {
+        const query =
+          dispatchSearch
+            .trim()
+            .toLowerCase()
+
+        const matchesText =
+          !query ||
+          dispatch.loadNumber
+            .toLowerCase()
+            .includes(query) ||
+          String(
+            dispatch.asset?.name || ''
+          )
+            .toLowerCase()
+            .includes(query) ||
+          String(
+            dispatch.asset?.deviceId || ''
+          )
+            .toLowerCase()
+            .includes(query) ||
+          dispatch.pickupName
+            .toLowerCase()
+            .includes(query) ||
+          dispatch.deliveryName
+            .toLowerCase()
+            .includes(query)
+
+        const matchesStatus =
+          dispatchStatusFilter === 'all' ||
+          dispatch.status ===
+            dispatchStatusFilter
+
+        return (
+          matchesText &&
+          matchesStatus
+        )
+      }
+    )
+
+  const availableAssets =
+    assets.filter(
+      (asset) =>
+        !activeDispatches.some(
+          (dispatch) =>
+            dispatch.asset?.id ===
+            asset.id
+        )
+    )
+
+
+  // =====================================================
   // DEVICE STATUS
   // =====================================================
 
-  const getDeviceStatus =
-    (): DeviceStatus => {
-      if (
-        !telemetry?.receivedAt
-      ) {
+  const getDeviceStatusForTelemetry =
+    (item: any): DeviceStatus => {
+      if (!item?.receivedAt) {
         return 'offline'
       }
 
       const ageMs =
         now -
         new Date(
-          telemetry.receivedAt
+          item.receivedAt
         ).getTime()
 
       if (ageMs < 90000) {
@@ -818,7 +1783,9 @@ function App() {
     }
 
   const deviceStatus =
-    getDeviceStatus()
+    getDeviceStatusForTelemetry(
+      telemetry
+    )
 
   const statusLabel =
     deviceStatus === 'online'
@@ -827,6 +1794,300 @@ function App() {
           'delayed'
         ? 'Delayed'
         : 'Offline'
+
+  const getMovementStatusForTelemetry = (
+    item: any,
+    status: DeviceStatus
+  ): MovementStatus => {
+    if (status === 'offline') {
+      return 'offline'
+    }
+
+    if (!Boolean(item?.hasCurrentGps)) {
+      return 'acquiring'
+    }
+
+    const rawSpeed =
+      item?.speedKph != null
+        ? Number(item.speedKph)
+        : 0
+
+    const safeSpeed =
+      Number.isFinite(rawSpeed)
+        ? Math.max(0, rawSpeed)
+        : 0
+
+    const backendMovement =
+      String(
+        item?.movementStatus || ''
+      ).toUpperCase()
+
+    return (
+      backendMovement === 'MOVING' ||
+      safeSpeed >= 5
+        ? 'moving'
+        : 'parked'
+    )
+  }
+
+  const getDetailedMovementLabel = (
+    item: any,
+    status: DeviceStatus,
+    dispatch?: DispatchRecord | null
+  ) => {
+    const movement =
+      getMovementStatusForTelemetry(
+        item,
+        status
+      )
+
+    const rawSpeedKph =
+      item?.speedKph != null
+        ? Number(item.speedKph)
+        : 0
+
+    const speedMph =
+      (
+        Number.isFinite(rawSpeedKph)
+          ? Math.max(
+              0,
+              rawSpeedKph
+            )
+          : 0
+      ) * 0.621371
+
+    if (status === 'offline') {
+      return 'Offline · last known state'
+    }
+
+    if (status === 'delayed') {
+      if (movement === 'moving') {
+        return `Last seen moving · ${speedMph.toFixed(1)} mph · telemetry delayed`
+      }
+
+      if (movement === 'parked') {
+        return 'Last seen parked · telemetry delayed'
+      }
+
+      return 'Telemetry delayed · movement unavailable'
+    }
+
+    if (movement === 'acquiring') {
+      if (!dispatch) {
+        return 'Acquiring GPS · movement pending'
+      }
+
+      return `${dispatchStatusLabel(
+        dispatch.status
+      )} · Acquiring GPS`
+    }
+
+    const statusContext =
+      !dispatch
+        ? ''
+        : dispatch.status ===
+            'EN_ROUTE_TO_PICKUP'
+          ? 'To pickup'
+          : dispatch.status ===
+              'AT_PICKUP'
+            ? 'At pickup'
+            : dispatch.status ===
+                'LOADED'
+              ? 'Loaded'
+              : dispatch.status ===
+                  'IN_TRANSIT'
+                ? 'In transit'
+                : dispatch.status ===
+                    'AT_DELIVERY'
+                  ? 'At delivery'
+                  : dispatch.status ===
+                      'DELIVERED'
+                    ? 'Delivered'
+                    : dispatch.status ===
+                        'CANCELLED'
+                      ? 'Cancelled'
+                      : 'Assigned'
+
+    if (movement === 'moving') {
+      return statusContext
+        ? `${statusContext} · Moving ${speedMph.toFixed(1)} mph`
+        : `Moving · ${speedMph.toFixed(1)} mph`
+    }
+
+    if (dispatch?.status === 'IN_TRANSIT') {
+      return 'In transit · Stopped'
+    }
+
+    if (
+      dispatch?.status ===
+        'EN_ROUTE_TO_PICKUP'
+    ) {
+      return 'To pickup · Stopped'
+    }
+
+    return statusContext
+      ? `${statusContext} · Parked`
+      : 'Parked'
+  }
+
+  const fleetStatusCounts =
+    assets.reduce(
+      (counts, asset) => {
+        const item =
+          fleetTelemetry[
+            asset.deviceId
+          ]
+
+        const status =
+          getDeviceStatusForTelemetry(
+            item
+          )
+
+        counts[status] += 1
+        return counts
+      },
+      {
+        online: 0,
+        delayed: 0,
+        offline: 0
+      } as Record<DeviceStatus, number>
+    )
+
+  const fleetMapAssets =
+    assets
+      .map((asset) => {
+        const item =
+          fleetTelemetry[
+            asset.deviceId
+          ] ??
+          (
+            telemetry?.deviceId ===
+              asset.deviceId
+              ? telemetry
+              : null
+          )
+
+        if (
+          item?.latitude == null ||
+          item?.longitude == null
+        ) {
+          return null
+        }
+
+        const latitude =
+          Number(item.latitude)
+
+        const longitude =
+          Number(item.longitude)
+
+        if (
+          !Number.isFinite(latitude) ||
+          !Number.isFinite(longitude)
+        ) {
+          return null
+        }
+
+        const status =
+          getDeviceStatusForTelemetry(
+            item
+          )
+
+        const movement =
+          getMovementStatusForTelemetry(
+            item,
+            status
+          )
+
+        const activeDispatch =
+          activeDispatches.find(
+            (dispatch) =>
+              dispatch.asset?.deviceId ===
+              asset.deviceId
+          ) || null
+
+        const selected =
+          selectedDeviceId ===
+          asset.deviceId
+
+        const statusEnabled =
+          status === 'online'
+            ? showOnline
+            : status === 'delayed'
+              ? showDelayed
+              : showOffline
+
+        const statusMatches =
+          statusFilter === 'all' ||
+          statusFilter === status
+
+        const mapFilterSearch =
+          searchTerm
+            .trim()
+            .toLowerCase()
+
+        const searchMatches =
+          !mapFilterSearch ||
+          String(
+            asset.deviceId || ''
+          )
+            .toLowerCase()
+            .includes(
+              mapFilterSearch
+            ) ||
+          String(
+            asset.name || ''
+          )
+            .toLowerCase()
+            .includes(
+              mapFilterSearch
+            )
+
+        return {
+          asset,
+          item,
+          latitude,
+          longitude,
+          status,
+          movement,
+          activeDispatch,
+          selected,
+          visible:
+            statusEnabled &&
+            statusMatches &&
+            searchMatches
+        }
+      })
+      .filter(
+        (
+          entry
+        ): entry is NonNullable<
+          typeof entry
+        > =>
+          Boolean(entry)
+      )
+
+  const visibleFleetMapAssets =
+    fleetMapAssets.filter(
+      (entry) =>
+        entry.visible
+    )
+
+  const fleetMapPoints =
+    visibleFleetMapAssets.map(
+      (entry) =>
+        [
+          entry.latitude,
+          entry.longitude
+        ] as [number, number]
+    )
+
+  const fleetMapBoundsKey =
+    fleetMapPoints
+      .map(
+        ([latitude, longitude]) =>
+          `${latitude.toFixed(5)},${longitude.toFixed(5)}`
+      )
+      .join('|')
 
   const formatDateTime = (
     value?: string | null
@@ -1051,11 +2312,6 @@ function App() {
           ? 'Acquiring GPS'
           : 'Offline'
 
-  const trailerIcon =
-    createTrailerIcon(
-      movementStatus
-    )
-
   const requestRoadMatch =
     useCallback(
       async (
@@ -1273,7 +2529,7 @@ function App() {
       ? Number(telemetry.temperature)
       : null
 
-  const temperatureBelowLimit =
+  const assetTemperatureBelowLimit =
     Boolean(
       selectedAsset
         ?.temperatureAlertsEnabled
@@ -1285,7 +2541,7 @@ function App() {
         selectedAsset.temperatureMinC
       )
 
-  const temperatureAboveLimit =
+  const assetTemperatureAboveLimit =
     Boolean(
       selectedAsset
         ?.temperatureAlertsEnabled
@@ -1297,9 +2553,108 @@ function App() {
         selectedAsset.temperatureMaxC
       )
 
+  const dispatchTemperatureBelowLimit =
+    currentTemperatureC != null &&
+    selectedActiveDispatch
+      ?.temperatureMinC != null &&
+    currentTemperatureC <
+      Number(
+        selectedActiveDispatch.temperatureMinC
+      )
+
+  const dispatchTemperatureAboveLimit =
+    currentTemperatureC != null &&
+    selectedActiveDispatch
+      ?.temperatureMaxC != null &&
+    currentTemperatureC >
+      Number(
+        selectedActiveDispatch.temperatureMaxC
+      )
+
+  const assetTemperatureOutOfRange =
+    assetTemperatureBelowLimit ||
+    assetTemperatureAboveLimit
+
+  const dispatchTemperatureOutOfRange =
+    dispatchTemperatureBelowLimit ||
+    dispatchTemperatureAboveLimit
+
+  // Asset and Dispatch limits are monitored together.
+  // A violation of either one activates the same asset alert.
+
+
   const temperatureOutOfRange =
-    temperatureBelowLimit ||
-    temperatureAboveLimit
+    assetTemperatureOutOfRange ||
+    dispatchTemperatureOutOfRange
+
+  const temperatureAboveLimit =
+    assetTemperatureAboveLimit ||
+    dispatchTemperatureAboveLimit
+
+  const dispatchHasTemperatureLimits =
+    Boolean(
+      selectedActiveDispatch &&
+      (
+        selectedActiveDispatch.temperatureMinC != null ||
+        selectedActiveDispatch.temperatureMaxC != null
+      )
+    )
+
+  const temperatureAlertSource =
+    assetTemperatureOutOfRange &&
+    dispatchTemperatureOutOfRange
+      ? 'Asset + Dispatch'
+      : dispatchTemperatureOutOfRange
+        ? 'Dispatch'
+        : assetTemperatureOutOfRange
+          ? 'Asset'
+          : ''
+
+  const temperatureAlertLimitText = (() => {
+    const parts: string[] = []
+
+    if (assetTemperatureBelowLimit) {
+      parts.push(
+        `Asset min ${celsiusToFahrenheit(
+          Number(
+            selectedAsset?.temperatureMinC
+          )
+        ).toFixed(1)}°F`
+      )
+    }
+
+    if (assetTemperatureAboveLimit) {
+      parts.push(
+        `Asset max ${celsiusToFahrenheit(
+          Number(
+            selectedAsset?.temperatureMaxC
+          )
+        ).toFixed(1)}°F`
+      )
+    }
+
+    if (dispatchTemperatureBelowLimit) {
+      parts.push(
+        `Dispatch min ${celsiusToFahrenheit(
+          Number(
+            selectedActiveDispatch?.temperatureMinC
+          )
+        ).toFixed(1)}°F`
+      )
+    }
+
+    if (dispatchTemperatureAboveLimit) {
+      parts.push(
+        `Dispatch max ${celsiusToFahrenheit(
+          Number(
+            selectedActiveDispatch?.temperatureMaxC
+          )
+        ).toFixed(1)}°F`
+      )
+    }
+
+    return parts.join(' · ')
+  })()
 
   const deviceAlertCount =
     deviceStatus === 'online'
@@ -1331,6 +2686,7 @@ function App() {
     setCurrentUser(null)
     setTelemetry(null)
     setAssets([])
+    setFleetTelemetry({})
     setIsLoggedIn(false)
   }
 
@@ -1340,14 +2696,6 @@ function App() {
     )
 
     setIsLoggedIn(true)
-  }
-
-  const openRenameAsset = () => {
-    setRenameError('')
-    setRenameValue(
-      selectedAssetName
-    )
-    setRenameOpen(true)
   }
 
   const handleRenameAsset =
@@ -1443,16 +2791,6 @@ function App() {
       }
     }
 
-  const celsiusToFahrenheit = (
-    value: number
-  ) =>
-    (value * 9) / 5 + 32
-
-  const fahrenheitToCelsius = (
-    value: number
-  ) =>
-    ((value - 32) * 5) / 9
-
   const openTemperatureLimits = () => {
     if (!selectedAsset) {
       return
@@ -1460,28 +2798,56 @@ function App() {
 
     setTemperatureLimitsError('')
 
-    setTemperatureMinF(
-      selectedAsset.temperatureMinC != null
-        ? celsiusToFahrenheit(
-            Number(
+    // If an active dispatch defines temperature limits,
+    // show those limits here so Asset + Dispatch remain
+    // synchronized in the UI.
+    const effectiveMinC =
+      selectedActiveDispatch
+        ?.temperatureMinC != null
+        ? Number(
+            selectedActiveDispatch.temperatureMinC
+          )
+        : selectedAsset.temperatureMinC != null
+          ? Number(
               selectedAsset.temperatureMinC
             )
+          : null
+
+    const effectiveMaxC =
+      selectedActiveDispatch
+        ?.temperatureMaxC != null
+        ? Number(
+            selectedActiveDispatch.temperatureMaxC
+          )
+        : selectedAsset.temperatureMaxC != null
+          ? Number(
+              selectedAsset.temperatureMaxC
+            )
+          : null
+
+    setTemperatureMinF(
+      effectiveMinC != null
+        ? celsiusToFahrenheit(
+            effectiveMinC
           ).toFixed(1)
         : ''
     )
 
     setTemperatureMaxF(
-      selectedAsset.temperatureMaxC != null
+      effectiveMaxC != null
         ? celsiusToFahrenheit(
-            Number(
-              selectedAsset.temperatureMaxC
-            )
+            effectiveMaxC
           ).toFixed(1)
         : ''
     )
 
     setTemperatureAlertsEnabled(
       Boolean(
+        (
+          selectedActiveDispatch &&
+          effectiveMinC != null &&
+          effectiveMaxC != null
+        ) ||
         selectedAsset
           .temperatureAlertsEnabled
       )
@@ -1905,6 +3271,169 @@ function App() {
       historyRange,
       historyCustomDate
     )
+  }
+
+  const generateReport =
+    async () => {
+      const token =
+        localStorage.getItem(
+          'maverick_token'
+        )
+
+      const deviceId =
+        selectedDeviceId ||
+        telemetry?.deviceId
+
+      if (!token) {
+        setReportError(
+          'Your session has expired.'
+        )
+        return
+      }
+
+      if (!deviceId) {
+        setReportError(
+          'Select an asset before generating a report.'
+        )
+        setReportPoints([])
+        return
+      }
+
+      const {
+        from,
+        to
+      } = getHistoryWindow(
+        reportRange,
+        reportCustomDate
+      )
+
+      setReportLoading(true)
+      setReportError('')
+
+      try {
+        const params =
+          new URLSearchParams({
+            deviceId,
+            from,
+            to
+          })
+
+        const res =
+          await fetch(
+            `${API_BASE}/api/telemetry/history?${params.toString()}`,
+            {
+              headers: {
+                Authorization:
+                  `Bearer ${token}`
+              }
+            }
+          )
+
+        const data =
+          await res.json()
+
+        if (res.status === 401) {
+          handleLogout()
+          return
+        }
+
+        if (!res.ok || !data.ok) {
+          setReportPoints([])
+          setReportError(
+            data.message ||
+            'Unable to generate report.'
+          )
+          return
+        }
+
+        const points: HistoryPoint[] =
+          (data.points || []).map(
+            (point: any) => ({
+              id: Number(point.id),
+              latitude:
+                point.latitude == null
+                  ? null
+                  : Number(
+                      point.latitude
+                    ),
+              longitude:
+                point.longitude == null
+                  ? null
+                  : Number(
+                      point.longitude
+                    ),
+              timestamp:
+                String(point.timestamp),
+              temperature:
+                Number(
+                  point.temperature
+                ),
+              altitude:
+                point.altitude == null
+                  ? null
+                  : Number(
+                      point.altitude
+                    ),
+              speedKph:
+                point.speedKph == null
+                  ? null
+                  : Number(
+                      point.speedKph
+                    ),
+              movementStatus:
+                point.movementStatus == null
+                  ? null
+                  : String(
+                      point.movementStatus
+                    )
+            })
+          )
+
+        setReportPoints(points)
+        setReportGeneratedAt(
+          new Date().toISOString()
+        )
+      } catch {
+        setReportPoints([])
+        setReportError(
+          'Unable to connect to Maverick.'
+        )
+      } finally {
+        setReportLoading(false)
+      }
+    }
+
+  const exportReportPdf = () => {
+    if (reportPoints.length === 0) {
+      setReportError(
+        'Generate the report before exporting it.'
+      )
+      return
+    }
+
+    const originalTitle =
+      document.title
+
+    const safeAssetName =
+      (
+        selectedAsset?.name ||
+        selectedDeviceId ||
+        'Maverick'
+      )
+        .replace(
+          /[^a-zA-Z0-9-_]+/g,
+          '-'
+        )
+
+    document.title =
+      `Maverick-${safeAssetName}-Telemetry-Report`
+
+    window.print()
+
+    window.setTimeout(() => {
+      document.title =
+        originalTitle
+    }, 500)
   }
 
   const handleHistoryRangeChange = (
@@ -2651,6 +4180,137 @@ function App() {
       )
     )
 
+  const reportTemperatureValuesF =
+    reportPoints
+      .map(
+        (point) =>
+          celsiusToFahrenheit(
+            Number(
+              point.temperature
+            )
+          )
+      )
+      .filter(
+        (value) =>
+          Number.isFinite(value)
+      )
+
+  const reportGpsPoints =
+    reportPoints.filter(
+      (point) =>
+        point.latitude != null &&
+        point.longitude != null
+    )
+
+  const reportAverageTempF =
+    reportTemperatureValuesF.length > 0
+      ? reportTemperatureValuesF.reduce(
+          (
+            sum,
+            value
+          ) =>
+            sum + value,
+          0
+        ) /
+        reportTemperatureValuesF.length
+      : null
+
+  const reportMinTempF =
+    reportTemperatureValuesF.length > 0
+      ? Math.min(
+          ...reportTemperatureValuesF
+        )
+      : null
+
+  const reportMaxTempF =
+    reportTemperatureValuesF.length > 0
+      ? Math.max(
+          ...reportTemperatureValuesF
+        )
+      : null
+
+  const reportDistanceMiles =
+    reportGpsPoints.reduce(
+      (
+        total,
+        point,
+        index
+      ) => {
+        if (index === 0) {
+          return total
+        }
+
+        const previous =
+          reportGpsPoints[
+            index - 1
+          ]
+
+        return total +
+          distanceMiles(
+            Number(
+              previous.latitude
+            ),
+            Number(
+              previous.longitude
+            ),
+            Number(
+              point.latitude
+            ),
+            Number(
+              point.longitude
+            )
+          )
+      },
+      0
+    )
+
+  const reportEffectiveMinC =
+    selectedActiveDispatch
+      ?.temperatureMinC ??
+    selectedAsset
+      ?.temperatureMinC ??
+    null
+
+  const reportEffectiveMaxC =
+    selectedActiveDispatch
+      ?.temperatureMaxC ??
+    selectedAsset
+      ?.temperatureMaxC ??
+    null
+
+  const reportOutOfRangeCount =
+    reportPoints.filter(
+      (point) => {
+        const tempC =
+          Number(
+            point.temperature
+          )
+
+        return (
+          (
+            reportEffectiveMinC != null &&
+            tempC <
+              Number(
+                reportEffectiveMinC
+              )
+          ) ||
+          (
+            reportEffectiveMaxC != null &&
+            tempC >
+              Number(
+                reportEffectiveMaxC
+              )
+          )
+        )
+      }
+    ).length
+
+  const reportPeriod =
+    getHistoryWindow(
+      reportRange,
+      reportCustomDate
+    )
+
   const getLimitY = (
     limitF: number
   ) =>
@@ -2671,15 +4331,95 @@ function App() {
     setActiveView('map')
   }
 
+  const normalizedAssetSearch =
+    assetSearchTerm
+      .trim()
+      .toLowerCase()
+
+  const assetSearchMatches =
+    normalizedAssetSearch
+      ? assets
+          .filter((asset) => {
+            const deviceId =
+              String(
+                asset.deviceId || ''
+              ).toLowerCase()
+
+            const name =
+              String(
+                asset.name || ''
+              ).toLowerCase()
+
+            return (
+              deviceId.includes(
+                normalizedAssetSearch
+              ) ||
+              name.includes(
+                normalizedAssetSearch
+              )
+            )
+          })
+          .slice(0, 8)
+      : []
+
+  const selectAssetFromSearch = (
+    asset: any
+  ) => {
+    if (!asset?.deviceId) {
+      return
+    }
+
+    setSelectedDeviceId(
+      asset.deviceId
+    )
+    setAssetSearchTerm('')
+    setSearchTerm('')
+    setStatusFilter('all')
+    setAssetTypeFilter('all')
+    setShowOnline(true)
+    setShowDelayed(true)
+    setShowOffline(true)
+    setFiltersOpen(true)
+    setActiveView('map')
+  }
+
   const handleSearchKeyDown = (
     event:
       React.KeyboardEvent<HTMLInputElement>
   ) => {
-    if (
-      event.key === 'Enter'
-    ) {
-      setActiveView('map')
-      setFiltersOpen(true)
+    if (event.key !== 'Enter') {
+      return
+    }
+
+    const exactMatch =
+      assets.find((asset) => {
+        const deviceId =
+          String(
+            asset.deviceId || ''
+          ).toLowerCase()
+
+        const name =
+          String(
+            asset.name || ''
+          ).toLowerCase()
+
+        return (
+          deviceId ===
+            normalizedAssetSearch ||
+          name ===
+            normalizedAssetSearch
+        )
+      })
+
+    const assetToSelect =
+      exactMatch ||
+      assetSearchMatches[0]
+
+    if (assetToSelect) {
+      event.preventDefault()
+      selectAssetFromSearch(
+        assetToSelect
+      )
     }
   }
 
@@ -2727,39 +4467,115 @@ function App() {
           </strong>
         </button>
 
-        <div className="mav-search">
+        <div className="mav-search asset-search">
           <span>⌕</span>
 
           <input
             type="text"
             value={
-              searchTerm
+              assetSearchTerm
             }
             onChange={
               (event) =>
-                setSearchTerm(
+                setAssetSearchTerm(
                   event.target.value
                 )
             }
             onKeyDown={
               handleSearchKeyDown
             }
-            placeholder="Search trailer ID"
-            aria-label="Search trailers"
+            placeholder="Search trailer ID or asset name"
+            aria-label="Search and select trailer"
+            autoComplete="off"
           />
 
           {
-            searchTerm && (
+            assetSearchTerm && (
               <button
                 className="clear-search"
                 onClick={() =>
-                  setSearchTerm('')
+                  setAssetSearchTerm('')
                 }
                 type="button"
-                aria-label="Clear search"
+                aria-label="Clear trailer search"
               >
                 ×
               </button>
+            )
+          }
+
+          {
+            normalizedAssetSearch && (
+              <div className="asset-search-results">
+                {
+                  assetSearchMatches.length > 0
+                    ? assetSearchMatches.map(
+                        (asset) => {
+                          const item =
+                            fleetTelemetry[
+                              asset.deviceId
+                            ] ?? null
+
+                          const status =
+                            getDeviceStatusForTelemetry(
+                              item
+                            )
+
+                          return (
+                            <button
+                              key={asset.id}
+                              className="asset-search-result"
+                              onMouseDown={(event) =>
+                                event.preventDefault()
+                              }
+                              onClick={() =>
+                                selectAssetFromSearch(
+                                  asset
+                                )
+                              }
+                              type="button"
+                            >
+                              <span
+                                className={
+                                  `mini-status ${status}`
+                                }
+                              >
+                                ◈
+                              </span>
+
+                              <span className="asset-search-result-copy">
+                                <strong>
+                                  {
+                                    asset.name ||
+                                    asset.deviceId
+                                  }
+                                </strong>
+
+                                <small>
+                                  {asset.deviceId}
+                                </small>
+                              </span>
+
+                              <em>
+                                {
+                                  status === 'online'
+                                    ? 'Online'
+                                    : status === 'delayed'
+                                      ? 'Delayed'
+                                      : 'Offline'
+                                }
+                              </em>
+                            </button>
+                          )
+                        }
+                      )
+                    : (
+                      <div className="asset-search-empty">
+                        No trailer found
+                      </div>
+                    )
+                }
+              </div>
             )
           }
         </div>
@@ -2929,33 +4745,63 @@ function App() {
 
       <section className="mav-statusbar">
 
-        <select
-          value={selectedDeviceId}
-          aria-label="Asset selector"
-          onChange={(event) => {
-            setSelectedDeviceId(
-              event.target.value
-            )
-            setSearchTerm('')
-            setStatusFilter('all')
-          }}
+        <div
+          className={
+            `selected-asset-chip ${
+              selectedDeviceId
+                ? 'active'
+                : 'empty'
+            }`
+          }
+          title={
+            selectedDeviceId
+              ? 'Selected asset'
+              : 'Use Search Trailer ID above to select an asset'
+          }
         >
-          <option value="">
-            Select Asset
-          </option>
+          <span className="selected-asset-chip-icon">
+            ◈
+          </span>
 
-          {assets.map((asset) => (
-            <option
-              key={asset.id}
-              value={asset.deviceId}
-            >
-              {asset.name || asset.deviceId}
-              {asset.name && asset.name !== asset.deviceId
-                ? ` (${asset.deviceId})`
-                : ''}
-            </option>
-          ))}
-        </select>
+          <span className="selected-asset-chip-copy">
+            <strong>
+              {
+                selectedAsset
+                  ? (
+                    selectedAsset.name ||
+                    selectedAsset.deviceId
+                  )
+                  : 'No asset selected'
+              }
+            </strong>
+
+            {
+              selectedAsset &&
+              selectedAsset.name !==
+                selectedAsset.deviceId && (
+                <small>
+                  {selectedAsset.deviceId}
+                </small>
+              )
+            }
+          </span>
+
+          {
+            selectedDeviceId && (
+              <button
+                type="button"
+                aria-label="Clear selected asset"
+                onClick={() => {
+                  setSelectedDeviceId('')
+                  setAssetSearchTerm('')
+                  setSearchTerm('')
+                }}
+              >
+                ×
+              </button>
+            )
+          }
+        </div>
 
         <div className="metric-pill neutral">
           <span className="metric-dot" />
@@ -2971,13 +4817,7 @@ function App() {
           <span className="metric-dot" />
 
           <strong>
-            {
-              deviceStatus ===
-                'online' &&
-              telemetry
-                ? 1
-                : 0
-            }
+            {fleetStatusCounts.online}
           </strong>
 
           Online
@@ -2987,13 +4827,7 @@ function App() {
           <span className="metric-dot" />
 
           <strong>
-            {
-              deviceStatus ===
-                'delayed' &&
-              telemetry
-                ? 1
-                : 0
-            }
+            {fleetStatusCounts.delayed}
           </strong>
 
           Delayed
@@ -3003,12 +4837,7 @@ function App() {
           <span className="metric-dot" />
 
           <strong>
-            {
-              deviceStatus ===
-                'offline'
-                ? 1
-                : 0
-            }
+            {fleetStatusCounts.offline}
           </strong>
 
           Offline
@@ -3108,6 +4937,12 @@ function App() {
                         null
                       : null
                   }
+                  fleetPoints={
+                    fleetMapPoints
+                  }
+                  fleetBoundsKey={
+                    fleetMapBoundsKey
+                  }
                 />
 
                 <ResponsiveMapSize />
@@ -3154,115 +4989,193 @@ function App() {
                 }
 
                 {
-                  markerVisible && (
-                    <Marker
-                      position={[
-                        telemetry.latitude,
-                        telemetry.longitude
-                      ]}
-                      icon={
-                        trailerIcon
-                      }
-                      opacity={
-                        telemetry.hasCurrentGps
-                          ? 1
-                          : 0.55
-                      }
-                    >
-                      <Popup>
-                        <div
-                          className={
-                            `map-popup map-popup-${deviceStatus}`
+                  visibleFleetMapAssets.map(
+                    (entry) => {
+                      const {
+                        asset,
+                        item,
+                        latitude,
+                        longitude,
+                        status,
+                        movement,
+                        activeDispatch,
+                        selected
+                      } = entry
+
+                      const assetName =
+                        asset.name ||
+                        asset.deviceId
+
+                      const statusText =
+                        status === 'online'
+                          ? 'Online'
+                          : status === 'delayed'
+                            ? 'Delayed'
+                            : 'Offline'
+
+                      const movementText =
+                        movement === 'moving'
+                          ? 'Moving'
+                          : movement === 'parked'
+                            ? 'Parked'
+                            : movement === 'acquiring'
+                              ? 'Acquiring GPS'
+                              : 'Offline'
+
+                      const speedMphForAsset =
+                        item?.speedKph != null
+                          ? Math.max(
+                              0,
+                              Number(
+                                item.speedKph
+                              )
+                            ) * 0.621371
+                          : 0
+
+                      const tempFForAsset =
+                        item?.temperature != null
+                          ? celsiusToFahrenheit(
+                              Number(
+                                item.temperature
+                              )
+                            )
+                          : null
+
+                      return (
+                        <Marker
+                          key={
+                            asset.deviceId
                           }
-                        >
-                          <strong>
-                            {
-                              selectedAssetName
+                          position={[
+                            latitude,
+                            longitude
+                          ]}
+                          icon={
+                            createTrailerIcon(
+                              movement,
+                              selected,
+                              Boolean(
+                                activeDispatch
+                              )
+                            )
+                          }
+                          opacity={
+                            item?.hasCurrentGps
+                              ? 1
+                              : 0.62
+                          }
+                          eventHandlers={{
+                            click: () => {
+                              setSelectedDeviceId(
+                                asset.deviceId
+                              )
+                              setAssetSearchTerm('')
+                              setSearchTerm('')
+                              setStatusFilter('all')
+                              setAssetTypeFilter('all')
+                              setShowOnline(true)
+                              setShowDelayed(true)
+                              setShowOffline(true)
+                              setActiveView('map')
                             }
-                          </strong>
+                          }}
+                        >
+                          <Popup>
+                            <div
+                              className={
+                                `map-popup map-popup-${status}`
+                              }
+                            >
+                              <strong>
+                                {assetName}
+                              </strong>
 
-                          {
-                            selectedAssetName !==
-                              telemetry.deviceId && (
-                              <>
-                                <br />
-                                Device ID:{' '}
-                                {
-                                  telemetry.deviceId
+                              {
+                                assetName !==
+                                  asset.deviceId && (
+                                  <>
+                                    <br />
+                                    Device ID:{' '}
+                                    {
+                                      asset.deviceId
+                                    }
+                                  </>
+                                )
+                              }
+
+                              <br />
+                              Status:{' '}
+                              <strong>
+                                {statusText}
+                              </strong>
+
+                              {
+                                activeDispatch && (
+                                  <>
+                                    <br />
+                                    Load:{' '}
+                                    <strong>
+                                      {
+                                        activeDispatch.loadNumber
+                                      }
+                                    </strong>
+                                    {' · '}
+                                    {
+                                      dispatchStatusLabel(
+                                        activeDispatch.status
+                                      )
+                                    }
+                                  </>
+                                )
+                              }
+
+                              <br />
+                              Movement:{' '}
+                              <strong
+                                className={
+                                  `popup-movement ${movement}`
                                 }
-                              </>
-                            )
-                          }
+                              >
+                                {movementText}
+                              </strong>
 
-                          <br />
+                              <br />
+                              Speed:{' '}
+                              {
+                                speedMphForAsset.toFixed(
+                                  1
+                                )
+                              } mph
 
-                          Status:{' '}
-                          {statusLabel}
+                              <br />
+                              Temperature:{' '}
+                              {
+                                tempFForAsset != null
+                                  ? `${tempFForAsset.toFixed(1)}°F`
+                                  : 'No data'
+                              }
 
-                          <br />
+                              <br />
+                              {
+                                item?.hasCurrentGps
+                                  ? 'Current GPS location'
+                                  : 'Last known location'
+                              }
 
-                          Movement:{' '}
-                          <strong className={`popup-movement ${movementStatus}`}>
-                            {movementLabel}
-                          </strong>
-
-                          <br />
-
-                          Speed:{' '}
-                          {speedMph.toFixed(1)} mph
-
-                          <br />
-
-                          {temperatureLabel}:{' '}
-                          {temperatureF}°F
-
-                          <br />
-
-                          {
-                            telemetry.hasCurrentGps
-                              ? 'Current GPS location'
-                              : gpsAcquiring
-                                ? '🟡 Acquiring GPS · showing last known location'
-                                : 'Last known location'
-                          }
-
-                          <br />
-
-                          Lat:{' '}
-                          {
-                            telemetry.latitude
-                          }
-
-                          <br />
-
-                          Lon:{' '}
-                          {
-                            telemetry.longitude
-                          }
-
-                          {
-                            telemetry.locationReceivedAt &&
-                            (
-                              <>
-                                <br />
-
-                                {
-                                  telemetry.hasCurrentGps
-                                    ? 'Location updated: '
-                                    : 'Last valid location: '
-                                }
-
-                                {
-                                  formatDateTime(
-                                    telemetry.locationReceivedAt
-                                  )
-                                }
-                              </>
-                            )
-                          }
-                        </div>
-                      </Popup>
-                    </Marker>
+                              <br />
+                              Last Ping:{' '}
+                              {
+                                item?.receivedAt
+                                  ? formatAge(
+                                      item.receivedAt
+                                    )
+                                  : 'No data'
+                              }
+                            </div>
+                          </Popup>
+                        </Marker>
+                      )
+                    }
                   )
                 }
 
@@ -3550,7 +5463,15 @@ function App() {
               {/* ASSET DETAILS */}
               {/* ================================= */}
 
-              <aside className="floating-panel asset-panel">
+              <aside
+                className={
+                  `floating-panel asset-panel ${
+                    temperatureOutOfRange
+                      ? 'temperature-alert'
+                      : ''
+                  }`
+                }
+              >
 
                 {
                   telemetry &&
@@ -3616,19 +5537,186 @@ function App() {
 
                         </div>
 
+                        {
+                          selectedActiveDispatch && (
+                            <div className="asset-dispatch-banner">
+                              <div className="asset-dispatch-banner-top">
+                                <span className="asset-dispatch-kicker">
+                                  LOAD ASSIGNED
+                                </span>
+
+                                <span
+                                  className={
+                                    `dispatch-status-pill ${selectedActiveDispatch.status.toLowerCase()}`
+                                  }
+                                >
+                                  {
+                                    dispatchStatusLabel(
+                                      selectedActiveDispatch.status
+                                    )
+                                  }
+                                </span>
+                              </div>
+
+                              <div className="asset-dispatch-main">
+                                <div>
+                                  <strong>
+                                    {
+                                      selectedActiveDispatch.loadNumber
+                                    }
+                                  </strong>
+
+                                  <small>
+                                    {
+                                      selectedActiveDispatch.pickupName
+                                    }
+                                    {' → '}
+                                    {
+                                      selectedActiveDispatch.deliveryName
+                                    }
+                                  </small>
+                                </div>
+
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    setActiveView(
+                                      'operations'
+                                    )
+                                  }
+                                >
+                                  Open Dispatch
+                                </button>
+                              </div>
+                            </div>
+                          )
+                        }
+
                         <div className="panel-divider" />
 
                         <dl className="asset-details">
 
-                          <div>
+                          <div
+                            className={
+                              temperatureOutOfRange
+                                ? 'asset-temperature-row alert'
+                                : 'asset-temperature-row'
+                            }
+                          >
                             <dt>
                               {temperatureLabel}
                             </dt>
 
                             <dd>
-                              {temperatureF}°F
+                              <strong>
+                                {temperatureF}°F
+                              </strong>
+
+                              {
+                                temperatureOutOfRange && (
+                                  <small className="temperature-alert-note">
+                                    ⚠ Outside {
+                                      temperatureAlertSource
+                                    } limits
+                                  </small>
+                                )
+                              }
                             </dd>
                           </div>
+
+                          <div>
+                            <dt>
+                              Asset Temp Limits
+                            </dt>
+
+                            <dd>
+                              {
+                                selectedAsset
+                                  ?.temperatureMinC != null &&
+                                selectedAsset
+                                  ?.temperatureMaxC != null
+                                  ? `${celsiusToFahrenheit(
+                                      Number(
+                                        selectedAsset.temperatureMinC
+                                      )
+                                    ).toFixed(1)}°F – ${celsiusToFahrenheit(
+                                      Number(
+                                        selectedAsset.temperatureMaxC
+                                      )
+                                    ).toFixed(1)}°F`
+                                  : 'Not configured'
+                              }
+                            </dd>
+                          </div>
+
+                          {
+                            selectedActiveDispatch && (
+                              <div
+                                className={
+                                  dispatchTemperatureOutOfRange
+                                    ? 'dispatch-temperature-limits alert'
+                                    : 'dispatch-temperature-limits'
+                                }
+                              >
+                                <dt>
+                                  Dispatch Temp Limits
+                                </dt>
+
+                                <dd>
+                                  {
+                                    selectedActiveDispatch
+                                      .temperatureMinC != null &&
+                                    selectedActiveDispatch
+                                      .temperatureMaxC != null
+                                      ? `${celsiusToFahrenheit(
+                                          Number(
+                                            selectedActiveDispatch.temperatureMinC
+                                          )
+                                        ).toFixed(1)}°F – ${celsiusToFahrenheit(
+                                          Number(
+                                            selectedActiveDispatch.temperatureMaxC
+                                          )
+                                        ).toFixed(1)}°F`
+                                      : dispatchHasTemperatureLimits
+                                        ? [
+                                            selectedActiveDispatch.temperatureMinC != null
+                                              ? `Min ${celsiusToFahrenheit(
+                                                  Number(
+                                                    selectedActiveDispatch.temperatureMinC
+                                                  )
+                                                ).toFixed(1)}°F`
+                                              : null,
+                                            selectedActiveDispatch.temperatureMaxC != null
+                                              ? `Max ${celsiusToFahrenheit(
+                                                  Number(
+                                                    selectedActiveDispatch.temperatureMaxC
+                                                  )
+                                                ).toFixed(1)}°F`
+                                              : null
+                                          ]
+                                            .filter(Boolean)
+                                            .join(' · ')
+                                        : 'Not configured'
+                                  }
+
+                                  {
+                                    selectedActiveDispatch
+                                      .temperatureSetpointC != null && (
+                                      <small className="dispatch-setpoint">
+                                        Set point {
+                                          celsiusToFahrenheit(
+                                            Number(
+                                              selectedActiveDispatch.temperatureSetpointC
+                                            )
+                                          ).toFixed(1)
+                                        }°F
+                                      </small>
+                                    )
+                                  }
+                                </dd>
+                              </div>
+                            )
+                          }
 
                           <div>
                             <dt>
@@ -3774,269 +5862,7 @@ function App() {
 
               </aside>
 
-              {/* ================================= */}
-              {/* BOTTOM DOCK */}
-              {/* ================================= */}
 
-<section
-  className={
-    `bottom-dock ${
-      bottomDockOpen
-        ? 'open'
-        : 'collapsed'
-    }`
-  }
->
-  <div className="bottom-dock-bar">
-
-    <button
-      className="dock-summary-button"
-      onClick={() =>
-        setNotificationsOpen(true)
-      }
-      type="button"
-    >
-      Alerts
-      <span
-        className={
-          activeAlertCount > 0
-            ? 'dock-count alert'
-            : 'dock-count'
-        }
-      >
-        {activeAlertCount}
-      </span>
-    </button>
-
-    <button
-      className="dock-summary-button"
-      onClick={() =>
-        setActiveView('fleet')
-      }
-      type="button"
-    >
-      My Assets
-      <span className="dock-count">
-        {assets.length || (telemetry ? 1 : 0)}
-      </span>
-    </button>
-
-    <div className="dock-bar-spacer" />
-
-    <button
-      className="dock-expand-button"
-      onClick={() =>
-        setBottomDockOpen(
-          !bottomDockOpen
-        )
-      }
-      type="button"
-    >
-      {
-        bottomDockOpen
-          ? '▼ Collapse'
-          : '▲ Expand'
-      }
-    </button>
-
-  </div>
-
-  {
-    bottomDockOpen && (
-      <div className="bottom-dock-content">
-
-        <div className="recent-alerts">
-          <div className="dock-heading">
-            <strong>
-              Recent Alerts
-            </strong>
-
-            {
-              activeAlertCount > 0 && (
-                <span className="alert-count visible">
-                  {activeAlertCount}
-                </span>
-              )
-            }
-          </div>
-
-          {
-            activeAlertCount === 0
-              ? (
-                <div className="no-alerts">
-                  No active alerts.
-                </div>
-              )
-              : (
-                <>
-                  {
-                    temperatureOutOfRange && (
-                      <button
-                        className="alert-item alert-button"
-                        onClick={() =>
-                          setNotificationsOpen(true)
-                        }
-                        type="button"
-                      >
-                        <div className="mini-status offline">
-                          !
-                        </div>
-
-                        <div>
-                          <strong>
-                            {
-                              temperatureAboveLimit
-                                ? 'High Temperature'
-                                : 'Low Temperature'
-                            }
-                          </strong>
-
-                          <span>
-                            {selectedAssetName}
-                          </span>
-
-                          <small>
-                            Current: {temperatureF}°F
-                            {' · '}
-                            Limit:{' '}
-                            {
-                              temperatureAboveLimit
-                                ? `${celsiusToFahrenheit(
-                                    Number(
-                                      selectedAsset?.temperatureMaxC
-                                    )
-                                  ).toFixed(1)}°F max`
-                                : `${celsiusToFahrenheit(
-                                    Number(
-                                      selectedAsset?.temperatureMinC
-                                    )
-                                  ).toFixed(1)}°F min`
-                            }
-                          </small>
-                        </div>
-                      </button>
-                    )
-                  }
-
-                  {
-                    deviceStatus !== 'online' && (
-                      <button
-                        className="alert-item alert-button"
-                        onClick={() =>
-                          setNotificationsOpen(true)
-                        }
-                        type="button"
-                      >
-                        <div
-                          className={
-                            `mini-status ${deviceStatus}`
-                          }
-                        >
-                          !
-                        </div>
-
-                        <div>
-                          <strong>
-                            {
-                              deviceStatus === 'offline'
-                                ? 'Trailer Offline'
-                                : 'Telemetry Delayed'
-                            }
-                          </strong>
-
-                          <span>
-                            {selectedAssetName}
-                          </span>
-
-                          <small>
-                            {
-                              telemetry?.receivedAt
-                                ? formatAge(
-                                    telemetry.receivedAt
-                                  )
-                                : 'No recent telemetry'
-                            }
-                          </small>
-                        </div>
-                      </button>
-                    )
-                  }
-                </>
-              )
-          }
-        </div>
-
-        <div className="my-assets">
-          <div className="dock-heading">
-            <strong>
-              My Assets
-            </strong>
-
-            <button
-              className="view-all"
-              onClick={() =>
-                setActiveView('fleet')
-              }
-              type="button"
-            >
-              View All
-            </button>
-          </div>
-
-          <div className="asset-card-row">
-            {
-              telemetry
-                ? (
-                  <button
-                    className={
-                      `asset-mini-card ${deviceStatus}`
-                    }
-                    onClick={
-                      openAssetOnMap
-                    }
-                    type="button"
-                  >
-                    <div
-                      className={
-                        `mini-status ${deviceStatus}`
-                      }
-                    >
-                      ◈
-                    </div>
-
-                    <div>
-                      <strong>
-                        {selectedAssetName}
-                      </strong>
-
-                      <span>
-                        {statusLabel}
-                      </span>
-
-                      <small>
-                        {
-                          formatAge(
-                            telemetry.receivedAt
-                          )
-                        }
-                      </small>
-                    </div>
-                  </button>
-                )
-                : (
-                  <span className="no-assets">
-                    No assets available.
-                  </span>
-                )
-            }
-          </div>
-        </div>
-
-      </div>
-    )
-  }
-
-</section>
             </>
           )
         }
@@ -4075,7 +5901,7 @@ function App() {
                 </button>
               </div>
 
-              <div className="page-card">
+              <div className="page-card fleet-table-card">
 
                 <div className="table-header">
                   <span>
@@ -4104,114 +5930,194 @@ function App() {
                 </div>
 
                 {
-                  telemetry
-                    ? (
-                      <div className="fleet-row">
-                        <div className="fleet-asset-name">
-                          <span
-                            className={
-                              `mini-status ${deviceStatus}`
-                            }
+                  assets.length > 0
+                    ? assets.map((asset) => {
+                        const item =
+                          fleetTelemetry[asset.deviceId] ??
+                          (telemetry?.deviceId === asset.deviceId
+                            ? telemetry
+                            : null)
+
+                        const rowStatus =
+                          getDeviceStatusForTelemetry(item)
+
+                        const rowStatusLabel =
+                          rowStatus === 'online'
+                            ? 'Online'
+                            : rowStatus === 'delayed'
+                              ? 'Delayed'
+                              : 'Offline'
+
+                        const rowDispatch =
+                          activeDispatches.find(
+                            (dispatch) =>
+                              dispatch.asset
+                                ?.deviceId ===
+                              asset.deviceId
+                          ) || null
+
+                        const rowMovement =
+                          getMovementStatusForTelemetry(
+                            item,
+                            rowStatus
+                          )
+
+                        const rowMovementLabel =
+                          getDetailedMovementLabel(
+                            item,
+                            rowStatus,
+                            rowDispatch
+                          )
+
+                        const rowTemperatureF =
+                          item?.temperature != null
+                            ? (
+                                (Number(item.temperature) * 9) / 5 +
+                                32
+                              ).toFixed(1)
+                            : '--'
+
+                        return (
+                          <div
+                            className="fleet-row"
+                            key={asset.id}
                           >
-                            ◈
-                          </span>
+                            <div className="fleet-asset-name">
+                              <span
+                                className={
+                                  `mini-status ${rowStatus}`
+                                }
+                              >
+                                ◈
+                              </span>
 
-                          <div>
-                            <strong>
-                              {
-                                selectedAssetName
-                              }
-                            </strong>
+                              <div>
+                                <strong>
+                                  {asset.name || asset.deviceId}
+                                </strong>
 
-                            <small>
-                              {
-                                telemetry.deviceId
+                                <small>
+                                  {asset.deviceId}
+                                </small>
+                              </div>
+                            </div>
+
+                            <span
+                              className={
+                                `inline-status ${rowStatus}`
                               }
-                            </small>
+                            >
+                              {rowStatusLabel}
+                            </span>
+
+                            <span
+                              className={
+                                `inline-movement ${rowMovement}`
+                              }
+                            >
+                              {rowMovementLabel}
+                            </span>
+
+                            <span>
+                              {item
+                                ? rowStatus === 'online'
+                                  ? `${rowTemperatureF}°F`
+                                  : `Last ${rowTemperatureF}°F`
+                                : 'No data'}
+                            </span>
+
+                            <span>
+                              {item?.receivedAt
+                                ? formatDateTime(item.receivedAt)
+                                : 'No telemetry'}
+                            </span>
+
+                            <div className="row-actions">
+                              <button
+                                onClick={() => {
+                                  setSelectedDeviceId(
+                                    asset.deviceId
+                                  )
+                                  setSearchTerm('')
+                                  setStatusFilter('all')
+                                  setAssetTypeFilter('all')
+                                  setShowOnline(true)
+                                  setShowDelayed(true)
+                                  setShowOffline(true)
+                                  setFiltersOpen(true)
+                                  setActiveView('map')
+                                }}
+                                type="button"
+                              >
+                                Locate
+                              </button>
+
+                              <button
+                                onClick={() => {
+                                  setSelectedDeviceId(
+                                    asset.deviceId
+                                  )
+                                  setRenameError('')
+                                  setRenameValue(
+                                    asset.name || asset.deviceId
+                                  )
+                                  setRenameOpen(true)
+                                }}
+                                type="button"
+                              >
+                                Rename
+                              </button>
+
+                              <button
+                                onClick={() => {
+                                  setSelectedDeviceId(
+                                    asset.deviceId
+                                  )
+                                  setTemperatureLimitsError('')
+                                  setTemperatureMinF(
+                                    asset.temperatureMinC != null
+                                      ? celsiusToFahrenheit(
+                                          Number(asset.temperatureMinC)
+                                        ).toFixed(1)
+                                      : ''
+                                  )
+                                  setTemperatureMaxF(
+                                    asset.temperatureMaxC != null
+                                      ? celsiusToFahrenheit(
+                                          Number(asset.temperatureMaxC)
+                                        ).toFixed(1)
+                                      : ''
+                                  )
+                                  setTemperatureAlertsEnabled(
+                                    Boolean(
+                                      asset.temperatureAlertsEnabled
+                                    )
+                                  )
+                                  setTemperatureLimitsOpen(true)
+                                }}
+                                type="button"
+                              >
+                                Temp Limits
+                              </button>
+
+                              <button
+                                onClick={() => {
+                                  setSelectedDeviceId(
+                                    asset.deviceId
+                                  )
+                                  setDetailsOpen(true)
+                                }}
+                                type="button"
+                              >
+                                Details
+                              </button>
+                            </div>
                           </div>
-                        </div>
-
-                        <span
-                          className={
-                            `inline-status ${deviceStatus}`
-                          }
-                        >
-                          {statusLabel}
-                        </span>
-
-                        <span className={`inline-movement ${movementStatus}`}>
-                          {movementLabel}
-                          {movementStatus === 'moving'
-                            ? ` · ${speedMph.toFixed(1)} mph`
-                            : ''}
-                        </span>
-
-                        <span>
-                          {
-                            deviceStatus === 'online'
-                              ? `${temperatureF}°F`
-                              : `Last ${temperatureF}°F`
-                          }
-                        </span>
-
-                        <span>
-                          {
-                            formatDateTime(
-                              telemetry.receivedAt
-                            )
-                          }
-                        </span>
-
-                        <div className="row-actions">
-                          <button
-                            onClick={
-                              openAssetOnMap
-                            }
-                            type="button"
-                          >
-                            Locate
-                          </button>
-
-                          <button
-                            onClick={
-                              openRenameAsset
-                            }
-                            type="button"
-                            disabled={
-                              !selectedAsset
-                            }
-                          >
-                            Rename
-                          </button>
-
-                          <button
-                            onClick={
-                              openTemperatureLimits
-                            }
-                            type="button"
-                            disabled={
-                              !selectedAsset
-                            }
-                          >
-                            Temp Limits
-                          </button>
-
-                          <button
-                            onClick={() =>
-                              setDetailsOpen(
-                                true
-                              )
-                            }
-                            type="button"
-                          >
-                            Details
-                          </button>
-                        </div>
-                      </div>
-                    )
+                        )
+                      })
                     : (
                       <div className="page-empty">
-                        No fleet telemetry is available yet.
+                        No assets are available for this company.
                       </div>
                     )
                 }
@@ -4229,101 +6135,1411 @@ function App() {
         {
           activeView ===
             'operations' && (
-            <section className="workspace-page">
+            <section className="workspace-page operations-page">
 
-              <div className="page-header">
+              <div className="page-header operations-header">
                 <div>
                   <span className="page-kicker">
                     Operations
                   </span>
 
                   <h1>
-                    Operations Center
+                    Dispatch Center
                   </h1>
 
                   <p>
-                    Live operational controls using the telemetry currently available.
+                    Assign assets, manage loads and monitor live trailer telemetry from one workspace.
                   </p>
                 </div>
+
+                <button
+                  className="primary-action"
+                  onClick={() => {
+                    setDispatchError('')
+                    setNewDispatchOpen(true)
+                  }}
+                  type="button"
+                >
+                  + New Dispatch
+                </button>
               </div>
 
-              <div className="dashboard-grid">
-
-                <article className="page-card action-card">
-                  <span className="card-label">
-                    Selected Asset
-                  </span>
-
-                  <strong className="large-value">
-                    {
-                      selectedDeviceId ||
-                      'No asset selected'
-                    }
-                  </strong>
-
-                  <span
-                    className={
-                      `inline-status ${deviceStatus}`
-                    }
-                  >
-                    {statusLabel}
-                  </span>
-
-                  <button
-                    className="primary-action"
-                    onClick={
-                      openAssetOnMap
-                    }
-                    type="button"
-                  >
-                    Locate on Map
-                  </button>
+              <div className="operations-kpis">
+                <article className="page-card operations-kpi">
+                  <span>Active Loads</span>
+                  <strong>{activeDispatches.length}</strong>
+                  <small>
+                    Assigned through delivery
+                  </small>
                 </article>
 
-                <article className="page-card action-card">
-                  <span className="card-label">
-                    Telemetry
-                  </span>
-
-                  <strong className="large-value">
-                    {temperatureF}°F
-                  </strong>
-
-                  <span className="muted-text">
-                    Last ping:{' '}
+                <article className="page-card operations-kpi">
+                  <span>In Transit</span>
+                  <strong>
                     {
-                      formatAge(
-                        telemetry?.receivedAt
+                      dispatches.filter(
+                        (item) =>
+                          item.status ===
+                          'IN_TRANSIT'
+                      ).length
+                    }
+                  </strong>
+                  <small>
+                    Currently moving between facilities
+                  </small>
+                </article>
+
+                <article className="page-card operations-kpi">
+                  <span>At Facility</span>
+                  <strong>
+                    {
+                      dispatches.filter(
+                        (item) =>
+                          item.status ===
+                            'AT_PICKUP' ||
+                          item.status ===
+                            'AT_DELIVERY'
+                      ).length
+                    }
+                  </strong>
+                  <small>
+                    Pickup or delivery activity
+                  </small>
+                </article>
+
+                <article className="page-card operations-kpi">
+                  <span>Available Assets</span>
+                  <strong>
+                    {availableAssets.length}
+                  </strong>
+                  <small>
+                    Ready for assignment
+                  </small>
+                </article>
+              </div>
+
+              <div className="operations-toolbar page-card">
+                <div className="operations-search">
+                  <span>⌕</span>
+                  <input
+                    value={dispatchSearch}
+                    onChange={(event) =>
+                      setDispatchSearch(
+                        event.target.value
                       )
                     }
-                  </span>
+                    placeholder="Search load, asset, pickup or delivery"
+                    aria-label="Search dispatches"
+                  />
+                </div>
 
-                  <button
-                    className="secondary-action"
-                    onClick={
-                      loadTelemetry
-                    }
-                    type="button"
-                  >
-                    Refresh Now
-                  </button>
-                </article>
+                <select
+                  value={dispatchStatusFilter}
+                  onChange={(event) =>
+                    setDispatchStatusFilter(
+                      event.target.value as
+                        'all' | DispatchStatus
+                    )
+                  }
+                  aria-label="Dispatch status filter"
+                >
+                  <option value="all">
+                    All Statuses
+                  </option>
 
-                <article className="page-card action-card">
-                  <span className="card-label">
-                    Dispatch
-                  </span>
+                  {
+                    dispatchStatusOptions.map(
+                      (status) => (
+                        <option
+                          key={status}
+                          value={status}
+                        >
+                          {
+                            dispatchStatusLabel(
+                              status
+                            )
+                          }
+                        </option>
+                      )
+                    )
+                  }
+                </select>
 
-                  <strong className="large-value">
-                    0
-                  </strong>
-
-                  <span className="muted-text">
-                    No dispatch jobs are connected to the backend yet.
-                  </span>
-                </article>
-
+                <button
+                  className="secondary-action"
+                  onClick={loadDispatches}
+                  type="button"
+                  disabled={dispatchLoading}
+                >
+                  {
+                    dispatchLoading
+                      ? 'Refreshing...'
+                      : 'Refresh'
+                  }
+                </button>
               </div>
+
+              {
+                dispatchError && (
+                  <div className="operations-error">
+                    {dispatchError}
+                  </div>
+                )
+              }
+
+              <div className="operations-layout">
+                <div className="operations-main">
+                  <div className="operations-section-heading">
+                    <div>
+                      <span className="page-kicker">
+                        Loads
+                      </span>
+                      <h2>
+                        Dispatch Board
+                      </h2>
+                    </div>
+
+                    <span>
+                      {filteredDispatches.length}
+                      {' '}
+                      dispatch
+                      {
+                        filteredDispatches.length === 1
+                          ? ''
+                          : 'es'
+                      }
+                    </span>
+                  </div>
+
+                  <div className="dispatch-list">
+                    {
+                      filteredDispatches.length > 0
+                        ? filteredDispatches.map(
+                            (dispatch) => {
+                              const item =
+                                dispatch.asset?.deviceId
+                                  ? fleetTelemetry[
+                                      dispatch.asset.deviceId
+                                    ] ?? null
+                                  : null
+
+                              const rowStatus =
+                                getDeviceStatusForTelemetry(
+                                  item
+                                )
+
+                              const rowTempF =
+                                item?.temperature != null
+                                  ? (
+                                      Number(
+                                        item.temperature
+                                      ) *
+                                        9 /
+                                        5 +
+                                      32
+                                    ).toFixed(1)
+                                  : '--'
+
+                              const rowSpeedMph =
+                                item?.speedKph != null &&
+                                Number.isFinite(
+                                  Number(
+                                    item.speedKph
+                                  )
+                                )
+                                  ? Math.max(
+                                      0,
+                                      Number(
+                                        item.speedKph
+                                      )
+                                    ) *
+                                    0.621371
+                                  : 0
+
+                              const dispatchTempMinF =
+                                dispatch.temperatureMinC != null
+                                  ? (
+                                      Number(
+                                        dispatch.temperatureMinC
+                                      ) *
+                                        9 /
+                                        5 +
+                                      32
+                                    )
+                                  : null
+
+                              const dispatchTempMaxF =
+                                dispatch.temperatureMaxC != null
+                                  ? (
+                                      Number(
+                                        dispatch.temperatureMaxC
+                                      ) *
+                                        9 /
+                                        5 +
+                                      32
+                                    )
+                                  : null
+
+                              const numericTempF =
+                                item?.temperature != null
+                                  ? Number(
+                                      item.temperature
+                                    ) *
+                                      9 /
+                                      5 +
+                                    32
+                                  : null
+
+                              const temperatureAlert =
+                                numericTempF != null &&
+                                (
+                                  (
+                                    dispatchTempMinF != null &&
+                                    numericTempF <
+                                      dispatchTempMinF
+                                  ) ||
+                                  (
+                                    dispatchTempMaxF != null &&
+                                    numericTempF >
+                                      dispatchTempMaxF
+                                  )
+                                )
+
+                              return (
+                                <article
+                                  className="page-card dispatch-card"
+                                  key={dispatch.id}
+                                >
+                                  <div className="dispatch-card-top">
+                                    <div>
+                                      <span className="dispatch-load-label">
+                                        Load
+                                      </span>
+
+                                      <h3>
+                                        {dispatch.loadNumber}
+                                      </h3>
+
+                                      <span
+                                        className={
+                                          `dispatch-status-pill ${dispatch.status.toLowerCase()}`
+                                        }
+                                      >
+                                        {
+                                          dispatchStatusLabel(
+                                            dispatch.status
+                                          )
+                                        }
+                                      </span>
+                                    </div>
+
+                                    <div className="dispatch-asset-summary">
+                                      <strong>
+                                        {
+                                          dispatch.asset?.name ||
+                                          'Unassigned'
+                                        }
+                                      </strong>
+
+                                      <small>
+                                        {
+                                          dispatch.asset?.deviceId ||
+                                          'No asset'
+                                        }
+                                      </small>
+
+                                      <span
+                                        className={
+                                          `inline-status ${rowStatus}`
+                                        }
+                                      >
+                                        {
+                                          rowStatus === 'online'
+                                            ? 'Online'
+                                            : rowStatus === 'delayed'
+                                              ? 'Delayed'
+                                              : 'Offline'
+                                        }
+                                      </span>
+                                    </div>
+                                  </div>
+
+                                  <div className="dispatch-route">
+                                    <div>
+                                      <span>Pickup</span>
+                                      <strong>
+                                        {dispatch.pickupName}
+                                      </strong>
+                                      <small>
+                                        {dispatch.pickupAddress}
+                                      </small>
+                                      <small>
+                                        {
+                                          dispatch.pickupScheduledAt
+                                            ? formatDateTime(
+                                                dispatch.pickupScheduledAt
+                                              )
+                                            : 'No appointment'
+                                        }
+                                      </small>
+                                    </div>
+
+                                    <div className="dispatch-route-arrow">
+                                      →
+                                    </div>
+
+                                    <div>
+                                      <span>Delivery</span>
+                                      <strong>
+                                        {dispatch.deliveryName}
+                                      </strong>
+                                      <small>
+                                        {dispatch.deliveryAddress}
+                                      </small>
+                                      <small>
+                                        {
+                                          dispatch.deliveryScheduledAt
+                                            ? formatDateTime(
+                                                dispatch.deliveryScheduledAt
+                                              )
+                                            : 'No appointment'
+                                        }
+                                      </small>
+                                    </div>
+                                  </div>
+
+                                  <div className="dispatch-live-grid">
+                                    <div>
+                                      <span>Device</span>
+                                      <strong
+                                        className={
+                                          `dispatch-value ${rowStatus}`
+                                        }
+                                      >
+                                        {
+                                          rowStatus === 'online'
+                                            ? 'Online'
+                                            : rowStatus === 'delayed'
+                                              ? 'Delayed'
+                                              : 'Offline'
+                                        }
+                                      </strong>
+                                    </div>
+
+                                    <div>
+                                      <span>Movement</span>
+                                      <strong>
+                                        {
+                                          getDetailedMovementLabel(
+                                            item,
+                                            rowStatus,
+                                            dispatch
+                                          )
+                                        }
+                                      </strong>
+                                    </div>
+
+                                    <div>
+                                      <span>Speed</span>
+                                      <strong>
+                                        {
+                                          `${rowSpeedMph.toFixed(1)} mph`
+                                        }
+                                      </strong>
+                                    </div>
+
+                                    <div>
+                                      <span>Temperature</span>
+                                      <strong
+                                        className={
+                                          temperatureAlert
+                                            ? 'dispatch-value alert'
+                                            : ''
+                                        }
+                                      >
+                                        {rowTempF}°F
+                                      </strong>
+                                    </div>
+
+                                    <div>
+                                      <span>Last Ping</span>
+                                      <strong>
+                                        {
+                                          item?.receivedAt
+                                            ? formatAge(
+                                                item.receivedAt
+                                              )
+                                            : 'No data'
+                                        }
+                                      </strong>
+                                    </div>
+                                  </div>
+
+                                  {
+                                    temperatureAlert && (
+                                      <div className="dispatch-temp-alert">
+                                        ⚠ Temperature outside dispatch limits
+                                      </div>
+                                    )
+                                  }
+
+                                  <div className="dispatch-card-footer">
+                                    <div className="dispatch-meta">
+                                      {
+                                        dispatch.referenceNumber && (
+                                          <span>
+                                            Ref: {dispatch.referenceNumber}
+                                          </span>
+                                        )
+                                      }
+
+                                      {
+                                        dispatch.commodity && (
+                                          <span>
+                                            {dispatch.commodity}
+                                          </span>
+                                        )
+                                      }
+                                    </div>
+
+                                    <div className="dispatch-actions">
+                                      <button
+                                        className="secondary-action dispatch-edit-button"
+                                        onClick={() =>
+                                          openEditDispatch(
+                                            dispatch
+                                          )
+                                        }
+                                        type="button"
+                                      >
+                                        Edit Load
+                                      </button>
+
+                                      {
+                                        dispatch.asset?.deviceId && (
+                                          <button
+                                            className="secondary-action"
+                                            onClick={() => {
+                                              setSelectedDeviceId(
+                                                dispatch.asset.deviceId
+                                              )
+                                              setActiveView('map')
+                                            }}
+                                            type="button"
+                                          >
+                                            View Map
+                                          </button>
+                                        )
+                                      }
+
+                                      <select
+                                        value={dispatch.status}
+                                        onChange={(event) =>
+                                          updateDispatchStatus(
+                                            dispatch.id,
+                                            event.target.value as DispatchStatus
+                                          )
+                                        }
+                                        aria-label={
+                                          `Status for ${dispatch.loadNumber}`
+                                        }
+                                      >
+                                        {
+                                          dispatchStatusOptions.map(
+                                            (status) => (
+                                              <option
+                                                key={status}
+                                                value={status}
+                                              >
+                                                {
+                                                  dispatchStatusLabel(
+                                                    status
+                                                  )
+                                                }
+                                              </option>
+                                            )
+                                          )
+                                        }
+                                      </select>
+                                    </div>
+                                  </div>
+
+                                  {
+                                    dispatch.statusEvents?.length > 0 && (
+                                      <details className="dispatch-history">
+                                        <summary>
+                                          Status History
+                                        </summary>
+
+                                        <div>
+                                          {
+                                            dispatch.statusEvents
+                                              .slice(0, 8)
+                                              .map((event) => (
+                                                <p key={event.id}>
+                                                  <strong>
+                                                    {
+                                                      dispatchStatusLabel(
+                                                        event.status
+                                                      )
+                                                    }
+                                                  </strong>
+                                                  <span>
+                                                    {
+                                                      formatDateTime(
+                                                        event.createdAt
+                                                      )
+                                                    }
+                                                  </span>
+                                                </p>
+                                              ))
+                                          }
+                                        </div>
+                                      </details>
+                                    )
+                                  }
+                                </article>
+                              )
+                            }
+                          )
+                        : (
+                          <div className="page-card page-empty">
+                            {
+                              dispatchLoading
+                                ? 'Loading dispatches...'
+                                : 'No dispatches match the current filters.'
+                            }
+                          </div>
+                        )
+                    }
+                  </div>
+                </div>
+
+                <aside className="operations-side">
+                  <div className="page-card available-assets-card">
+                    <div className="operations-section-heading compact">
+                      <div>
+                        <span className="page-kicker">
+                          Fleet
+                        </span>
+                        <h2>
+                          Available Assets
+                        </h2>
+                      </div>
+                    </div>
+
+                    {
+                      availableAssets.length > 0
+                        ? availableAssets.map(
+                            (asset) => {
+                              const item =
+                                fleetTelemetry[
+                                  asset.deviceId
+                                ] ?? null
+
+                              const status =
+                                getDeviceStatusForTelemetry(
+                                  item
+                                )
+
+                              return (
+                                <button
+                                  className="available-asset-row"
+                                  key={asset.id}
+                                  onClick={() => {
+                                    setNewDispatchForm(
+                                      (current) => ({
+                                        ...current,
+                                        assetId:
+                                          String(asset.id)
+                                      })
+                                    )
+                                    setNewDispatchOpen(true)
+                                  }}
+                                  type="button"
+                                >
+                                  <span
+                                    className={
+                                      `mini-status ${status}`
+                                    }
+                                  >
+                                    ◈
+                                  </span>
+
+                                  <span>
+                                    <strong>
+                                      {
+                                        asset.name ||
+                                        asset.deviceId
+                                      }
+                                    </strong>
+                                    <small>
+                                      {asset.deviceId}
+                                    </small>
+                                  </span>
+
+                                  <em>
+                                    {
+                                      status === 'online'
+                                        ? 'Online'
+                                        : status === 'delayed'
+                                          ? 'Delayed'
+                                          : 'Offline'
+                                    }
+                                  </em>
+                                </button>
+                              )
+                            }
+                          )
+                        : (
+                          <p className="muted-text">
+                            No unassigned assets.
+                          </p>
+                        )
+                    }
+                  </div>
+                </aside>
+              </div>
+
+              {
+                newDispatchOpen && (
+                  <div
+                    className="modal-backdrop"
+                    onMouseDown={() => {
+                      if (!newDispatchSaving) {
+                        setNewDispatchOpen(false)
+                      }
+                    }}
+                  >
+                    <section
+                      className="details-modal dispatch-modal"
+                      onMouseDown={(event) =>
+                        event.stopPropagation()
+                      }
+                    >
+                      <div className="modal-header">
+                        <div>
+                          <span className="page-kicker">
+                            Operations
+                          </span>
+
+                          <h2>
+                            New Dispatch
+                          </h2>
+                        </div>
+
+                        <button
+                          className="modal-close"
+                          onClick={() =>
+                            setNewDispatchOpen(false)
+                          }
+                          type="button"
+                          disabled={newDispatchSaving}
+                        >
+                          ×
+                        </button>
+                      </div>
+
+                      <div className="dispatch-form-grid">
+                        <label>
+                          <span>Load Number *</span>
+                          <input
+                            value={
+                              newDispatchForm.loadNumber
+                            }
+                            onChange={(event) =>
+                              setNewDispatchForm(
+                                (current) => ({
+                                  ...current,
+                                  loadNumber:
+                                    event.target.value
+                                })
+                              )
+                            }
+                            placeholder="MAV-00021"
+                          />
+                        </label>
+
+                        <label>
+                          <span>Asset</span>
+                          <select
+                            value={
+                              newDispatchForm.assetId
+                            }
+                            onChange={(event) =>
+                              setNewDispatchForm(
+                                (current) => ({
+                                  ...current,
+                                  assetId:
+                                    event.target.value
+                                })
+                              )
+                            }
+                          >
+                            <option value="">
+                              Unassigned
+                            </option>
+
+                            {
+                              availableAssets.map(
+                                (asset) => (
+                                  <option
+                                    key={asset.id}
+                                    value={asset.id}
+                                  >
+                                    {
+                                      asset.name ||
+                                      asset.deviceId
+                                    }
+                                    {' ('}
+                                    {asset.deviceId}
+                                    {')'}
+                                  </option>
+                                )
+                              )
+                            }
+                          </select>
+                        </label>
+
+                        <label>
+                          <span>Pickup Facility *</span>
+                          <input
+                            value={
+                              newDispatchForm.pickupName
+                            }
+                            onChange={(event) =>
+                              setNewDispatchForm(
+                                (current) => ({
+                                  ...current,
+                                  pickupName:
+                                    event.target.value
+                                })
+                              )
+                            }
+                            placeholder="Taylor Farms"
+                          />
+                        </label>
+
+                        <label>
+                          <span>Pickup Appointment</span>
+                          <input
+                            type="datetime-local"
+                            value={
+                              newDispatchForm.pickupScheduledAt
+                            }
+                            onChange={(event) =>
+                              setNewDispatchForm(
+                                (current) => ({
+                                  ...current,
+                                  pickupScheduledAt:
+                                    event.target.value
+                                })
+                              )
+                            }
+                          />
+                        </label>
+
+                        <label className="span-2">
+                          <span>Pickup Address *</span>
+                          <input
+                            value={
+                              newDispatchForm.pickupAddress
+                            }
+                            onChange={(event) =>
+                              setNewDispatchForm(
+                                (current) => ({
+                                  ...current,
+                                  pickupAddress:
+                                    event.target.value
+                                })
+                              )
+                            }
+                            placeholder="Salinas, CA"
+                          />
+                        </label>
+
+                        <label>
+                          <span>Delivery Facility *</span>
+                          <input
+                            value={
+                              newDispatchForm.deliveryName
+                            }
+                            onChange={(event) =>
+                              setNewDispatchForm(
+                                (current) => ({
+                                  ...current,
+                                  deliveryName:
+                                    event.target.value
+                                })
+                              )
+                            }
+                            placeholder="Distribution Center"
+                          />
+                        </label>
+
+                        <label>
+                          <span>Delivery Appointment</span>
+                          <input
+                            type="datetime-local"
+                            value={
+                              newDispatchForm.deliveryScheduledAt
+                            }
+                            onChange={(event) =>
+                              setNewDispatchForm(
+                                (current) => ({
+                                  ...current,
+                                  deliveryScheduledAt:
+                                    event.target.value
+                                })
+                              )
+                            }
+                          />
+                        </label>
+
+                        <label className="span-2">
+                          <span>Delivery Address *</span>
+                          <input
+                            value={
+                              newDispatchForm.deliveryAddress
+                            }
+                            onChange={(event) =>
+                              setNewDispatchForm(
+                                (current) => ({
+                                  ...current,
+                                  deliveryAddress:
+                                    event.target.value
+                                })
+                              )
+                            }
+                            placeholder="Los Angeles, CA"
+                          />
+                        </label>
+
+                        <label>
+                          <span>Commodity</span>
+                          <input
+                            value={
+                              newDispatchForm.commodity
+                            }
+                            onChange={(event) =>
+                              setNewDispatchForm(
+                                (current) => ({
+                                  ...current,
+                                  commodity:
+                                    event.target.value
+                                })
+                              )
+                            }
+                            placeholder="Produce"
+                          />
+                        </label>
+
+                        <label>
+                          <span>Reference / PO</span>
+                          <input
+                            value={
+                              newDispatchForm.referenceNumber
+                            }
+                            onChange={(event) =>
+                              setNewDispatchForm(
+                                (current) => ({
+                                  ...current,
+                                  referenceNumber:
+                                    event.target.value
+                                })
+                              )
+                            }
+                            placeholder="PO-829183"
+                          />
+                        </label>
+
+                        <label>
+                          <span>Set Point °F</span>
+                          <input
+                            inputMode="decimal"
+                            value={
+                              newDispatchForm.temperatureSetpointF
+                            }
+                            onChange={(event) =>
+                              setNewDispatchForm(
+                                (current) => ({
+                                  ...current,
+                                  temperatureSetpointF:
+                                    event.target.value
+                                })
+                              )
+                            }
+                            placeholder="34"
+                          />
+                        </label>
+
+                        <label>
+                          <span>Minimum °F</span>
+                          <input
+                            inputMode="decimal"
+                            value={
+                              newDispatchForm.temperatureMinF
+                            }
+                            onChange={(event) =>
+                              setNewDispatchForm(
+                                (current) => ({
+                                  ...current,
+                                  temperatureMinF:
+                                    event.target.value
+                                })
+                              )
+                            }
+                            placeholder="32"
+                          />
+                        </label>
+
+                        <label>
+                          <span>Maximum °F</span>
+                          <input
+                            inputMode="decimal"
+                            value={
+                              newDispatchForm.temperatureMaxF
+                            }
+                            onChange={(event) =>
+                              setNewDispatchForm(
+                                (current) => ({
+                                  ...current,
+                                  temperatureMaxF:
+                                    event.target.value
+                                })
+                              )
+                            }
+                            placeholder="38"
+                          />
+                        </label>
+
+                        <label className="span-2">
+                          <span>Notes</span>
+                          <textarea
+                            value={
+                              newDispatchForm.notes
+                            }
+                            onChange={(event) =>
+                              setNewDispatchForm(
+                                (current) => ({
+                                  ...current,
+                                  notes:
+                                    event.target.value
+                                })
+                              )
+                            }
+                            placeholder="Load notes, driver instructions, appointment details..."
+                          />
+                        </label>
+                      </div>
+
+                      {
+                        dispatchError && (
+                          <div className="operations-error">
+                            {dispatchError}
+                          </div>
+                        )
+                      }
+
+                      <div className="modal-actions">
+                        <button
+                          className="secondary-action"
+                          onClick={() =>
+                            setNewDispatchOpen(false)
+                          }
+                          type="button"
+                          disabled={newDispatchSaving}
+                        >
+                          Cancel
+                        </button>
+
+                        <button
+                          className="primary-action"
+                          onClick={createDispatch}
+                          type="button"
+                          disabled={newDispatchSaving}
+                        >
+                          {
+                            newDispatchSaving
+                              ? 'Creating...'
+                              : 'Create Dispatch'
+                          }
+                        </button>
+                      </div>
+                    </section>
+                  </div>
+                )
+              }
+
+              {
+                editDispatchOpen && (
+                  <div
+                    className="modal-backdrop"
+                    onMouseDown={() => {
+                      if (!editDispatchSaving) {
+                        setEditDispatchOpen(false)
+                      }
+                    }}
+                  >
+                    <section
+                      className="details-modal dispatch-modal"
+                      onMouseDown={(event) =>
+                        event.stopPropagation()
+                      }
+                    >
+                      <div className="modal-header">
+                        <div>
+                          <span className="page-kicker">
+                            Operations
+                          </span>
+
+                          <h2>
+                            Edit Dispatch
+                          </h2>
+                        </div>
+
+                        <button
+                          className="modal-close"
+                          onClick={() =>
+                            setEditDispatchOpen(false)
+                          }
+                          type="button"
+                          disabled={editDispatchSaving}
+                        >
+                          ×
+                        </button>
+                      </div>
+
+                      <div className="dispatch-form-grid">
+                        <label>
+                          <span>Load Number *</span>
+                          <input
+                            value={
+                              editDispatchForm.loadNumber
+                            }
+                            onChange={(event) =>
+                              setEditDispatchForm(
+                                (current) => ({
+                                  ...current,
+                                  loadNumber:
+                                    event.target.value
+                                })
+                              )
+                            }
+                            placeholder="MAV-00021"
+                          />
+                        </label>
+
+                        <label>
+                          <span>Asset</span>
+                          <select
+                            value={
+                              editDispatchForm.assetId
+                            }
+                            onChange={(event) =>
+                              setEditDispatchForm(
+                                (current) => ({
+                                  ...current,
+                                  assetId:
+                                    event.target.value
+                                })
+                              )
+                            }
+                          >
+                            <option value="">
+                              Unassigned
+                            </option>
+
+                            {
+                              assets.map(
+                                (asset) => (
+                                  <option
+                                    key={asset.id}
+                                    value={asset.id}
+                                  >
+                                    {
+                                      asset.name ||
+                                      asset.deviceId
+                                    }
+                                    {' ('}
+                                    {asset.deviceId}
+                                    {')'}
+                                  </option>
+                                )
+                              )
+                            }
+                          </select>
+                        </label>
+
+                        <label>
+                          <span>Pickup Facility *</span>
+                          <input
+                            value={
+                              editDispatchForm.pickupName
+                            }
+                            onChange={(event) =>
+                              setEditDispatchForm(
+                                (current) => ({
+                                  ...current,
+                                  pickupName:
+                                    event.target.value
+                                })
+                              )
+                            }
+                            placeholder="Taylor Farms"
+                          />
+                        </label>
+
+                        <label>
+                          <span>Pickup Appointment</span>
+                          <input
+                            type="datetime-local"
+                            value={
+                              editDispatchForm.pickupScheduledAt
+                            }
+                            onChange={(event) =>
+                              setEditDispatchForm(
+                                (current) => ({
+                                  ...current,
+                                  pickupScheduledAt:
+                                    event.target.value
+                                })
+                              )
+                            }
+                          />
+                        </label>
+
+                        <label className="span-2">
+                          <span>Pickup Address *</span>
+                          <input
+                            value={
+                              editDispatchForm.pickupAddress
+                            }
+                            onChange={(event) =>
+                              setEditDispatchForm(
+                                (current) => ({
+                                  ...current,
+                                  pickupAddress:
+                                    event.target.value
+                                })
+                              )
+                            }
+                            placeholder="Salinas, CA"
+                          />
+                        </label>
+
+                        <label>
+                          <span>Delivery Facility *</span>
+                          <input
+                            value={
+                              editDispatchForm.deliveryName
+                            }
+                            onChange={(event) =>
+                              setEditDispatchForm(
+                                (current) => ({
+                                  ...current,
+                                  deliveryName:
+                                    event.target.value
+                                })
+                              )
+                            }
+                            placeholder="Distribution Center"
+                          />
+                        </label>
+
+                        <label>
+                          <span>Delivery Appointment</span>
+                          <input
+                            type="datetime-local"
+                            value={
+                              editDispatchForm.deliveryScheduledAt
+                            }
+                            onChange={(event) =>
+                              setEditDispatchForm(
+                                (current) => ({
+                                  ...current,
+                                  deliveryScheduledAt:
+                                    event.target.value
+                                })
+                              )
+                            }
+                          />
+                        </label>
+
+                        <label className="span-2">
+                          <span>Delivery Address *</span>
+                          <input
+                            value={
+                              editDispatchForm.deliveryAddress
+                            }
+                            onChange={(event) =>
+                              setEditDispatchForm(
+                                (current) => ({
+                                  ...current,
+                                  deliveryAddress:
+                                    event.target.value
+                                })
+                              )
+                            }
+                            placeholder="Los Angeles, CA"
+                          />
+                        </label>
+
+                        <label>
+                          <span>Commodity</span>
+                          <input
+                            value={
+                              editDispatchForm.commodity
+                            }
+                            onChange={(event) =>
+                              setEditDispatchForm(
+                                (current) => ({
+                                  ...current,
+                                  commodity:
+                                    event.target.value
+                                })
+                              )
+                            }
+                            placeholder="Produce"
+                          />
+                        </label>
+
+                        <label>
+                          <span>Reference / PO</span>
+                          <input
+                            value={
+                              editDispatchForm.referenceNumber
+                            }
+                            onChange={(event) =>
+                              setEditDispatchForm(
+                                (current) => ({
+                                  ...current,
+                                  referenceNumber:
+                                    event.target.value
+                                })
+                              )
+                            }
+                            placeholder="PO-829183"
+                          />
+                        </label>
+
+                        <label>
+                          <span>Set Point °F</span>
+                          <input
+                            inputMode="decimal"
+                            value={
+                              editDispatchForm.temperatureSetpointF
+                            }
+                            onChange={(event) =>
+                              setEditDispatchForm(
+                                (current) => ({
+                                  ...current,
+                                  temperatureSetpointF:
+                                    event.target.value
+                                })
+                              )
+                            }
+                            placeholder="34"
+                          />
+                        </label>
+
+                        <label>
+                          <span>Minimum °F</span>
+                          <input
+                            inputMode="decimal"
+                            value={
+                              editDispatchForm.temperatureMinF
+                            }
+                            onChange={(event) =>
+                              setEditDispatchForm(
+                                (current) => ({
+                                  ...current,
+                                  temperatureMinF:
+                                    event.target.value
+                                })
+                              )
+                            }
+                            placeholder="32"
+                          />
+                        </label>
+
+                        <label>
+                          <span>Maximum °F</span>
+                          <input
+                            inputMode="decimal"
+                            value={
+                              editDispatchForm.temperatureMaxF
+                            }
+                            onChange={(event) =>
+                              setEditDispatchForm(
+                                (current) => ({
+                                  ...current,
+                                  temperatureMaxF:
+                                    event.target.value
+                                })
+                              )
+                            }
+                            placeholder="38"
+                          />
+                        </label>
+
+                        <label className="span-2">
+                          <span>Notes</span>
+                          <textarea
+                            value={
+                              editDispatchForm.notes
+                            }
+                            onChange={(event) =>
+                              setEditDispatchForm(
+                                (current) => ({
+                                  ...current,
+                                  notes:
+                                    event.target.value
+                                })
+                              )
+                            }
+                            placeholder="Load notes, driver instructions, appointment details..."
+                          />
+                        </label>
+                      </div>
+
+                      {
+                        dispatchError && (
+                          <div className="operations-error">
+                            {dispatchError}
+                          </div>
+                        )
+                      }
+
+                      <div className="modal-actions">
+                        <button
+                          className="secondary-action"
+                          onClick={() =>
+                            setEditDispatchOpen(false)
+                          }
+                          type="button"
+                          disabled={editDispatchSaving}
+                        >
+                          Cancel
+                        </button>
+
+                        <button
+                          className="primary-action"
+                          onClick={saveEditedDispatch}
+                          type="button"
+                          disabled={editDispatchSaving}
+                        >
+                          {
+                            editDispatchSaving
+                              ? 'Saving...'
+                              : 'Save Changes'
+                          }
+                        </button>
+                      </div>
+                    </section>
+                  </div>
+                )
+              }
 
             </section>
           )
@@ -4480,123 +7696,546 @@ function App() {
         {
           activeView ===
             'reports' && (
-            <section className="workspace-page">
+            <section className="workspace-page reports-page">
 
-              <div className="page-header">
+              <div className="page-header reports-page-header">
                 <div>
                   <span className="page-kicker">
                     Reports
                   </span>
 
                   <h1>
-                    Current Fleet Snapshot
+                    Fleet Telemetry Reports
                   </h1>
 
                   <p>
-                    This report uses the latest telemetry currently provided by the backend.
+                    Generate structured location and temperature reports from stored Maverick telemetry.
                   </p>
                 </div>
 
                 <button
                   className="primary-action"
-                  onClick={() =>
-                    window.print()
+                  onClick={
+                    exportReportPdf
                   }
                   type="button"
+                  disabled={
+                    reportPoints.length === 0
+                  }
                 >
-                  Print Report
+                  Export PDF
                 </button>
               </div>
 
-              <div className="page-card report-card">
+              <div className="report-builder page-card">
 
-                <dl className="report-list">
-
-                  <div>
-                    <dt>
+                <div className="report-builder-controls">
+                  <label>
+                    <span>
                       Asset
-                    </dt>
+                    </span>
 
-                    <dd>
-                      {
-                        selectedAssetName
+                    <div className="report-selected-asset">
+                      <strong>
+                        {
+                          selectedAsset
+                            ? (
+                              selectedAsset.name ||
+                              selectedAsset.deviceId
+                            )
+                            : 'No asset selected'
+                        }
+                      </strong>
+
+                      <small>
+                        {
+                          selectedDeviceId ||
+                          'Use Search Trailer ID above'
+                        }
+                      </small>
+                    </div>
+                  </label>
+
+                  <label>
+                    <span>
+                      Date range
+                    </span>
+
+                    <select
+                      value={
+                        reportRange
                       }
-                    </dd>
-                  </div>
-
-                  <div>
-                    <dt>
-                      Status
-                    </dt>
-
-                    <dd>
-                      {statusLabel}
-                    </dd>
-                  </div>
-
-                  <div>
-                    <dt>
-                      {temperatureLabel}
-                    </dt>
-
-                    <dd>
-                      {temperatureF}°F
-                    </dd>
-                  </div>
-
-                  <div>
-                    <dt>
-                      Last telemetry
-                    </dt>
-
-                    <dd>
-                      {
-                        formatDateTime(
-                          telemetry?.receivedAt
-                        )
+                      onChange={
+                        (event) =>
+                          setReportRange(
+                            event.target.value as HistoryRange
+                          )
                       }
-                    </dd>
-                  </div>
+                    >
+                      <option value="today">
+                        Today
+                      </option>
+                      <option value="yesterday">
+                        Yesterday
+                      </option>
+                      <option value="7days">
+                        Last 7 days
+                      </option>
+                      <option value="custom">
+                        Custom date
+                      </option>
+                    </select>
+                  </label>
 
-                  <div>
-                    <dt>
-                      Last location update
-                    </dt>
+                  {
+                    reportRange ===
+                      'custom' && (
+                      <label>
+                        <span>
+                          Date
+                        </span>
 
-                    <dd>
-                      {
-                        formatDateTime(
-                          telemetry?.locationReceivedAt
-                        )
-                      }
-                    </dd>
-                  </div>
+                        <input
+                          type="date"
+                          value={
+                            reportCustomDate
+                          }
+                          onChange={
+                            (event) =>
+                              setReportCustomDate(
+                                event.target.value
+                              )
+                          }
+                        />
+                      </label>
+                    )
+                  }
 
-                  <div>
-                    <dt>
-                      Coordinates
-                    </dt>
+                  <button
+                    className="primary-action"
+                    onClick={
+                      generateReport
+                    }
+                    type="button"
+                    disabled={
+                      reportLoading ||
+                      !selectedDeviceId
+                    }
+                  >
+                    {
+                      reportLoading
+                        ? 'Generating...'
+                        : 'Generate Report'
+                    }
+                  </button>
+                </div>
 
-                    <dd>
-                      {
-                        hasLocation
-                          ? `${telemetry.latitude.toFixed(
-                              6
-                            )}, ${telemetry.longitude.toFixed(
-                              6
-                            )}`
-                          : 'No GPS location'
-                      }
-                    </dd>
-                  </div>
-
-                </dl>
-
-                <p className="report-note">
-                  Historical charts and date-range reports will need a backend history endpoint; this page intentionally does not invent historical data.
-                </p>
+                {
+                  reportError && (
+                    <div className="report-error">
+                      {reportError}
+                    </div>
+                  )
+                }
 
               </div>
+
+              {
+                reportPoints.length > 0 && (
+                  <section className="report-export-sheet">
+
+                    <div className="report-document-header">
+                      <div>
+                        <span>
+                          MAVERICK
+                        </span>
+
+                        <h2>
+                          Location & Temperature Report
+                        </h2>
+                      </div>
+
+                      <div className="report-document-meta">
+                        <strong>
+                          {
+                            selectedAsset
+                              ? (
+                                selectedAsset.name ||
+                                selectedAsset.deviceId
+                              )
+                              : selectedDeviceId
+                          }
+                        </strong>
+
+                        <small>
+                          Device ID: {
+                            selectedDeviceId
+                          }
+                        </small>
+
+                        <small>
+                          Generated: {
+                            formatDateTime(
+                              reportGeneratedAt
+                            )
+                          }
+                        </small>
+                      </div>
+                    </div>
+
+                    <div className="report-period">
+                      <div>
+                        <span>
+                          Report Period
+                        </span>
+
+                        <strong>
+                          {
+                            formatDateTime(
+                              reportPeriod.from
+                            )
+                          }
+                          {' → '}
+                          {
+                            formatDateTime(
+                              reportPeriod.to
+                            )
+                          }
+                        </strong>
+                      </div>
+
+                      <div>
+                        <span>
+                          Current Status
+                        </span>
+
+                        <strong>
+                          {statusLabel}
+                        </strong>
+                      </div>
+
+                      <div>
+                        <span>
+                          Dispatch
+                        </span>
+
+                        <strong>
+                          {
+                            selectedActiveDispatch
+                              ? `${selectedActiveDispatch.loadNumber} · ${dispatchStatusLabel(
+                                  selectedActiveDispatch.status
+                                )}`
+                              : 'No active dispatch'
+                          }
+                        </strong>
+                      </div>
+                    </div>
+
+                    <div className="report-summary-grid">
+                      <div>
+                        <span>
+                          Telemetry Readings
+                        </span>
+                        <strong>
+                          {
+                            reportPoints.length
+                          }
+                        </strong>
+                      </div>
+
+                      <div>
+                        <span>
+                          GPS Locations
+                        </span>
+                        <strong>
+                          {
+                            reportGpsPoints.length
+                          }
+                        </strong>
+                      </div>
+
+                      <div>
+                        <span>
+                          Distance
+                        </span>
+                        <strong>
+                          {
+                            `${reportDistanceMiles.toFixed(1)} mi`
+                          }
+                        </strong>
+                      </div>
+
+                      <div>
+                        <span>
+                          Average Temp
+                        </span>
+                        <strong>
+                          {
+                            reportAverageTempF != null
+                              ? `${reportAverageTempF.toFixed(1)}°F`
+                              : '--'
+                          }
+                        </strong>
+                      </div>
+
+                      <div>
+                        <span>
+                          Minimum Temp
+                        </span>
+                        <strong>
+                          {
+                            reportMinTempF != null
+                              ? `${reportMinTempF.toFixed(1)}°F`
+                              : '--'
+                          }
+                        </strong>
+                      </div>
+
+                      <div>
+                        <span>
+                          Maximum Temp
+                        </span>
+                        <strong>
+                          {
+                            reportMaxTempF != null
+                              ? `${reportMaxTempF.toFixed(1)}°F`
+                              : '--'
+                          }
+                        </strong>
+                      </div>
+
+                      <div
+                        className={
+                          reportOutOfRangeCount > 0
+                            ? 'report-summary-alert'
+                            : ''
+                        }
+                      >
+                        <span>
+                          Temp Exceptions
+                        </span>
+                        <strong>
+                          {
+                            reportOutOfRangeCount
+                          }
+                        </strong>
+                      </div>
+
+                      <div>
+                        <span>
+                          Temp Limits
+                        </span>
+                        <strong>
+                          {
+                            reportEffectiveMinC != null ||
+                            reportEffectiveMaxC != null
+                              ? `${
+                                  reportEffectiveMinC != null
+                                    ? `${celsiusToFahrenheit(
+                                        Number(
+                                          reportEffectiveMinC
+                                        )
+                                      ).toFixed(1)}°F`
+                                    : '--'
+                                } – ${
+                                  reportEffectiveMaxC != null
+                                    ? `${celsiusToFahrenheit(
+                                        Number(
+                                          reportEffectiveMaxC
+                                        )
+                                      ).toFixed(1)}°F`
+                                    : '--'
+                                }`
+                              : 'Not configured'
+                          }
+                        </strong>
+                      </div>
+                    </div>
+
+                    <div className="report-section-title">
+                      <div>
+                        <span className="page-kicker">
+                          Detail
+                        </span>
+                        <h3>
+                          Telemetry Timeline
+                        </h3>
+                      </div>
+
+                      <small>
+                        Temperature, location, movement and speed
+                      </small>
+                    </div>
+
+                    <div className="report-table-wrap">
+                      <table className="report-data-table">
+                        <thead>
+                          <tr>
+                            <th>
+                              Date / Time
+                            </th>
+                            <th>
+                              Temp
+                            </th>
+                            <th>
+                              Location
+                            </th>
+                            <th>
+                              Movement
+                            </th>
+                            <th>
+                              Speed
+                            </th>
+                            <th>
+                              Altitude
+                            </th>
+                          </tr>
+                        </thead>
+
+                        <tbody>
+                          {
+                            reportPoints.map(
+                              (
+                                point,
+                                index
+                              ) => {
+                                const pointTempF =
+                                  celsiusToFahrenheit(
+                                    Number(
+                                      point.temperature
+                                    )
+                                  )
+
+                                const pointOutOfRange =
+                                  (
+                                    reportEffectiveMinC != null &&
+                                    Number(
+                                      point.temperature
+                                    ) <
+                                      Number(
+                                        reportEffectiveMinC
+                                      )
+                                  ) ||
+                                  (
+                                    reportEffectiveMaxC != null &&
+                                    Number(
+                                      point.temperature
+                                    ) >
+                                      Number(
+                                        reportEffectiveMaxC
+                                      )
+                                  )
+
+                                const pointSpeedMph =
+                                  point.speedKph != null
+                                    ? Math.max(
+                                        0,
+                                        Number(
+                                          point.speedKph
+                                        )
+                                      ) *
+                                      0.621371
+                                    : 0
+
+                                const pointMovement =
+                                  String(
+                                    point.movementStatus ||
+                                    ''
+                                  ).toUpperCase()
+
+                                return (
+                                  <tr
+                                    key={
+                                      `${point.id}-${index}`
+                                    }
+                                  >
+                                    <td>
+                                      {
+                                        formatDateTime(
+                                          point.timestamp
+                                        )
+                                      }
+                                    </td>
+
+                                    <td
+                                      className={
+                                        pointOutOfRange
+                                          ? 'report-temp-alert'
+                                          : ''
+                                      }
+                                    >
+                                      {
+                                        pointTempF.toFixed(
+                                          1
+                                        )
+                                      }°F
+                                    </td>
+
+                                    <td>
+                                      {
+                                        point.latitude != null &&
+                                        point.longitude != null
+                                          ? `${Number(
+                                              point.latitude
+                                            ).toFixed(5)}, ${Number(
+                                              point.longitude
+                                            ).toFixed(5)}`
+                                          : 'No GPS'
+                                      }
+                                    </td>
+
+                                    <td>
+                                      {
+                                        pointMovement ===
+                                          'MOVING'
+                                          ? 'Moving'
+                                          : pointMovement ===
+                                              'PARKED'
+                                            ? 'Parked'
+                                            : pointMovement ||
+                                              'Unknown'
+                                      }
+                                    </td>
+
+                                    <td>
+                                      {
+                                        `${pointSpeedMph.toFixed(
+                                          1
+                                        )} mph`
+                                      }
+                                    </td>
+
+                                    <td>
+                                      {
+                                        point.altitude != null
+                                          ? `${Number(
+                                              point.altitude
+                                            ).toFixed(1)} m`
+                                          : '--'
+                                      }
+                                    </td>
+                                  </tr>
+                                )
+                              }
+                            )
+                          }
+                        </tbody>
+                      </table>
+                    </div>
+
+                    <div className="report-footer-note">
+                      <span>
+                        Maverick Fleet Telemetry
+                      </span>
+
+                      <span>
+                        Location points are based on current or recorded GNSS telemetry received by Maverick.
+                      </span>
+                    </div>
+
+                  </section>
+                )
+              }
 
             </section>
           )
@@ -4669,17 +8308,13 @@ function App() {
                               Current {temperatureF}°F
                               {' · '}
                               {
-                                temperatureAboveLimit
-                                  ? `Max ${celsiusToFahrenheit(
-                                      Number(
-                                        selectedAsset?.temperatureMaxC
-                                      )
-                                    ).toFixed(1)}°F`
-                                  : `Min ${celsiusToFahrenheit(
-                                      Number(
-                                        selectedAsset?.temperatureMinC
-                                      )
-                                    ).toFixed(1)}°F`
+                                temperatureAlertLimitText ||
+                                'Configured temperature limits'
+                              }
+                              {
+                                temperatureAlertSource
+                                  ? ` · ${temperatureAlertSource}`
+                                  : ''
                               }
                             </small>
                           </div>
@@ -4862,7 +8497,7 @@ function App() {
 
                 <div>
                   <dt>
-                    Temperature Limits
+                    Asset Temperature Limits
                   </dt>
 
                   <dd>
@@ -4887,17 +8522,57 @@ function App() {
 
                 <div>
                   <dt>
-                    Temperature Alerts
+                    Dispatch Temperature Limits
                   </dt>
 
                   <dd>
                     {
-                      selectedAsset
-                        ?.temperatureAlertsEnabled
-                        ? temperatureOutOfRange
-                          ? 'ACTIVE ALERT'
-                          : 'Enabled'
-                        : 'Disabled'
+                      selectedActiveDispatch
+                        ? (
+                          selectedActiveDispatch
+                            .temperatureMinC != null &&
+                          selectedActiveDispatch
+                            .temperatureMaxC != null
+                            ? `${celsiusToFahrenheit(
+                                Number(
+                                  selectedActiveDispatch.temperatureMinC
+                                )
+                              ).toFixed(1)}°F – ${celsiusToFahrenheit(
+                                Number(
+                                  selectedActiveDispatch.temperatureMaxC
+                                )
+                              ).toFixed(1)}°F`
+                            : 'Not configured'
+                        )
+                        : 'No active dispatch'
+                    }
+                  </dd>
+                </div>
+
+                <div>
+                  <dt>
+                    Temperature Monitoring
+                  </dt>
+
+                  <dd
+                    className={
+                      temperatureOutOfRange
+                        ? 'temperature-status-active'
+                        : ''
+                    }
+                  >
+                    {
+                      temperatureOutOfRange
+                        ? `ACTIVE ALERT · ${temperatureAlertSource}`
+                        : (
+                            Boolean(
+                              selectedAsset
+                                ?.temperatureAlertsEnabled
+                            ) ||
+                            dispatchHasTemperatureLimits
+                          )
+                          ? 'Monitoring'
+                          : 'Disabled'
                     }
                   </dd>
                 </div>
@@ -5797,7 +9472,12 @@ function App() {
               <div className="modal-header">
                 <div>
                   <span className="page-kicker">
-                    Temperature Monitor
+                    {
+                      selectedActiveDispatch &&
+                      dispatchHasTemperatureLimits
+                        ? 'Temperature Monitor · Dispatch Synced'
+                        : 'Temperature Monitor'
+                    }
                   </span>
 
                   <h2>
@@ -5908,6 +9588,50 @@ function App() {
 
                   <i className="toggle" />
                 </label>
+
+                {
+                  selectedActiveDispatch &&
+                  dispatchHasTemperatureLimits && (
+                    <div className="temperature-limit-source">
+                      <strong>
+                        Active Dispatch Limits
+                      </strong>
+
+                      <span>
+                        {
+                          selectedActiveDispatch
+                            .loadNumber
+                        }
+                        {' · '}
+                        {
+                          selectedActiveDispatch
+                            .temperatureMinC != null
+                            ? `${celsiusToFahrenheit(
+                                Number(
+                                  selectedActiveDispatch.temperatureMinC
+                                )
+                              ).toFixed(1)}°F min`
+                            : 'No minimum'
+                        }
+                        {' · '}
+                        {
+                          selectedActiveDispatch
+                            .temperatureMaxC != null
+                            ? `${celsiusToFahrenheit(
+                                Number(
+                                  selectedActiveDispatch.temperatureMaxC
+                                )
+                              ).toFixed(1)}°F max`
+                            : 'No maximum'
+                        }
+                      </span>
+
+                      <small>
+                        These dispatch limits are currently applied to this asset. Saving here copies the displayed values into the asset limits; removing asset limits does not remove the active dispatch limits.
+                      </small>
+                    </div>
+                  )
+                }
 
                 <div className="rename-help">
                   <span>

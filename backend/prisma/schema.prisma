@@ -15,17 +15,18 @@ model Company {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  users  User[]
-  assets Asset[]
+  users      User[]
+  assets     Asset[]
+  dispatches Dispatch[]
 }
 
 model User {
-  id           Int      @id @default(autoincrement())
-  email        String   @unique
+  id           Int     @id @default(autoincrement())
+  email        String  @unique
   passwordHash String
   name         String
-  role         String   @default("viewer")
-  active       Boolean  @default(true)
+  role         String  @default("viewer")
+  active       Boolean @default(true)
 
   companyId Int
   company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
@@ -37,11 +38,11 @@ model User {
 }
 
 model Asset {
-  id          Int      @id @default(autoincrement())
-  deviceId    String   @unique
+  id          Int     @id @default(autoincrement())
+  deviceId    String  @unique
   name        String
   description String?
-  active      Boolean  @default(true)
+  active      Boolean @default(true)
 
   temperatureMinC          Float?
   temperatureMaxC          Float?
@@ -50,7 +51,8 @@ model Asset {
   companyId Int
   company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
 
-  telemetry Telemetry[]
+  telemetry  Telemetry[]
+  dispatches Dispatch[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -59,13 +61,13 @@ model Asset {
 }
 
 model Telemetry {
-  id          Int      @id @default(autoincrement())
-  deviceId    String
-  temperature Float
-  latitude    Float?
-  longitude   Float?
-  altitude    Float?
-  speedKph    Float?
+  id             Int     @id @default(autoincrement())
+  deviceId       String
+  temperature    Float
+  latitude       Float?
+  longitude      Float?
+  altitude       Float?
+  speedKph       Float?
   movementStatus String?
 
   // Momento REAL en que el dispositivo capturo la lectura.
@@ -80,7 +82,7 @@ model Telemetry {
   receivedAt DateTime @default(now())
 
   assetId Int?
-  asset   Asset? @relation(fields: [assetId], references: [id], onDelete: SetNull)
+  asset   Asset? @relation(fields: [assetId], references: [id])
 
   @@index([deviceId])
   @@index([assetId])
@@ -88,4 +90,72 @@ model Telemetry {
   @@index([recordedAt])
   @@index([isBackfill])
   @@index([assetId, recordedAt])
+}
+
+enum DispatchStatus {
+  ASSIGNED
+  EN_ROUTE_TO_PICKUP
+  AT_PICKUP
+  LOADED
+  IN_TRANSIT
+  AT_DELIVERY
+  DELIVERED
+  CANCELLED
+}
+
+model Dispatch {
+  id         Int            @id @default(autoincrement())
+  loadNumber String
+  status     DispatchStatus @default(ASSIGNED)
+
+  companyId Int
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  assetId Int?
+  asset   Asset? @relation(fields: [assetId], references: [id], onDelete: SetNull)
+
+  pickupName        String
+  pickupAddress     String
+  pickupLatitude    Float?
+  pickupLongitude   Float?
+  pickupScheduledAt DateTime?
+
+  deliveryName        String
+  deliveryAddress     String
+  deliveryLatitude    Float?
+  deliveryLongitude   Float?
+  deliveryScheduledAt DateTime?
+
+  commodity       String?
+  referenceNumber String?
+
+  temperatureSetpointC Float?
+  temperatureMinC      Float?
+  temperatureMaxC      Float?
+
+  notes       String?
+  completedAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  statusEvents DispatchStatusEvent[]
+
+  @@unique([companyId, loadNumber])
+  @@index([companyId, status])
+  @@index([assetId, status])
+  @@index([pickupScheduledAt])
+  @@index([deliveryScheduledAt])
+}
+
+model DispatchStatusEvent {
+  id        Int            @id @default(autoincrement())
+  status    DispatchStatus
+  notes     String?
+  createdAt DateTime       @default(now())
+
+  dispatchId Int
+  dispatch   Dispatch @relation(fields: [dispatchId], references: [id], onDelete: Cascade)
+
+  @@index([dispatchId, createdAt])
 }

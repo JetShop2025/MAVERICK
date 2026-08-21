@@ -199,6 +199,36 @@ async function ensureAdminUser() {
 
 
   // =====================================
+  // CREAR ASSET TRAILER-002
+  // =====================================
+
+  const asset2 =
+    await prisma.asset.upsert({
+      where: {
+        deviceId: 'TRAILER-002'
+      },
+
+      update: {
+        companyId: company.id,
+        active: true
+      },
+
+      create: {
+        deviceId: 'TRAILER-002',
+        name: 'TRAILER-002',
+        description:
+          'Maverick T-SIM7670G-S3 tracking unit',
+        companyId: company.id,
+        active: true
+      }
+    })
+
+  console.log(
+    `Asset ready: ${asset2.deviceId}`
+  )
+
+
+  // =====================================
   // CREAR ADMIN
   // =====================================
 

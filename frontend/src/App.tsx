@@ -20,7 +20,7 @@ import {
 } from 'react'
 
 import './App.css'
-import maverickLogo from './assets/maverick-logo.svg'
+import maverickLogo from './assets/maverick-logo.jpeg'
 import Login from './Login'
 
 type ViewName =
@@ -463,6 +463,11 @@ function App() {
     dispatchStatusFilter,
     setDispatchStatusFilter
   ] = useState<'all' | DispatchStatus>('all')
+
+  const [
+    operationsTab,
+    setOperationsTab
+  ] = useState<'active' | 'history'>('active')
 
   const [
     newDispatchOpen,
@@ -1692,6 +1697,13 @@ function App() {
         dispatch.status !== 'CANCELLED'
     )
 
+  const completedDispatches =
+    dispatches.filter(
+      (dispatch) =>
+        dispatch.status === 'DELIVERED' ||
+        dispatch.status === 'CANCELLED'
+    )
+
   const selectedActiveDispatch =
     activeDispatches.find(
       (dispatch) =>
@@ -1702,8 +1714,13 @@ function App() {
         )
     ) || null
 
+  const operationsDispatches =
+    operationsTab === 'active'
+      ? activeDispatches
+      : completedDispatches
+
   const filteredDispatches =
-    dispatches.filter(
+    operationsDispatches.filter(
       (dispatch) => {
         const query =
           dispatchSearch
@@ -6218,6 +6235,56 @@ function App() {
                 </article>
               </div>
 
+              <div
+                className="operations-tabs"
+                role="tablist"
+                aria-label="Operations load views"
+              >
+                <button
+                  className={
+                    operationsTab === 'active'
+                      ? 'operations-tab active'
+                      : 'operations-tab'
+                  }
+                  onClick={() => {
+                    setOperationsTab('active')
+                    setDispatchStatusFilter('all')
+                  }}
+                  role="tab"
+                  aria-selected={
+                    operationsTab === 'active'
+                  }
+                  type="button"
+                >
+                  <span>Active Loads</span>
+                  <strong>
+                    {activeDispatches.length}
+                  </strong>
+                </button>
+
+                <button
+                  className={
+                    operationsTab === 'history'
+                      ? 'operations-tab active'
+                      : 'operations-tab'
+                  }
+                  onClick={() => {
+                    setOperationsTab('history')
+                    setDispatchStatusFilter('all')
+                  }}
+                  role="tab"
+                  aria-selected={
+                    operationsTab === 'history'
+                  }
+                  type="button"
+                >
+                  <span>Load History</span>
+                  <strong>
+                    {completedDispatches.length}
+                  </strong>
+                </button>
+              </div>
+
               <div className="operations-toolbar page-card">
                 <div className="operations-search">
                   <span>⌕</span>
@@ -6248,20 +6315,32 @@ function App() {
                   </option>
 
                   {
-                    dispatchStatusOptions.map(
-                      (status) => (
-                        <option
-                          key={status}
-                          value={status}
-                        >
-                          {
-                            dispatchStatusLabel(
-                              status
+                    dispatchStatusOptions
+                      .filter((status) =>
+                        operationsTab === 'active'
+                          ? (
+                              status !== 'DELIVERED' &&
+                              status !== 'CANCELLED'
                             )
-                          }
-                        </option>
+                          : (
+                              status === 'DELIVERED' ||
+                              status === 'CANCELLED'
+                            )
                       )
-                    )
+                      .map(
+                        (status) => (
+                          <option
+                            key={status}
+                            value={status}
+                          >
+                            {
+                              dispatchStatusLabel(
+                                status
+                              )
+                            }
+                          </option>
+                        )
+                      )
                   }
                 </select>
 
@@ -6292,10 +6371,18 @@ function App() {
                   <div className="operations-section-heading">
                     <div>
                       <span className="page-kicker">
-                        Loads
+                        {
+                          operationsTab === 'active'
+                            ? 'Loads'
+                            : 'Archive'
+                        }
                       </span>
                       <h2>
-                        Dispatch Board
+                        {
+                          operationsTab === 'active'
+                            ? 'Dispatch Board'
+                            : 'Load History'
+                        }
                       </h2>
                     </div>
 
@@ -6431,6 +6518,25 @@ function App() {
                                           )
                                         }
                                       </span>
+
+                                      {
+                                        operationsTab === 'history' && (
+                                          <small className="dispatch-completed-at">
+                                            {
+                                              dispatch.status === 'CANCELLED'
+                                                ? 'Cancelled'
+                                                : 'Completed'
+                                            }
+                                            {' · '}
+                                            {
+                                              formatDateTime(
+                                                dispatch.completedAt ||
+                                                dispatch.updatedAt
+                                              )
+                                            }
+                                          </small>
+                                        )
+                                      }
                                     </div>
 
                                     <div className="dispatch-asset-summary">
@@ -6507,6 +6613,14 @@ function App() {
                                       </small>
                                     </div>
                                   </div>
+
+                                  {
+                                    operationsTab === 'history' && (
+                                      <div className="dispatch-history-note">
+                                        Load record preserved. Device values below are the asset's current telemetry, not the completed load's historical telemetry.
+                                      </div>
+                                    )
+                                  }
 
                                   <div className="dispatch-live-grid">
                                     <div>
@@ -6707,7 +6821,9 @@ function App() {
                             {
                               dispatchLoading
                                 ? 'Loading dispatches...'
-                                : 'No dispatches match the current filters.'
+                                : operationsTab === 'active'
+                                  ? 'No active loads match the current filters.'
+                                  : 'No completed or cancelled loads match the current filters.'
                             }
                           </div>
                         )

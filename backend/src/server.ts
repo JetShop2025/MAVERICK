@@ -2332,7 +2332,7 @@ async function osrmMatchChunk(
     toMonotonicTimestamps(points).join(';')
 
   const radiuses = points
-    .map(() => '35')
+    .map(() => '65')
     .join(';')
 
   const url =
@@ -2408,6 +2408,75 @@ async function osrmMatchChunk(
   }
 }
 
+function selectRouteAnchors(
+  points: RoadMatchInputPoint[]
+) {
+  if (points.length <= 2) {
+    return points
+  }
+
+  const anchors: RoadMatchInputPoint[] = [
+    points[0]
+  ]
+
+  let lastKept = points[0]
+
+  for (
+    let index = 1;
+    index < points.length - 1;
+    index++
+  ) {
+    const point = points[index]
+
+    // Preserve meaningful turns/progress while removing tightly
+    // clustered GPS jitter before asking OSRM to route the path.
+    if (
+      metersBetween(
+        lastKept,
+        point
+      ) >= 90
+    ) {
+      anchors.push(point)
+      lastKept = point
+    }
+  }
+
+  const last =
+    points[points.length - 1]
+
+  if (
+    anchors[anchors.length - 1] !== last
+  ) {
+    anchors.push(last)
+  }
+
+  // Keep public OSRM requests compact and reliable.
+  if (anchors.length <= 22) {
+    return anchors
+  }
+
+  const sampled: RoadMatchInputPoint[] = []
+
+  for (let i = 0; i < 22; i++) {
+    const index = Math.round(
+      i *
+      (anchors.length - 1) /
+      21
+    )
+
+    const candidate = anchors[index]
+
+    if (
+      sampled[sampled.length - 1] !==
+      candidate
+    ) {
+      sampled.push(candidate)
+    }
+  }
+
+  return sampled
+}
+
 async function osrmRouteChunk(
   points: RoadMatchInputPoint[]
 ) {
@@ -2415,7 +2484,14 @@ async function osrmRouteChunk(
     return null
   }
 
-  const coordinates = points
+  const anchors =
+    selectRouteAnchors(points)
+
+  if (anchors.length < 2) {
+    return null
+  }
+
+  const coordinates = anchors
     .map(
       (point) =>
         `${point.longitude},${point.latitude}`
@@ -2475,8 +2551,8 @@ async function matchRoadTrack(
   }
 
   const chunks: RoadMatchInputPoint[][] = []
-  const chunkSize = 70
-  const overlap = 1
+  const chunkSize = 35
+  const overlap = 2
 
   for (
     let start = 0;

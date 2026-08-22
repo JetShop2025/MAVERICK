@@ -280,6 +280,212 @@ function ResponsiveMapSize() {
   return null
 }
 
+
+function HistoryRouteController({
+  points
+}: {
+  points: [number, number][]
+}) {
+  const map = useMap()
+
+  useEffect(() => {
+    if (points.length === 0) {
+      return
+    }
+
+    const timer = window.setTimeout(() => {
+      map.invalidateSize({ animate: false })
+
+      if (points.length === 1) {
+        map.setView(points[0], 15)
+        return
+      }
+
+      map.fitBounds(
+        L.latLngBounds(points),
+        {
+          padding: [38, 38],
+          maxZoom: 16
+        }
+      )
+    }, 120)
+
+    return () => {
+      window.clearTimeout(timer)
+    }
+  }, [map, points])
+
+  return null
+}
+
+function bearingDegrees(
+  from: [number, number],
+  to: [number, number]
+) {
+  const toRad = (value: number) =>
+    value * Math.PI / 180
+
+  const toDeg = (value: number) =>
+    value * 180 / Math.PI
+
+  const lat1 = toRad(from[0])
+  const lat2 = toRad(to[0])
+  const dLon = toRad(to[1] - from[1])
+
+  const y =
+    Math.sin(dLon) * Math.cos(lat2)
+
+  const x =
+    Math.cos(lat1) * Math.sin(lat2) -
+    Math.sin(lat1) *
+      Math.cos(lat2) *
+      Math.cos(dLon)
+
+  return (
+    toDeg(Math.atan2(y, x)) + 360
+  ) % 360
+}
+
+function createHistoryDirectionIcon(
+  bearing: number
+) {
+  // The SVG points upward (north), so the CSS rotation can use
+  // the geographic bearing directly: 0=N, 90=E, 180=S, 270=W.
+  return L.divIcon({
+    className:
+      'history-direction-marker-wrapper',
+    html: `
+      <div
+        class="history-direction-arrow"
+        style="transform: rotate(${bearing.toFixed(1)}deg)"
+        aria-hidden="true"
+      >
+        <svg viewBox="0 0 24 24" focusable="false">
+          <path d="M12 2 L20 18 L12 14.5 L4 18 Z"></path>
+        </svg>
+      </div>
+    `,
+    iconSize: [28, 28],
+    iconAnchor: [14, 14]
+  })
+}
+
+type HistoryDirectionArrow = {
+  id: string
+  position: [number, number]
+  bearing: number
+}
+
+function buildHistoryDirectionArrows(
+  segments: [number, number][][]
+): HistoryDirectionArrow[] {
+  const arrows: HistoryDirectionArrow[] = []
+
+  segments.forEach((segment, segmentIndex) => {
+    if (segment.length < 2) {
+      return
+    }
+
+    // Build cumulative distance along the actual displayed geometry.
+    const cumulative: number[] = [0]
+
+    for (let i = 1; i < segment.length; i++) {
+      cumulative.push(
+        cumulative[i - 1] +
+        distanceMiles(
+          segment[i - 1][0],
+          segment[i - 1][1],
+          segment[i][0],
+          segment[i][1]
+        )
+      )
+    }
+
+    const total =
+      cumulative[cumulative.length - 1]
+
+    if (total < 0.08) {
+      return
+    }
+
+    // Aim for arrows roughly every 0.25 mi, with a sensible
+    // minimum/maximum so short trips still show direction and
+    // long trips do not become visually crowded.
+    const desiredCount = Math.max(
+      2,
+      Math.min(
+        14,
+        Math.round(total / 0.25)
+      )
+    )
+
+    for (
+      let arrowIndex = 1;
+      arrowIndex <= desiredCount;
+      arrowIndex++
+    ) {
+      const target =
+        total *
+        (arrowIndex / (desiredCount + 1))
+
+      let pointIndex = 1
+
+      while (
+        pointIndex < cumulative.length &&
+        cumulative[pointIndex] < target
+      ) {
+        pointIndex++
+      }
+
+      if (pointIndex >= segment.length) {
+        pointIndex = segment.length - 1
+      }
+
+      const from =
+        segment[Math.max(0, pointIndex - 1)]
+
+      const to =
+        segment[pointIndex]
+
+      const span =
+        cumulative[pointIndex] -
+        cumulative[pointIndex - 1]
+
+      const ratio =
+        span > 0
+          ? Math.max(
+              0,
+              Math.min(
+                1,
+                (
+                  target -
+                  cumulative[pointIndex - 1]
+                ) / span
+              )
+            )
+          : 0.5
+
+      const position: [number, number] = [
+        from[0] +
+          (to[0] - from[0]) * ratio,
+        from[1] +
+          (to[1] - from[1]) * ratio
+      ]
+
+      arrows.push({
+        id:
+          `history-arrow-${segmentIndex}-${arrowIndex}`,
+        position,
+        bearing:
+          bearingDegrees(from, to)
+      })
+    }
+  })
+
+  return arrows
+}
+
+
 function distanceMiles(
   lat1: number,
   lon1: number,
@@ -3915,6 +4121,16 @@ function App() {
           (track) => track.segments
         )
       : rawHistorySegments
+
+  const historyDirectionArrows =
+    buildHistoryDirectionArrows(
+      historyDisplaySegments
+    )
+
+  const historyDisplayedMapPoints =
+    historyDisplaySegments.length > 0
+      ? historyDisplaySegments.flat()
+      : historyLatLngs
 
   const historyDistanceMiles =
     displayedHistoryPoints.reduce(
@@ -9178,8 +9394,8 @@ function App() {
                             roadMatchLoading
                               ? 'Aligning route to roads…'
                               : historyRoadTracks.length > 0
-                                ? 'Road-matched route'
-                                : 'Raw GPS route'
+                                ? 'Road-matched route · arrows show travel direction'
+                                : 'Road matching unavailable · showing raw GPS path'
                           }
                         </div>
                     {
@@ -9194,11 +9410,16 @@ function App() {
                                 historyLatLngs.length - 1
                               ]
                             }
-                            zoom={12}
+                            zoom={13}
                             scrollWheelZoom
                             className="history-leaflet-map"
                           >
                             <ResponsiveMapSize />
+                            <HistoryRouteController
+                              points={
+                                historyDisplayedMapPoints
+                              }
+                            />
 
                             <TileLayer
                               attribution='&copy; OpenStreetMap contributors'
@@ -9214,21 +9435,38 @@ function App() {
                                     pathOptions={{
                                       color:
                                         historyRoadTracks.length > 0
-                                          ? '#2563eb'
+                                          ? '#3b82f6'
                                           : '#64748b',
                                       weight:
                                         historyRoadTracks.length > 0
-                                          ? 5
-                                          : 3,
+                                          ? 6
+                                          : 4,
                                       opacity:
                                         historyRoadTracks.length > 0
-                                          ? 0.92
-                                          : 0.7,
-                                      dashArray:
-                                        historyRoadTracks.length > 0
-                                          ? undefined
-                                          : '6 7'
+                                          ? 0.96
+                                          : 0.72,
+                                      lineCap: 'round',
+                                      lineJoin: 'round'
                                     }}
+                                  />
+                                )
+                              )
+                            }
+
+                            {
+                              !roadMatchLoading &&
+                              historyDirectionArrows.map(
+                                (arrow) => (
+                                  <Marker
+                                    key={arrow.id}
+                                    position={arrow.position}
+                                    icon={
+                                      createHistoryDirectionIcon(
+                                        arrow.bearing
+                                      )
+                                    }
+                                    interactive={false}
+                                    keyboard={false}
                                   />
                                 )
                               )

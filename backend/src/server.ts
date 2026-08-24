@@ -1651,6 +1651,8 @@ app.post(
         altitude,
         speedKph,
         movementStatus,
+        batteryVoltage,
+        batteryPercent,
         recordedAt,
         isBackfill
       } = req.body
@@ -1701,6 +1703,26 @@ app.post(
           ? movementStatus
               .trim()
               .toUpperCase()
+          : null
+
+      const safeBatteryVoltage =
+        typeof batteryVoltage === 'number' &&
+        Number.isFinite(batteryVoltage) &&
+        batteryVoltage >= 0 &&
+        batteryVoltage <= 10
+          ? batteryVoltage
+          : null
+
+      const safeBatteryPercent =
+        typeof batteryPercent === 'number' &&
+        Number.isFinite(batteryPercent)
+          ? Math.max(
+              0,
+              Math.min(
+                100,
+                Math.round(batteryPercent)
+              )
+            )
           : null
 
       const safeIsBackfill =
@@ -1757,6 +1779,12 @@ app.post(
     movementStatus:
       safeMovementStatus,
 
+    batteryVoltage:
+      safeBatteryVoltage,
+
+    batteryPercent:
+      safeBatteryPercent,
+
     recordedAt:
       safeRecordedAt,
 
@@ -1806,6 +1834,12 @@ app.post(
 
           movementStatus:
             safeMovementStatus,
+
+          batteryVoltage:
+            safeBatteryVoltage,
+
+          batteryPercent:
+            safeBatteryPercent,
 
           recordedAt:
             safeRecordedAt
@@ -2133,6 +2167,8 @@ app.get(
             altitude: true,
             speedKph: true,
             movementStatus: true,
+            batteryVoltage: true,
+            batteryPercent: true,
             recordedAt: true,
             receivedAt: true,
             isBackfill: true
@@ -2156,6 +2192,10 @@ app.get(
               row.speedKph,
             movementStatus:
               row.movementStatus,
+            batteryVoltage:
+              row.batteryVoltage,
+            batteryPercent:
+              row.batteryPercent,
             isBackfill:
               row.isBackfill,
             timestamp:

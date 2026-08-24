@@ -70,6 +70,10 @@ model Telemetry {
   speedKph       Float?
   movementStatus String?
 
+  // Battery telemetry reported by MAV2.
+  batteryVoltage Float?
+  batteryPercent Int?
+
   // Momento REAL en que el dispositivo capturo la lectura.
   // Para GPS valido viene del UTC de GNSS.
   recordedAt DateTime?

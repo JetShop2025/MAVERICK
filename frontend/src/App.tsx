@@ -154,6 +154,64 @@ const fahrenheitToCelsius = (
 ) =>
   ((value - 32) * 5) / 9
 
+type BatteryLevel =
+  | 'good'
+  | 'medium'
+  | 'low'
+  | 'critical'
+  | 'unknown'
+
+const getBatteryLevel = (
+  value?: number | null
+): BatteryLevel => {
+  if (
+    value == null ||
+    !Number.isFinite(Number(value))
+  ) {
+    return 'unknown'
+  }
+
+  const percent =
+    Math.max(
+      0,
+      Math.min(
+        100,
+        Number(value)
+      )
+    )
+
+  if (percent <= 10) {
+    return 'critical'
+  }
+
+  if (percent <= 20) {
+    return 'low'
+  }
+
+  if (percent <= 50) {
+    return 'medium'
+  }
+
+  return 'good'
+}
+
+const getBatteryLabel = (
+  value?: number | null
+) => {
+  const level =
+    getBatteryLevel(value)
+
+  return level === 'critical'
+    ? 'Critical'
+    : level === 'low'
+      ? 'Low'
+      : level === 'medium'
+        ? 'Medium'
+        : level === 'good'
+          ? 'Good'
+          : 'Unavailable'
+}
+
 // Keep Leaflet's default marker assets available for compatibility.
 // Maverick uses a custom status-aware trailer icon below.
 void markerIcon2x
@@ -2436,6 +2494,54 @@ function App() {
     deviceStatus === 'online'
       ? 'Temperature'
       : 'Last Temperature'
+
+  const batteryPercentRaw =
+    telemetry?.batteryPercent != null
+      ? Number(
+          telemetry.batteryPercent
+        )
+      : null
+
+  const batteryPercent =
+    batteryPercentRaw != null &&
+    Number.isFinite(
+      batteryPercentRaw
+    )
+      ? Math.max(
+          0,
+          Math.min(
+            100,
+            Math.round(
+              batteryPercentRaw
+            )
+          )
+        )
+      : null
+
+  const batteryVoltageRaw =
+    telemetry?.batteryVoltage != null
+      ? Number(
+          telemetry.batteryVoltage
+        )
+      : null
+
+  const batteryVoltage =
+    batteryVoltageRaw != null &&
+    Number.isFinite(
+      batteryVoltageRaw
+    )
+      ? batteryVoltageRaw
+      : null
+
+  const batteryLevel =
+    getBatteryLevel(
+      batteryPercent
+    )
+
+  const batteryLabel =
+    getBatteryLabel(
+      batteryPercent
+    )
 
   const selectedAsset =
     assets.find(
@@ -5854,6 +5960,69 @@ function App() {
                                   </small>
                                 )
                               }
+                            </dd>
+                          </div>
+
+                          <div className="asset-battery-row">
+                            <dt>
+                              Battery
+                            </dt>
+
+                            <dd>
+                              <div className="battery-monitor">
+                                <div className="battery-monitor-top">
+                                  <strong>
+                                    {
+                                      batteryPercent != null
+                                        ? `${batteryPercent}%`
+                                        : '—'
+                                    }
+                                  </strong>
+
+                                  <span
+                                    className={
+                                      `battery-state ${batteryLevel}`
+                                    }
+                                  >
+                                    {batteryLabel}
+                                  </span>
+                                </div>
+
+                                <div
+                                  className="battery-track"
+                                  aria-label={
+                                    batteryPercent != null
+                                      ? `Battery ${batteryPercent}%`
+                                      : 'Battery unavailable'
+                                  }
+                                >
+                                  <span
+                                    className={
+                                      `battery-fill ${batteryLevel}`
+                                    }
+                                    style={{
+                                      width:
+                                        batteryPercent != null
+                                          ? `${batteryPercent}%`
+                                          : '0%'
+                                    }}
+                                  />
+                                </div>
+
+                                <div className="battery-monitor-bottom">
+                                  <span>
+                                    {
+                                      batteryVoltage != null
+                                        ? `${batteryVoltage.toFixed(2)} V`
+                                        : 'Voltage unavailable'
+                                    }
+                                  </span>
+
+                                  <span>
+                                    Internal battery
+                                  </span>
+                                </div>
+                              </div>
                             </dd>
                           </div>
 

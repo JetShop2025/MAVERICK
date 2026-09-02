@@ -1155,6 +1155,11 @@ function App() {
   ] = useState<'active' | 'history'>('active')
 
   const [
+    selectedOperationsDispatchId,
+    setSelectedOperationsDispatchId
+  ] = useState<number | null>(null)
+
+  const [
     newDispatchOpen,
     setNewDispatchOpen
   ] = useState(false)
@@ -1870,6 +1875,23 @@ function App() {
       'DELIVERED',
       'CANCELLED'
     ]
+
+  const dispatchProgressRank = (
+    status: DispatchStatus
+  ) => {
+    const order: Record<DispatchStatus, number> = {
+      ASSIGNED: 0,
+      EN_ROUTE_TO_PICKUP: 1,
+      AT_PICKUP: 2,
+      LOADED: 3,
+      IN_TRANSIT: 4,
+      AT_DELIVERY: 5,
+      DELIVERED: 6,
+      CANCELLED: 7
+    }
+
+    return order[status] ?? 0
+  }
 
   const loadDispatches =
     useCallback(
@@ -2765,6 +2787,19 @@ function App() {
       }
     )
 
+  const selectedOperationsDispatch =
+    selectedOperationsDispatchId === -1
+      ? null
+      : (
+          filteredDispatches.find(
+            (dispatch) =>
+              dispatch.id ===
+              selectedOperationsDispatchId
+          ) ||
+          filteredDispatches[0] ||
+          null
+        )
+
   const availableAssets =
     assets.filter(
       (asset) =>
@@ -2786,13 +2821,43 @@ function App() {
         return 'offline'
       }
 
-      const ageMs =
-        now -
+      const receivedAtMs =
         new Date(
           item.receivedAt
         ).getTime()
 
-      if (ageMs < 90000) {
+      if (!Number.isFinite(receivedAtMs)) {
+        return 'offline'
+      }
+
+      const ageMs =
+        Math.max(
+          0,
+          now - receivedAtMs
+        )
+
+      const backendMovement =
+        String(
+          item?.movementStatus || ''
+        ).toUpperCase()
+
+      // MAV2 intentionally reduces reporting frequency while PARKED
+      // to save battery. A normal 180-second parked interval must
+      // remain ONLINE instead of bouncing into DELAYED.
+      if (backendMovement === 'PARKED') {
+        if (ageMs < 240000) {
+          return 'online'
+        }
+
+        if (ageMs < 480000) {
+          return 'delayed'
+        }
+
+        return 'offline'
+      }
+
+      // Moving / acquiring / normal reporting.
+      if (ageMs < 120000) {
         return 'online'
       }
 
@@ -3128,6 +3193,44 @@ function App() {
     })
   }
 
+  const formatOperationsTime = (
+    value?: string | null
+  ) => {
+    if (!value) {
+      return '--'
+    }
+
+    const date = new Date(value)
+
+    if (Number.isNaN(date.getTime())) {
+      return '--'
+    }
+
+    return date.toLocaleTimeString([], {
+      hour: '2-digit',
+      minute: '2-digit'
+    })
+  }
+
+  const formatOperationsDate = (
+    value?: string | null
+  ) => {
+    if (!value) {
+      return '--'
+    }
+
+    const date = new Date(value)
+
+    if (Number.isNaN(date.getTime())) {
+      return '--'
+    }
+
+    return date.toLocaleDateString([], {
+      month: '2-digit',
+      day: '2-digit'
+    })
+  }
+
   const formatAge = (
     value?: string | null
   ) => {
@@ -3282,6 +3385,32 @@ function App() {
     getBatteryLabel(
       batteryPercent
     )
+
+  const powerSource =
+    telemetry?.powerSource != null &&
+    String(
+      telemetry.powerSource
+    ).trim()
+      ? String(
+          telemetry.powerSource
+        ).trim().toUpperCase()
+      : 'UNKNOWN'
+
+  const reeferPowerConnected =
+    telemetry?.reeferPower === true ||
+    String(
+      telemetry?.reeferPower ?? ''
+    ).toLowerCase() === 'true' ||
+    Number(
+      telemetry?.reeferPower
+    ) === 1
+
+  const reeferPowerLabel =
+    telemetry?.reeferPower == null
+      ? 'Unknown'
+      : reeferPowerConnected
+        ? 'Connected'
+        : 'Disconnected'
 
   const selectedAsset =
     assets.find(
@@ -6812,6 +6941,42 @@ function App() {
 
                           <div>
                             <dt>
+                              Power Source
+                            </dt>
+
+                            <dd>
+                              {
+                                powerSource === 'UNKNOWN'
+                                  ? 'Unavailable'
+                                  : powerSource
+                              }
+                            </dd>
+                          </div>
+
+                          <div>
+                            <dt>
+                              Reefer Power
+                            </dt>
+
+                            <dd>
+                              <span
+                                className={
+                                  `battery-state ${
+                                    telemetry?.reeferPower == null
+                                      ? 'unknown'
+                                      : reeferPowerConnected
+                                        ? 'good'
+                                        : 'medium'
+                                  }`
+                                }
+                              >
+                                {reeferPowerLabel}
+                              </span>
+                            </dd>
+                          </div>
+
+                          <div>
+                            <dt>
                               Asset Temp Limits
                             </dt>
 
@@ -7103,7 +7268,7 @@ function App() {
                   </span>
 
                   <span>
-                    Temperature
+                    Temp / Battery
                   </span>
 
                   <span>
@@ -7163,6 +7328,39 @@ function App() {
                               ).toFixed(1)
                             : '--'
 
+                        const rowBatteryPercentRaw =
+                          item?.batteryPercent != null
+                            ? Number(
+                                item.batteryPercent
+                              )
+                            : null
+
+                        const rowBatteryPercent =
+                          rowBatteryPercentRaw != null &&
+                          Number.isFinite(
+                            rowBatteryPercentRaw
+                          )
+                            ? Math.max(
+                                0,
+                                Math.min(
+                                  100,
+                                  Math.round(
+                                    rowBatteryPercentRaw
+                                  )
+                                )
+                              )
+                            : null
+
+                        const rowBatteryLevel =
+                          getBatteryLevel(
+                            rowBatteryPercent
+                          )
+
+                        const rowBatteryLabel =
+                          getBatteryLabel(
+                            rowBatteryPercent
+                          )
+
                         return (
                           <div
                             className="fleet-row"
@@ -7204,13 +7402,32 @@ function App() {
                               {rowMovementLabel}
                             </span>
 
-                            <span>
-                              {item
-                                ? rowStatus === 'online'
-                                  ? `${rowTemperatureF}°F`
-                                  : `Last ${rowTemperatureF}°F`
-                                : 'No data'}
-                            </span>
+                            <div>
+                              <span>
+                                {item
+                                  ? rowStatus === 'online'
+                                    ? `${rowTemperatureF}°F`
+                                    : `Last ${rowTemperatureF}°F`
+                                  : 'No data'}
+                              </span>
+
+                              <small
+                                className={
+                                  `battery-state ${rowBatteryLevel}`
+                                }
+                                title={
+                                  rowBatteryPercent != null
+                                    ? `Battery ${rowBatteryPercent}% • ${rowBatteryLabel}`
+                                    : 'Battery unavailable'
+                                }
+                              >
+                                {
+                                  rowBatteryPercent != null
+                                    ? `🔋 ${rowBatteryPercent}%`
+                                    : '🔋 —'
+                                }
+                              </small>
+                            </div>
 
                             <span>
                               {item?.receivedAt
@@ -7321,10 +7538,10 @@ function App() {
         {
           activeView ===
             'operations' && (
-            <section className="workspace-page operations-page">
+            <section className="workspace-page operations-page operations-master-detail">
 
-              <div className="page-header operations-header">
-                <div>
+              <div className="operations-commandbar">
+                <div className="operations-title-block">
                   <span className="page-kicker">
                     Operations
                   </span>
@@ -7334,599 +7551,809 @@ function App() {
                   </h1>
 
                   <p>
-                    Assign assets, manage loads and monitor live trailer telemetry from one workspace.
+                    Live view of loads, assets and trailer activity.
                   </p>
                 </div>
 
-                <button
-                  className="primary-action"
-                  onClick={() => {
-                    setDispatchError('')
-                    setNewDispatchOpen(true)
-                  }}
-                  type="button"
-                >
-                  + New Dispatch
-                </button>
-              </div>
+                <div className="operations-kpis operations-kpis-compact">
+                  <article className="operations-kpi compact">
+                    <span>Active Loads</span>
+                    <strong>{activeDispatches.length}</strong>
+                    <small>Assigned through delivery</small>
+                  </article>
 
-              <div className="operations-kpis">
-                <article className="page-card operations-kpi">
-                  <span>Active Loads</span>
-                  <strong>{activeDispatches.length}</strong>
-                  <small>
-                    Assigned through delivery
-                  </small>
-                </article>
+                  <article className="operations-kpi compact">
+                    <span>In Transit</span>
+                    <strong>
+                      {
+                        dispatches.filter(
+                          (item) => item.status === 'IN_TRANSIT'
+                        ).length
+                      }
+                    </strong>
+                    <small>Moving between facilities</small>
+                  </article>
 
-                <article className="page-card operations-kpi">
-                  <span>In Transit</span>
-                  <strong>
-                    {
-                      dispatches.filter(
-                        (item) =>
-                          item.status ===
-                          'IN_TRANSIT'
-                      ).length
-                    }
-                  </strong>
-                  <small>
-                    Currently moving between facilities
-                  </small>
-                </article>
+                  <article className="operations-kpi compact">
+                    <span>At Facility</span>
+                    <strong>
+                      {
+                        dispatches.filter(
+                          (item) =>
+                            item.status === 'AT_PICKUP' ||
+                            item.status === 'AT_DELIVERY'
+                        ).length
+                      }
+                    </strong>
+                    <small>Pickup or delivery</small>
+                  </article>
 
-                <article className="page-card operations-kpi">
-                  <span>At Facility</span>
-                  <strong>
-                    {
-                      dispatches.filter(
-                        (item) =>
-                          item.status ===
-                            'AT_PICKUP' ||
-                          item.status ===
-                            'AT_DELIVERY'
-                      ).length
-                    }
-                  </strong>
-                  <small>
-                    Pickup or delivery activity
-                  </small>
-                </article>
+                  <article className="operations-kpi compact">
+                    <span>Available Assets</span>
+                    <strong>{availableAssets.length}</strong>
+                    <small>Ready for assignment</small>
+                  </article>
 
-                <article className="page-card operations-kpi">
-                  <span>Available Assets</span>
-                  <strong>
-                    {availableAssets.length}
-                  </strong>
-                  <small>
-                    Ready for assignment
-                  </small>
-                </article>
-              </div>
-
-              <div
-                className="operations-tabs"
-                role="tablist"
-                aria-label="Operations load views"
-              >
-                <button
-                  className={
-                    operationsTab === 'active'
-                      ? 'operations-tab active'
-                      : 'operations-tab'
-                  }
-                  onClick={() => {
-                    setOperationsTab('active')
-                    setDispatchStatusFilter('all')
-                  }}
-                  role="tab"
-                  aria-selected={
-                    operationsTab === 'active'
-                  }
-                  type="button"
-                >
-                  <span>Active Loads</span>
-                  <strong>
-                    {activeDispatches.length}
-                  </strong>
-                </button>
-
-                <button
-                  className={
-                    operationsTab === 'history'
-                      ? 'operations-tab active'
-                      : 'operations-tab'
-                  }
-                  onClick={() => {
-                    setOperationsTab('history')
-                    setDispatchStatusFilter('all')
-                  }}
-                  role="tab"
-                  aria-selected={
-                    operationsTab === 'history'
-                  }
-                  type="button"
-                >
-                  <span>Load History</span>
-                  <strong>
-                    {completedDispatches.length}
-                  </strong>
-                </button>
-              </div>
-
-              <div className="operations-toolbar page-card">
-                <div className="operations-search">
-                  <span>⌕</span>
-                  <input
-                    value={dispatchSearch}
-                    onChange={(event) =>
-                      setDispatchSearch(
-                        event.target.value
-                      )
-                    }
-                    placeholder="Search load, asset, pickup or delivery"
-                    aria-label="Search dispatches"
-                  />
+                  <article className="operations-kpi compact">
+                    <span>Delivered</span>
+                    <strong>
+                      {
+                        dispatches.filter(
+                          (item) => item.status === 'DELIVERED'
+                        ).length
+                      }
+                    </strong>
+                    <small>Completed loads</small>
+                  </article>
                 </div>
 
-                <select
-                  value={dispatchStatusFilter}
-                  onChange={(event) =>
-                    setDispatchStatusFilter(
-                      event.target.value as
-                        'all' | DispatchStatus
-                    )
-                  }
-                  aria-label="Dispatch status filter"
-                >
-                  <option value="all">
-                    All Statuses
-                  </option>
-
-                  {
-                    dispatchStatusOptions
-                      .filter((status) =>
-                        operationsTab === 'active'
-                          ? (
-                              status !== 'DELIVERED' &&
-                              status !== 'CANCELLED'
-                            )
-                          : (
-                              status === 'DELIVERED' ||
-                              status === 'CANCELLED'
-                            )
+                <div className="operations-command-actions">
+                  <select
+                    value={dispatchStatusFilter}
+                    onChange={(event) =>
+                      setDispatchStatusFilter(
+                        event.target.value as
+                          'all' | DispatchStatus
                       )
-                      .map(
-                        (status) => (
+                    }
+                    aria-label="Dispatch status filter"
+                  >
+                    <option value="all">
+                      All Statuses
+                    </option>
+
+                    {
+                      dispatchStatusOptions
+                        .filter((status) =>
+                          operationsTab === 'active'
+                            ? (
+                                status !== 'DELIVERED' &&
+                                status !== 'CANCELLED'
+                              )
+                            : (
+                                status === 'DELIVERED' ||
+                                status === 'CANCELLED'
+                              )
+                        )
+                        .map((status) => (
                           <option
                             key={status}
                             value={status}
                           >
-                            {
-                              dispatchStatusLabel(
-                                status
-                              )
-                            }
+                            {dispatchStatusLabel(status)}
                           </option>
-                        )
-                      )
-                  }
-                </select>
+                        ))
+                    }
+                  </select>
 
-                <button
-                  className="secondary-action"
-                  onClick={loadDispatches}
-                  type="button"
-                  disabled={dispatchLoading}
-                >
-                  {
-                    dispatchLoading
-                      ? 'Refreshing...'
-                      : 'Refresh'
-                  }
-                </button>
+                  <div className="operations-date-chip">
+                    <span>Today</span>
+                    <strong>
+                      {
+                        new Date(now).toLocaleDateString([], {
+                          month: 'short',
+                          day: 'numeric',
+                          year: 'numeric'
+                        })
+                      }
+                    </strong>
+                  </div>
+
+                  <button
+                    className="secondary-action operations-refresh-button"
+                    onClick={loadDispatches}
+                    type="button"
+                    disabled={dispatchLoading}
+                  >
+                    {dispatchLoading ? 'Refreshing…' : 'Refresh'}
+                  </button>
+
+                  <button
+                    className="primary-action operations-new-dispatch"
+                    onClick={() => {
+                      setDispatchError('')
+                      setNewDispatchOpen(true)
+                    }}
+                    type="button"
+                  >
+                    + New Dispatch
+                  </button>
+                </div>
               </div>
 
               {
                 dispatchError && (
-                  <div className="operations-error">
+                  <div className="operations-error operations-error-compact">
                     {dispatchError}
                   </div>
                 )
               }
 
-              <div className="operations-layout">
-                <div className="operations-main">
-                  <div className="operations-section-heading">
-                    <div>
-                      <span className="page-kicker">
-                        {
+              <div className="operations-split-workspace">
+                <section className="operations-loads-pane">
+                  <div className="operations-master-toolbar">
+                    <div
+                      className="operations-tabs operations-tabs-compact"
+                      role="tablist"
+                      aria-label="Operations load views"
+                    >
+                      <button
+                        className={
                           operationsTab === 'active'
-                            ? 'Loads'
-                            : 'Archive'
+                            ? 'operations-tab active'
+                            : 'operations-tab'
                         }
-                      </span>
-                      <h2>
-                        {
-                          operationsTab === 'active'
-                            ? 'Dispatch Board'
-                            : 'Load History'
+                        onClick={() => {
+                          setOperationsTab('active')
+                          setDispatchStatusFilter('all')
+                          setSelectedOperationsDispatchId(null)
+                        }}
+                        role="tab"
+                        aria-selected={operationsTab === 'active'}
+                        type="button"
+                      >
+                        <span>Active Loads</span>
+                        <strong>{activeDispatches.length}</strong>
+                      </button>
+
+                      <button
+                        className={
+                          operationsTab === 'history'
+                            ? 'operations-tab active'
+                            : 'operations-tab'
                         }
-                      </h2>
+                        onClick={() => {
+                          setOperationsTab('history')
+                          setDispatchStatusFilter('all')
+                          setSelectedOperationsDispatchId(null)
+                        }}
+                        role="tab"
+                        aria-selected={operationsTab === 'history'}
+                        type="button"
+                      >
+                        <span>Load History</span>
+                        <strong>{completedDispatches.length}</strong>
+                      </button>
                     </div>
 
-                    <span>
-                      {filteredDispatches.length}
-                      {' '}
-                      dispatch
+                    <div className="operations-compact-search">
+                      <span>⌕</span>
+                      <input
+                        value={dispatchSearch}
+                        onChange={(event) =>
+                          setDispatchSearch(event.target.value)
+                        }
+                        placeholder="Search load, asset or location"
+                        aria-label="Search dispatches"
+                      />
+
                       {
-                        filteredDispatches.length === 1
-                          ? ''
-                          : 'es'
+                        dispatchSearch && (
+                          <button
+                            type="button"
+                            aria-label="Clear dispatch search"
+                            onClick={() => setDispatchSearch('')}
+                          >
+                            ×
+                          </button>
+                        )
                       }
-                    </span>
+                    </div>
                   </div>
 
-                  <div className="dispatch-list">
+                  <div className="operations-load-table-head">
+                    <span>Load / Asset</span>
+                    <span>Pickup</span>
+                    <span>Delivery</span>
+                    <span>Status</span>
+                    <span>Movement</span>
+                    <span>Temp</span>
+                    <span>ETA</span>
+                  </div>
+
+                  <div className="operations-load-scroll">
                     {
                       filteredDispatches.length > 0
-                        ? filteredDispatches.map(
-                            (dispatch) => {
-                              const item =
-                                dispatch.asset?.deviceId
-                                  ? fleetTelemetry[
-                                      dispatch.asset.deviceId
-                                    ] ?? null
-                                  : null
+                        ? filteredDispatches.map((dispatch) => {
+                            const item =
+                              dispatch.asset?.deviceId
+                                ? fleetTelemetry[
+                                    dispatch.asset.deviceId
+                                  ] ?? null
+                                : null
 
-                              const rowStatus =
-                                getDeviceStatusForTelemetry(
-                                  item
-                                )
+                            const rowStatus =
+                              getDeviceStatusForTelemetry(item)
 
-                              const rowTempF =
-                                item?.temperature != null
-                                  ? (
-                                      Number(
-                                        item.temperature
-                                      ) *
-                                        9 /
-                                        5 +
-                                      32
-                                    ).toFixed(1)
-                                  : '--'
+                            const rowTempF =
+                              item?.temperature != null
+                                ? celsiusToFahrenheit(
+                                    Number(item.temperature)
+                                  ).toFixed(1)
+                                : '--'
 
-                              const rowSpeedMph =
-                                item?.speedKph != null &&
-                                Number.isFinite(
-                                  Number(
-                                    item.speedKph
+                            const isSelected =
+                              selectedOperationsDispatch?.id ===
+                              dispatch.id
+
+                            const movementText =
+                              getDetailedMovementLabel(
+                                item,
+                                rowStatus,
+                                dispatch
+                              )
+
+                            return (
+                              <article
+                                className={
+                                  isSelected
+                                    ? 'operations-load-row selected'
+                                    : 'operations-load-row'
+                                }
+                                key={dispatch.id}
+                                onClick={() =>
+                                  setSelectedOperationsDispatchId(
+                                    dispatch.id
+                                  )
+                                }
+                                onKeyDown={(event) => {
+                                  if (
+                                    event.key === 'Enter' ||
+                                    event.key === ' '
+                                  ) {
+                                    event.preventDefault()
+                                    setSelectedOperationsDispatchId(
+                                      dispatch.id
+                                    )
+                                  }
+                                }}
+                                role="button"
+                                tabIndex={0}
+                              >
+                                <div className="operations-load-cell load-cell">
+                                  <strong>{dispatch.loadNumber}</strong>
+                                  <small>
+                                    {
+                                      dispatch.asset?.name ||
+                                      'Unassigned'
+                                    }
+                                  </small>
+                                  <small>
+                                    {
+                                      dispatch.asset?.deviceId ||
+                                      'No asset'
+                                    }
+                                  </small>
+                                </div>
+
+                                <div className="operations-load-cell route-cell">
+                                  <strong>{dispatch.pickupName}</strong>
+                                  <small>{dispatch.pickupAddress}</small>
+                                  <small>
+                                    {formatOperationsDate(
+                                      dispatch.pickupScheduledAt
+                                    )}
+                                    {' · '}
+                                    {formatOperationsTime(
+                                      dispatch.pickupScheduledAt
+                                    )}
+                                  </small>
+                                </div>
+
+                                <div className="operations-load-cell route-cell">
+                                  <strong>{dispatch.deliveryName}</strong>
+                                  <small>{dispatch.deliveryAddress}</small>
+                                  <small>
+                                    {formatOperationsDate(
+                                      dispatch.deliveryScheduledAt
+                                    )}
+                                    {' · '}
+                                    {formatOperationsTime(
+                                      dispatch.deliveryScheduledAt
+                                    )}
+                                  </small>
+                                </div>
+
+                                <div className="operations-load-cell status-cell">
+                                  <span
+                                    className={
+                                      `dispatch-status-pill ${dispatch.status.toLowerCase()}`
+                                    }
+                                  >
+                                    {dispatchStatusLabel(dispatch.status)}
+                                  </span>
+                                  <small
+                                    className={
+                                      `operations-device-state ${rowStatus}`
+                                    }
+                                  >
+                                    {
+                                      rowStatus === 'online'
+                                        ? 'Online'
+                                        : rowStatus === 'delayed'
+                                          ? 'Delayed'
+                                          : 'Offline'
+                                    }
+                                  </small>
+                                </div>
+
+                                <div className="operations-load-cell movement-cell">
+                                  <strong>{movementText}</strong>
+                                  <small>
+                                    {
+                                      item?.receivedAt
+                                        ? formatAge(item.receivedAt)
+                                        : 'No telemetry'
+                                    }
+                                  </small>
+                                </div>
+
+                                <div className="operations-load-cell temp-cell">
+                                  <strong>
+                                    {rowTempF === '--' ? '--' : `${rowTempF}°F`}
+                                  </strong>
+                                  {
+                                    dispatch.temperatureSetpointC != null && (
+                                      <small>
+                                        Set:{' '}
+                                        {celsiusToFahrenheit(
+                                          Number(
+                                            dispatch.temperatureSetpointC
+                                          )
+                                        ).toFixed(0)}°F
+                                      </small>
+                                    )
+                                  }
+                                </div>
+
+                                <div className="operations-load-cell eta-cell">
+                                  <strong>
+                                    {formatOperationsTime(
+                                      dispatch.deliveryScheduledAt
+                                    )}
+                                  </strong>
+                                  <small>
+                                    {formatOperationsDate(
+                                      dispatch.deliveryScheduledAt
+                                    )}
+                                  </small>
+                                  <span>›</span>
+                                </div>
+                              </article>
+                            )
+                          })
+                        : (
+                          <div className="operations-empty-state">
+                            {
+                              dispatchLoading
+                                ? 'Loading dispatches...'
+                                : operationsTab === 'active'
+                                  ? 'No active loads match the current filters.'
+                                  : 'No completed or cancelled loads match the current filters.'
+                            }
+                          </div>
+                        )
+                    }
+                  </div>
+
+                  <footer className="operations-list-footer">
+                    <span>
+                      Showing {filteredDispatches.length} of{' '}
+                      {operationsDispatches.length}{' '}
+                      {operationsTab === 'active'
+                        ? 'active loads'
+                        : 'history loads'}
+                    </span>
+
+                    <span>
+                      <i /> Auto-refresh telemetry
+                    </span>
+                  </footer>
+                </section>
+
+                <aside className="operations-detail-pane">
+                  {
+                    selectedOperationsDispatch
+                      ? (() => {
+                          const dispatch =
+                            selectedOperationsDispatch
+
+                          const item =
+                            dispatch.asset?.deviceId
+                              ? fleetTelemetry[
+                                  dispatch.asset.deviceId
+                                ] ?? null
+                              : null
+
+                          const detailStatus =
+                            getDeviceStatusForTelemetry(item)
+
+                          const detailTempF =
+                            item?.temperature != null
+                              ? celsiusToFahrenheit(
+                                  Number(item.temperature)
+                                ).toFixed(1)
+                              : '--'
+
+                          const rowSpeedMph =
+                            item?.speedKph != null &&
+                            Number.isFinite(
+                              Number(item.speedKph)
+                            )
+                              ? Math.max(
+                                  0,
+                                  Number(item.speedKph)
+                                ) * 0.621371
+                              : 0
+
+                          const timelineEvents = [
+                            ...(dispatch.statusEvents || [])
+                          ]
+                            .sort(
+                              (a, b) =>
+                                new Date(a.createdAt).getTime() -
+                                new Date(b.createdAt).getTime()
+                            )
+                            .slice(-7)
+
+                          const progressPercent =
+                            dispatch.status === 'CANCELLED'
+                              ? 100
+                              : Math.min(
+                                  100,
+                                  Math.max(
+                                    8,
+                                    (dispatchProgressRank(
+                                      dispatch.status
+                                    ) / 6) * 100
                                   )
                                 )
-                                  ? Math.max(
-                                      0,
-                                      Number(
-                                        item.speedKph
-                                      )
-                                    ) *
-                                    0.621371
-                                  : 0
 
-                              const dispatchTempMinF =
-                                dispatch.temperatureMinC != null
-                                  ? (
-                                      Number(
-                                        dispatch.temperatureMinC
-                                      ) *
-                                        9 /
-                                        5 +
-                                      32
-                                    )
-                                  : null
+                          return (
+                            <>
+                              <div className="operations-detail-header">
+                                <div>
+                                  <div className="operations-detail-title-row">
+                                    <h2>{dispatch.loadNumber}</h2>
 
-                              const dispatchTempMaxF =
-                                dispatch.temperatureMaxC != null
-                                  ? (
-                                      Number(
-                                        dispatch.temperatureMaxC
-                                      ) *
-                                        9 /
-                                        5 +
-                                      32
-                                    )
-                                  : null
+                                    <span
+                                      className={
+                                        `dispatch-status-pill ${dispatch.status.toLowerCase()}`
+                                      }
+                                    >
+                                      {dispatchStatusLabel(dispatch.status)}
+                                    </span>
 
-                              const numericTempF =
-                                item?.temperature != null
-                                  ? Number(
-                                      item.temperature
-                                    ) *
-                                      9 /
-                                      5 +
-                                    32
-                                  : null
+                                    <span
+                                      className={
+                                        `operations-device-state ${detailStatus}`
+                                      }
+                                    >
+                                      {
+                                        detailStatus === 'online'
+                                          ? 'Online'
+                                          : detailStatus === 'delayed'
+                                            ? 'Delayed'
+                                            : 'Offline'
+                                      }
+                                    </span>
+                                  </div>
 
-                              const temperatureAlert =
-                                numericTempF != null &&
-                                (
-                                  (
-                                    dispatchTempMinF != null &&
-                                    numericTempF <
-                                      dispatchTempMinF
-                                  ) ||
-                                  (
-                                    dispatchTempMaxF != null &&
-                                    numericTempF >
-                                      dispatchTempMaxF
-                                  )
-                                )
+                                  <small>
+                                    Updated{' '}
+                                    {
+                                      item?.receivedAt
+                                        ? formatAge(item.receivedAt)
+                                        : 'without live telemetry'
+                                    }
+                                  </small>
+                                </div>
 
-                              return (
-                                <article
-                                  className="page-card dispatch-card"
-                                  key={dispatch.id}
+                                <button
+                                  className="operations-detail-close"
+                                  onClick={() =>
+                                    setSelectedOperationsDispatchId(-1)
+                                  }
+                                  type="button"
+                                  aria-label="Close load details"
                                 >
-                                  <div className="dispatch-card-top">
-                                    <div>
-                                      <span className="dispatch-load-label">
-                                        Load
-                                      </span>
+                                  ×
+                                </button>
+                              </div>
 
-                                      <h3>
-                                        {dispatch.loadNumber}
-                                      </h3>
-
-                                      <span
-                                        className={
-                                          `dispatch-status-pill ${dispatch.status.toLowerCase()}`
-                                        }
-                                      >
-                                        {
-                                          dispatchStatusLabel(
-                                            dispatch.status
-                                          )
-                                        }
-                                      </span>
-
+                              <div className="operations-detail-scroll">
+                                <section className="operations-summary-card">
+                                  <div>
+                                    <span>Assigned Asset</span>
+                                    <strong>
                                       {
-                                        operationsTab === 'history' && (
-                                          <small className="dispatch-completed-at">
-                                            {
-                                              dispatch.status === 'CANCELLED'
-                                                ? 'Cancelled'
-                                                : 'Completed'
-                                            }
-                                            {' · '}
-                                            {
-                                              formatDateTime(
-                                                dispatch.completedAt ||
-                                                dispatch.updatedAt
-                                              )
-                                            }
-                                          </small>
-                                        )
+                                        dispatch.asset?.name ||
+                                        'Unassigned'
                                       }
+                                    </strong>
+                                    <small>
+                                      {
+                                        dispatch.asset?.deviceId ||
+                                        'No trailer assigned'
+                                      }
+                                    </small>
+                                  </div>
+
+                                  <div>
+                                    <span>Temperature</span>
+                                    <strong className="operations-temp-value">
+                                      {
+                                        detailTempF === '--'
+                                          ? '--'
+                                          : `${detailTempF}°F`
+                                      }
+                                    </strong>
+                                    <small>
+                                      {
+                                        dispatch.temperatureSetpointC != null
+                                          ? `Set ${celsiusToFahrenheit(
+                                              Number(
+                                                dispatch.temperatureSetpointC
+                                              )
+                                            ).toFixed(0)}°F`
+                                          : 'No setpoint'
+                                      }
+                                    </small>
+                                  </div>
+
+                                  <div>
+                                    <span>ETA</span>
+                                    <strong>
+                                      {formatOperationsTime(
+                                        dispatch.deliveryScheduledAt
+                                      )}
+                                    </strong>
+                                    <small>
+                                      {formatOperationsDate(
+                                        dispatch.deliveryScheduledAt
+                                      )}
+                                    </small>
+                                  </div>
+                                </section>
+
+                                <section className="operations-route-card">
+                                  <div className="operations-route-stop">
+                                    <span>Pickup</span>
+                                    <strong>{dispatch.pickupName}</strong>
+                                    <small>{dispatch.pickupAddress}</small>
+                                    <small>
+                                      {formatDateTime(
+                                        dispatch.pickupScheduledAt
+                                      )}
+                                    </small>
+                                  </div>
+
+                                  <div className="operations-route-line">
+                                    <i />
+                                    <span>→</span>
+                                    <i />
+                                  </div>
+
+                                  <div className="operations-route-stop">
+                                    <span>Delivery</span>
+                                    <strong>{dispatch.deliveryName}</strong>
+                                    <small>{dispatch.deliveryAddress}</small>
+                                    <small>
+                                      {formatDateTime(
+                                        dispatch.deliveryScheduledAt
+                                      )}
+                                    </small>
+                                  </div>
+                                </section>
+
+                                <section className="operations-progress-card">
+                                  <div className="operations-card-heading-row">
+                                    <div>
+                                      <span className="page-kicker">
+                                        Load Timeline
+                                      </span>
+                                      <h3>Progress</h3>
                                     </div>
 
-                                    <div className="dispatch-asset-summary">
-                                      <strong>
-                                        {
-                                          dispatch.asset?.name ||
-                                          'Unassigned'
-                                        }
-                                      </strong>
+                                    <strong>
+                                      {Math.round(progressPercent)}%
+                                    </strong>
+                                  </div>
 
-                                      <small>
-                                        {
-                                          dispatch.asset?.deviceId ||
-                                          'No asset'
-                                        }
-                                      </small>
+                                  <div className="operations-progress-bar">
+                                    <i
+                                      style={{
+                                        width: `${progressPercent}%`
+                                      }}
+                                    />
+                                  </div>
+
+                                  <div className="operations-timeline">
+                                    {
+                                      timelineEvents.length > 0
+                                        ? timelineEvents.map(
+                                            (event, index) => {
+                                              const isLatest =
+                                                index ===
+                                                timelineEvents.length - 1
+
+                                              return (
+                                                <div
+                                                  className={
+                                                    isLatest
+                                                      ? 'operations-timeline-item current'
+                                                      : 'operations-timeline-item complete'
+                                                  }
+                                                  key={event.id}
+                                                >
+                                                  <i />
+                                                  <div>
+                                                    <strong>
+                                                      {dispatchStatusLabel(
+                                                        event.status
+                                                      )}
+                                                    </strong>
+                                                    <span>
+                                                      {formatDateTime(
+                                                        event.createdAt
+                                                      )}
+                                                    </span>
+                                                    {
+                                                      event.notes && (
+                                                        <small>
+                                                          {event.notes}
+                                                        </small>
+                                                      )
+                                                    }
+                                                  </div>
+                                                </div>
+                                              )
+                                            }
+                                          )
+                                        : (
+                                          <div className="operations-timeline-item current">
+                                            <i />
+                                            <div>
+                                              <strong>
+                                                {dispatchStatusLabel(
+                                                  dispatch.status
+                                                )}
+                                              </strong>
+                                              <span>
+                                                {formatDateTime(
+                                                  dispatch.updatedAt
+                                                )}
+                                              </span>
+                                            </div>
+                                          </div>
+                                        )
+                                    }
+                                  </div>
+                                </section>
+
+                                <div className="operations-detail-bottom-grid">
+                                  <section className="operations-assigned-card">
+                                    <div className="operations-card-heading-row">
+                                      <div>
+                                        <span className="page-kicker">
+                                          Assigned Asset
+                                        </span>
+                                        <h3>
+                                          {
+                                            dispatch.asset?.name ||
+                                            'Unassigned'
+                                          }
+                                        </h3>
+                                      </div>
 
                                       <span
                                         className={
-                                          `inline-status ${rowStatus}`
+                                          `inline-status ${detailStatus}`
                                         }
                                       >
                                         {
-                                          rowStatus === 'online'
+                                          detailStatus === 'online'
                                             ? 'Online'
-                                            : rowStatus === 'delayed'
+                                            : detailStatus === 'delayed'
                                               ? 'Delayed'
                                               : 'Offline'
                                         }
                                       </span>
                                     </div>
-                                  </div>
 
-                                  <div className="dispatch-route">
-                                    <div>
-                                      <span>Pickup</span>
-                                      <strong>
-                                        {dispatch.pickupName}
-                                      </strong>
-                                      <small>
-                                        {dispatch.pickupAddress}
-                                      </small>
-                                      <small>
-                                        {
-                                          dispatch.pickupScheduledAt
-                                            ? formatDateTime(
-                                                dispatch.pickupScheduledAt
-                                              )
-                                            : 'No appointment'
-                                        }
-                                      </small>
-                                    </div>
-
-                                    <div className="dispatch-route-arrow">
-                                      →
-                                    </div>
-
-                                    <div>
-                                      <span>Delivery</span>
-                                      <strong>
-                                        {dispatch.deliveryName}
-                                      </strong>
-                                      <small>
-                                        {dispatch.deliveryAddress}
-                                      </small>
-                                      <small>
-                                        {
-                                          dispatch.deliveryScheduledAt
-                                            ? formatDateTime(
-                                                dispatch.deliveryScheduledAt
-                                              )
-                                            : 'No appointment'
-                                        }
-                                      </small>
-                                    </div>
-                                  </div>
-
-                                  {
-                                    operationsTab === 'history' && (
-                                      <div className="dispatch-history-note">
-                                        Load record preserved. Device values below are the asset's current telemetry, not the completed load's historical telemetry.
+                                    <dl>
+                                      <div>
+                                        <dt>Device</dt>
+                                        <dd>
+                                          {
+                                            dispatch.asset?.deviceId ||
+                                            'No asset'
+                                          }
+                                        </dd>
                                       </div>
-                                    )
-                                  }
-
-                                  <div className="dispatch-live-grid">
-                                    <div>
-                                      <span>Device</span>
-                                      <strong
-                                        className={
-                                          `dispatch-value ${rowStatus}`
-                                        }
-                                      >
-                                        {
-                                          rowStatus === 'online'
-                                            ? 'Online'
-                                            : rowStatus === 'delayed'
-                                              ? 'Delayed'
-                                              : 'Offline'
-                                        }
-                                      </strong>
-                                    </div>
-
-                                    <div>
-                                      <span>Movement</span>
-                                      <strong>
-                                        {
-                                          getDetailedMovementLabel(
+                                      <div>
+                                        <dt>Movement</dt>
+                                        <dd>
+                                          {getDetailedMovementLabel(
                                             item,
-                                            rowStatus,
+                                            detailStatus,
                                             dispatch
-                                          )
-                                        }
-                                      </strong>
-                                    </div>
-
-                                    <div>
-                                      <span>Speed</span>
-                                      <strong>
-                                        {
-                                          `${rowSpeedMph.toFixed(1)} mph`
-                                        }
-                                      </strong>
-                                    </div>
-
-                                    <div>
-                                      <span>Temperature</span>
-                                      <strong
-                                        className={
-                                          temperatureAlert
-                                            ? 'dispatch-value alert'
-                                            : ''
-                                        }
-                                      >
-                                        {rowTempF}°F
-                                      </strong>
-                                    </div>
-
-                                    <div>
-                                      <span>Last Ping</span>
-                                      <strong>
-                                        {
-                                          item?.receivedAt
-                                            ? formatAge(
-                                                item.receivedAt
-                                              )
-                                            : 'No data'
-                                        }
-                                      </strong>
-                                    </div>
-                                  </div>
-
-                                  {
-                                    temperatureAlert && (
-                                      <div className="dispatch-temp-alert">
-                                        ⚠ Temperature outside dispatch limits
+                                          )}
+                                        </dd>
                                       </div>
-                                    )
-                                  }
+                                      <div>
+                                        <dt>Speed</dt>
+                                        <dd>
+                                          {rowSpeedMph.toFixed(1)} mph
+                                        </dd>
+                                      </div>
+                                    </dl>
 
-                                  <div className="dispatch-card-footer">
-                                    <div className="dispatch-meta">
-                                      {
-                                        dispatch.referenceNumber && (
-                                          <span>
-                                            Ref: {dispatch.referenceNumber}
-                                          </span>
-                                        )
+                                    {
+                                      dispatch.asset?.deviceId && (
+                                        <button
+                                          className="secondary-action operations-full-button"
+                                          onClick={() => {
+                                            setSelectedDeviceId(
+                                              dispatch.asset.deviceId
+                                            )
+                                            setActiveView('map')
+                                          }}
+                                          type="button"
+                                        >
+                                          View Asset on Map
+                                        </button>
+                                      )
+                                    }
+                                  </section>
+
+                                  <section className="operations-quick-actions-card">
+                                    <span className="page-kicker">
+                                      Quick Actions
+                                    </span>
+
+                                    <button
+                                      type="button"
+                                      onClick={() =>
+                                        openEditDispatch(dispatch)
                                       }
+                                    >
+                                      <span>✎</span>
+                                      <strong>Edit Load</strong>
+                                    </button>
 
-                                      {
-                                        dispatch.commodity && (
-                                          <span>
-                                            {dispatch.commodity}
-                                          </span>
-                                        )
+                                    <button
+                                      type="button"
+                                      onClick={() =>
+                                        openShareDispatch(dispatch)
                                       }
-                                    </div>
+                                    >
+                                      <span>↗</span>
+                                      <strong>Share Load</strong>
+                                    </button>
 
-                                    <div className="dispatch-actions">
-                                      <button
-                                        className="secondary-action dispatch-edit-button"
-                                        onClick={() =>
-                                          openEditDispatch(
-                                            dispatch
-                                          )
-                                        }
-                                        type="button"
-                                      >
-                                        Edit Load
-                                      </button>
-
-                                      <button
-                                        className="secondary-action dispatch-share-button"
-                                        onClick={() =>
-                                          openShareDispatch(
-                                            dispatch
-                                          )
-                                        }
-                                        type="button"
-                                      >
-                                        Share Load
-                                      </button>
-
-                                      {
-                                        dispatch.asset?.deviceId && (
-                                          <button
-                                            className="secondary-action"
-                                            onClick={() => {
-                                              setSelectedDeviceId(
-                                                dispatch.asset.deviceId
-                                              )
-                                              setActiveView('map')
-                                            }}
-                                            type="button"
-                                          >
-                                            View Map
-                                          </button>
-                                        )
-                                      }
-
+                                    <label>
+                                      <span>Status</span>
                                       <select
                                         value={dispatch.status}
                                         onChange={(event) =>
@@ -7946,155 +8373,37 @@ function App() {
                                                 key={status}
                                                 value={status}
                                               >
-                                                {
-                                                  dispatchStatusLabel(
-                                                    status
-                                                  )
-                                                }
+                                                {dispatchStatusLabel(status)}
                                               </option>
                                             )
                                           )
                                         }
                                       </select>
+                                    </label>
+                                  </section>
+                                </div>
+
+                                {
+                                  operationsTab === 'history' && (
+                                    <div className="operations-history-note">
+                                      Historical load details are preserved here. Live device values shown in the assigned asset card reflect the asset's current telemetry.
                                     </div>
-                                  </div>
-
-                                  {
-                                    dispatch.statusEvents?.length > 0 && (
-                                      <details className="dispatch-history">
-                                        <summary>
-                                          Status History
-                                        </summary>
-
-                                        <div>
-                                          {
-                                            dispatch.statusEvents
-                                              .slice(0, 8)
-                                              .map((event) => (
-                                                <p key={event.id}>
-                                                  <strong>
-                                                    {
-                                                      dispatchStatusLabel(
-                                                        event.status
-                                                      )
-                                                    }
-                                                  </strong>
-                                                  <span>
-                                                    {
-                                                      formatDateTime(
-                                                        event.createdAt
-                                                      )
-                                                    }
-                                                  </span>
-                                                </p>
-                                              ))
-                                          }
-                                        </div>
-                                      </details>
-                                    )
-                                  }
-                                </article>
-                              )
-                            }
+                                  )
+                                }
+                              </div>
+                            </>
                           )
-                        : (
-                          <div className="page-card page-empty">
-                            {
-                              dispatchLoading
-                                ? 'Loading dispatches...'
-                                : operationsTab === 'active'
-                                  ? 'No active loads match the current filters.'
-                                  : 'No completed or cancelled loads match the current filters.'
-                            }
-                          </div>
-                        )
-                    }
-                  </div>
-                </div>
-
-                <aside className="operations-side">
-                  <div className="page-card available-assets-card">
-                    <div className="operations-section-heading compact">
-                      <div>
-                        <span className="page-kicker">
-                          Fleet
-                        </span>
-                        <h2>
-                          Available Assets
-                        </h2>
-                      </div>
-                    </div>
-
-                    {
-                      availableAssets.length > 0
-                        ? availableAssets.map(
-                            (asset) => {
-                              const item =
-                                fleetTelemetry[
-                                  asset.deviceId
-                                ] ?? null
-
-                              const status =
-                                getDeviceStatusForTelemetry(
-                                  item
-                                )
-
-                              return (
-                                <button
-                                  className="available-asset-row"
-                                  key={asset.id}
-                                  onClick={() => {
-                                    setNewDispatchForm(
-                                      (current) => ({
-                                        ...current,
-                                        assetId:
-                                          String(asset.id)
-                                      })
-                                    )
-                                    setNewDispatchOpen(true)
-                                  }}
-                                  type="button"
-                                >
-                                  <span
-                                    className={
-                                      `mini-status ${status}`
-                                    }
-                                  >
-                                    ◈
-                                  </span>
-
-                                  <span>
-                                    <strong>
-                                      {
-                                        asset.name ||
-                                        asset.deviceId
-                                      }
-                                    </strong>
-                                    <small>
-                                      {asset.deviceId}
-                                    </small>
-                                  </span>
-
-                                  <em>
-                                    {
-                                      status === 'online'
-                                        ? 'Online'
-                                        : status === 'delayed'
-                                          ? 'Delayed'
-                                          : 'Offline'
-                                    }
-                                  </em>
-                                </button>
-                              )
-                            }
-                          )
-                        : (
-                          <p className="muted-text">
-                            No unassigned assets.
+                        })()
+                      : (
+                        <div className="operations-detail-empty">
+                          <span className="page-kicker">Load Details</span>
+                          <h2>Select a load</h2>
+                          <p>
+                            Choose a load from the list to view its route, timeline, trailer telemetry and actions.
                           </p>
-                        )
-                    }
-                  </div>
+                        </div>
+                      )
+                  }
                 </aside>
               </div>
 
@@ -8931,6 +9240,66 @@ function App() {
                   </strong>
                 </article>
 
+                <article className="page-card monitor-card">
+                  <span>
+                    Battery
+                  </span>
+
+                  <strong>
+                    {
+                      batteryPercent != null
+                        ? `${batteryPercent}%`
+                        : '—'
+                    }
+                  </strong>
+
+                  <span
+                    className={
+                      `battery-state ${batteryLevel}`
+                    }
+                  >
+                    {batteryLabel}
+                  </span>
+                </article>
+
+                <article className="page-card monitor-card">
+                  <span>
+                    Battery Voltage
+                  </span>
+
+                  <strong>
+                    {
+                      batteryVoltage != null
+                        ? `${batteryVoltage.toFixed(2)} V`
+                        : '—'
+                    }
+                  </strong>
+                </article>
+
+                <article className="page-card monitor-card">
+                  <span>
+                    Power Source
+                  </span>
+
+                  <strong>
+                    {
+                      powerSource === 'UNKNOWN'
+                        ? 'Unavailable'
+                        : powerSource
+                    }
+                  </strong>
+                </article>
+
+                <article className="page-card monitor-card">
+                  <span>
+                    Reefer Power
+                  </span>
+
+                  <strong>
+                    {reeferPowerLabel}
+                  </strong>
+                </article>
+
               </div>
 
               <div className="page-card monitor-detail">
@@ -8977,6 +9346,58 @@ function App() {
                           telemetry?.locationReceivedAt
                         )
                       }
+                    </dd>
+                  </div>
+
+                  <div>
+                    <dt>
+                      Battery
+                    </dt>
+
+                    <dd>
+                      {
+                        batteryPercent != null
+                          ? `${batteryPercent}% • ${batteryLabel}`
+                          : 'Unavailable'
+                      }
+                    </dd>
+                  </div>
+
+                  <div>
+                    <dt>
+                      Battery voltage
+                    </dt>
+
+                    <dd>
+                      {
+                        batteryVoltage != null
+                          ? `${batteryVoltage.toFixed(2)} V`
+                          : 'Unavailable'
+                      }
+                    </dd>
+                  </div>
+
+                  <div>
+                    <dt>
+                      Power source
+                    </dt>
+
+                    <dd>
+                      {
+                        powerSource === 'UNKNOWN'
+                          ? 'Unavailable'
+                          : powerSource
+                      }
+                    </dd>
+                  </div>
+
+                  <div>
+                    <dt>
+                      Reefer power
+                    </dt>
+
+                    <dd>
+                      {reeferPowerLabel}
                     </dd>
                   </div>
                 </dl>

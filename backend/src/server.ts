@@ -3134,6 +3134,8 @@ app.post(
         movementStatus,
         batteryVoltage,
         batteryPercent,
+        reeferPower,
+        powerSource,
         recordedAt,
         isBackfill
       } = req.body
@@ -3204,6 +3206,28 @@ app.post(
                 Math.round(batteryPercent)
               )
             )
+          : null
+
+      const safeReeferPower =
+        typeof reeferPower === 'boolean'
+          ? reeferPower
+          : reeferPower === 1 ||
+              reeferPower === '1' ||
+              String(reeferPower).toLowerCase() === 'true'
+            ? true
+            : reeferPower === 0 ||
+                reeferPower === '0' ||
+                String(reeferPower).toLowerCase() === 'false'
+              ? false
+              : null
+
+      const safePowerSource =
+        typeof powerSource === 'string' &&
+        powerSource.trim().length > 0
+          ? powerSource
+              .trim()
+              .toUpperCase()
+              .slice(0, 32)
           : null
 
       const safeIsBackfill =
@@ -3289,6 +3313,12 @@ app.post(
     batteryPercent:
       safeBatteryPercent,
 
+    reeferPower:
+      safeReeferPower,
+
+    powerSource:
+      safePowerSource,
+
     recordedAt:
       safeRecordedAt,
 
@@ -3358,6 +3388,12 @@ app.post(
 
           batteryPercent:
             safeBatteryPercent,
+
+          reeferPower:
+            safeReeferPower,
+
+          powerSource:
+            safePowerSource,
 
           recordedAt:
             safeRecordedAt
@@ -3513,6 +3549,15 @@ app.get(
 
           // Always identify the requested device.
           deviceId: asset.deviceId,
+
+          // MAV2 power telemetry.
+          reeferPower:
+            latestTelemetry.reeferPower ??
+            null,
+
+          powerSource:
+            latestTelemetry.powerSource ??
+            null,
 
           latitude:
             latestTelemetry.latitude ??

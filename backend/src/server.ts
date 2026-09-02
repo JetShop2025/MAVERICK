@@ -61,12 +61,12 @@ const RESEND_API_KEY =
 
 const EMAIL_FROM =
   process.env.EMAIL_FROM?.trim() ||
-  'Maverick <onboarding@resend.dev>'
+  'MAVTRACK LLC <tracking@mavtrackfleet.com>'
 
 const PUBLIC_FRONTEND_URL =
   (
     process.env.PUBLIC_FRONTEND_URL?.trim() ||
-    'https://maverick-tracking.onrender.com'
+    'https://mavtrackfleet.com'
   ).replace(/\/+$/, '')
 
 const DEFAULT_NOTIFICATION_EMAIL =
@@ -2381,20 +2381,383 @@ app.post(
             customerEmail
           ],
           subject:
-            `Maverick tracking — Load ${dispatch.loadNumber}`,
-          html: `
-            <div style="font-family:Arial,sans-serif;max-width:640px;margin:auto;color:#0f172a">
-              <h2>Load ${escapeHtml(dispatch.loadNumber)}</h2>
-              <p>${escapeHtml(share.customerName || 'Hello')}, your load has been shared with you through Maverick.</p>
-              <p><strong>Status:</strong> ${escapeHtml(dispatchStatusLabel(dispatch.status))}</p>
-              <p><strong>Pickup:</strong> ${escapeHtml(dispatch.pickupName)} — ${escapeHtml(dispatch.pickupAddress)}</p>
-              <p><strong>Delivery:</strong> ${escapeHtml(dispatch.deliveryName)} — ${escapeHtml(dispatch.deliveryAddress)}</p>
-              <p style="margin:28px 0">
-                <a href="${trackingUrl}" style="display:inline-block;background:#2563eb;color:white;text-decoration:none;padding:12px 18px;border-radius:8px;font-weight:700">View Live Load</a>
-              </p>
-              <p style="color:#64748b;font-size:12px">This secure link expires in ${safeExpirationDays} day${safeExpirationDays === 1 ? '' : 's'}.</p>
-            </div>
-          `
+  `MAVTRACK LLC | Live Tracking for Load ${dispatch.loadNumber}`,
+
+html: `
+<!DOCTYPE html>
+<html>
+  <body style="
+    margin:0;
+    padding:0;
+    background:#f3f6fa;
+    font-family:Arial,Helvetica,sans-serif;
+    color:#0f172a;
+  ">
+
+    <div style="
+      display:none;
+      max-height:0;
+      overflow:hidden;
+      opacity:0;
+      color:transparent;
+    ">
+      Secure live shipment tracking for load ${escapeHtml(dispatch.loadNumber)}.
+    </div>
+
+    <table
+      role="presentation"
+      width="100%"
+      cellspacing="0"
+      cellpadding="0"
+      border="0"
+      style="background:#f3f6fa;padding:32px 12px;"
+    >
+      <tr>
+        <td align="center">
+
+          <table
+            role="presentation"
+            width="100%"
+            cellspacing="0"
+            cellpadding="0"
+            border="0"
+            style="
+              max-width:680px;
+              background:#ffffff;
+              border-radius:16px;
+              overflow:hidden;
+              box-shadow:0 8px 30px rgba(15,23,42,0.08);
+            "
+          >
+
+            <!-- HEADER -->
+            <tr>
+              <td style="
+                background:#071426;
+                padding:30px 36px;
+              ">
+                <div style="
+                  font-size:24px;
+                  font-weight:800;
+                  letter-spacing:2px;
+                  color:#ffffff;
+                ">
+                  MAVTRACK LLC
+                </div>
+
+                <div style="
+                  margin-top:7px;
+                  font-size:13px;
+                  color:#94a3b8;
+                  letter-spacing:0.5px;
+                ">
+                  SECURE SHIPMENT TRACKING
+                </div>
+              </td>
+            </tr>
+
+            <!-- INTRO -->
+            <tr>
+              <td style="padding:36px 36px 18px 36px;">
+
+                <p style="
+                  margin:0 0 10px 0;
+                  font-size:15px;
+                  color:#64748b;
+                ">
+                  Hello ${escapeHtml(share.customerName || 'Customer')},
+                </p>
+
+                <h1 style="
+                  margin:0;
+                  font-size:28px;
+                  line-height:1.25;
+                  color:#0f172a;
+                ">
+                  Your shipment is ready to track
+                </h1>
+
+                <p style="
+                  margin:12px 0 0 0;
+                  font-size:15px;
+                  line-height:1.6;
+                  color:#64748b;
+                ">
+                  MAVTRACK LLC has provided you secure access to the
+                  live tracking information for this shipment.
+                </p>
+
+              </td>
+            </tr>
+
+            <!-- LOAD SUMMARY -->
+            <tr>
+              <td style="padding:12px 36px 6px 36px;">
+
+                <table
+                  role="presentation"
+                  width="100%"
+                  cellspacing="0"
+                  cellpadding="0"
+                  border="0"
+                  style="
+                    background:#f8fafc;
+                    border:1px solid #e2e8f0;
+                    border-radius:12px;
+                  "
+                >
+
+                  <tr>
+                    <td style="padding:22px 22px 8px 22px;">
+                      <div style="
+                        font-size:11px;
+                        font-weight:700;
+                        color:#64748b;
+                        letter-spacing:1px;
+                      ">
+                        LOAD
+                      </div>
+
+                      <div style="
+                        margin-top:5px;
+                        font-size:26px;
+                        font-weight:800;
+                        color:#0f172a;
+                      ">
+                        ${escapeHtml(dispatch.loadNumber)}
+                      </div>
+                    </td>
+
+                    <td
+                      align="right"
+                      style="padding:22px 22px 8px 22px;"
+                    >
+                      <span style="
+                        display:inline-block;
+                        padding:8px 14px;
+                        border-radius:999px;
+                        background:#dbeafe;
+                        color:#1d4ed8;
+                        font-size:12px;
+                        font-weight:800;
+                      ">
+                        ${escapeHtml(
+                          dispatchStatusLabel(
+                            dispatch.status
+                          )
+                        )}
+                      </span>
+                    </td>
+                  </tr>
+
+                </table>
+
+              </td>
+            </tr>
+
+            <!-- PICKUP / DELIVERY -->
+            <tr>
+              <td style="padding:18px 36px;">
+
+                <table
+                  role="presentation"
+                  width="100%"
+                  cellspacing="0"
+                  cellpadding="0"
+                  border="0"
+                >
+                  <tr>
+
+                    <td
+                      width="48%"
+                      valign="top"
+                      style="
+                        padding:20px;
+                        border:1px solid #e2e8f0;
+                        border-radius:12px;
+                      "
+                    >
+                      <div style="
+                        font-size:11px;
+                        font-weight:700;
+                        letter-spacing:1px;
+                        color:#64748b;
+                      ">
+                        PICKUP
+                      </div>
+
+                      <div style="
+                        margin-top:8px;
+                        font-size:17px;
+                        font-weight:800;
+                        color:#0f172a;
+                      ">
+                        ${escapeHtml(dispatch.pickupName)}
+                      </div>
+
+                      <div style="
+                        margin-top:6px;
+                        font-size:13px;
+                        line-height:1.5;
+                        color:#64748b;
+                      ">
+                        ${escapeHtml(dispatch.pickupAddress)}
+                      </div>
+                    </td>
+
+                    <td width="4%"></td>
+
+                    <td
+                      width="48%"
+                      valign="top"
+                      style="
+                        padding:20px;
+                        border:1px solid #e2e8f0;
+                        border-radius:12px;
+                      "
+                    >
+                      <div style="
+                        font-size:11px;
+                        font-weight:700;
+                        letter-spacing:1px;
+                        color:#64748b;
+                      ">
+                        DELIVERY
+                      </div>
+
+                      <div style="
+                        margin-top:8px;
+                        font-size:17px;
+                        font-weight:800;
+                        color:#0f172a;
+                      ">
+                        ${escapeHtml(dispatch.deliveryName)}
+                      </div>
+
+                      <div style="
+                        margin-top:6px;
+                        font-size:13px;
+                        line-height:1.5;
+                        color:#64748b;
+                      ">
+                        ${escapeHtml(dispatch.deliveryAddress)}
+                      </div>
+                    </td>
+
+                  </tr>
+                </table>
+
+              </td>
+            </tr>
+
+            <!-- BUTTON -->
+            <tr>
+              <td
+                align="center"
+                style="padding:14px 36px 34px 36px;"
+              >
+
+                <a
+                  href="${escapeHtml(trackingUrl)}"
+                  style="
+                    display:inline-block;
+                    background:#2563eb;
+                    color:#ffffff;
+                    text-decoration:none;
+                    padding:15px 30px;
+                    border-radius:10px;
+                    font-size:15px;
+                    font-weight:800;
+                    letter-spacing:0.3px;
+                  "
+                >
+                  TRACK SHIPMENT
+                </a>
+
+                <p style="
+                  margin:18px 0 0 0;
+                  font-size:12px;
+                  line-height:1.6;
+                  color:#94a3b8;
+                ">
+                  This secure tracking link expires in
+                  ${safeExpirationDays}
+                  day${safeExpirationDays === 1 ? '' : 's'}.
+                </p>
+
+              </td>
+            </tr>
+
+            <!-- SECURITY -->
+            <tr>
+              <td style="
+                padding:20px 36px;
+                background:#f8fafc;
+                border-top:1px solid #e2e8f0;
+              ">
+
+                <p style="
+                  margin:0;
+                  font-size:12px;
+                  line-height:1.6;
+                  color:#64748b;
+                ">
+                  This link provides access only to the shipment
+                  shared with this email address. It does not provide
+                  access to the MAVTRACK LLC fleet management portal
+                  or any other shipment.
+                </p>
+
+              </td>
+            </tr>
+
+            <!-- FOOTER -->
+            <tr>
+              <td
+                align="center"
+                style="
+                  padding:28px 36px;
+                  background:#071426;
+                "
+              >
+
+                <div style="
+                  color:#ffffff;
+                  font-size:15px;
+                  font-weight:800;
+                  letter-spacing:1px;
+                ">
+                  MAVTRACK LLC
+                </div>
+
+                <div style="
+                  margin-top:7px;
+                  color:#94a3b8;
+                  font-size:12px;
+                ">
+                  Real-Time Fleet & Temperature Visibility
+                </div>
+
+                <div style="
+                  margin-top:10px;
+                  color:#60a5fa;
+                  font-size:12px;
+                ">
+                  mavtrackfleet.com
+                </div>
+
+              </td>
+            </tr>
+
+          </table>
+
+        </td>
+      </tr>
+    </table>
+
+  </body>
+</html>
+`
         })
 
       await createNotificationEvent({
@@ -3610,18 +3973,39 @@ function selectRouteAnchors(
     return points
   }
 
-  const anchors: RoadMatchInputPoint[] = [
+  const first =
     points[0]
-  ]
 
-  let lastKept = points[0]
+  const last =
+    points[
+      points.length - 1
+    ]
+
+  if (!first || !last) {
+    return []
+  }
+
+  const anchors:
+    RoadMatchInputPoint[] = [
+      first
+    ]
+
+  let lastKept:
+    RoadMatchInputPoint =
+      first
 
   for (
     let index = 1;
-    index < points.length - 1;
+    index <
+      points.length - 1;
     index++
   ) {
-    const point = points[index]
+    const point =
+      points[index]
+
+    if (!point) {
+      continue
+    }
 
     // Preserve meaningful turns/progress while removing tightly
     // clustered GPS jitter before asking OSRM to route the path.
@@ -3631,41 +4015,66 @@ function selectRouteAnchors(
         point
       ) >= 90
     ) {
-      anchors.push(point)
-      lastKept = point
+      anchors.push(
+        point
+      )
+
+      lastKept =
+        point
     }
   }
 
-  const last =
-    points[points.length - 1]
-
   if (
-    anchors[anchors.length - 1] !== last
+    anchors[
+      anchors.length - 1
+    ] !== last
   ) {
-    anchors.push(last)
+    anchors.push(
+      last
+    )
   }
 
   // Keep public OSRM requests compact and reliable.
-  if (anchors.length <= 22) {
+  if (
+    anchors.length <= 22
+  ) {
     return anchors
   }
 
-  const sampled: RoadMatchInputPoint[] = []
+  const sampled:
+    RoadMatchInputPoint[] =
+      []
 
-  for (let i = 0; i < 22; i++) {
-    const index = Math.round(
-      i *
-      (anchors.length - 1) /
-      21
-    )
+  for (
+    let i = 0;
+    i < 22;
+    i++
+  ) {
+    const index =
+      Math.round(
+        i *
+          (
+            anchors.length -
+            1
+          ) /
+          21
+      )
 
-    const candidate = anchors[index]
+    const candidate =
+      anchors[index]
+
+    if (!candidate) {
+      continue
+    }
 
     if (
-      sampled[sampled.length - 1] !==
-      candidate
+      sampled[
+        sampled.length - 1
+      ] !== candidate
     ) {
-      sampled.push(candidate)
+      sampled.push(
+        candidate
+      )
     }
   }
 

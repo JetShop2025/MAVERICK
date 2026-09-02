@@ -5800,11 +5800,11 @@ function App() {
             🔔
 
             {
-              activeAlertCount >
+              notificationBadgeCount >
                 0 && (
                 <span className="notification-badge">
                   {
-                    activeAlertCount
+                    notificationBadgeCount
                   }
                 </span>
               )

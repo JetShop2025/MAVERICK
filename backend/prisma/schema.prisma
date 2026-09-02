@@ -15,9 +15,10 @@ model Company {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  users      User[]
-  assets     Asset[]
-  dispatches Dispatch[]
+  users         User[]
+  assets        Asset[]
+  dispatches    Dispatch[]
+  notifications NotificationEvent[]
 }
 
 model User {
@@ -47,12 +48,14 @@ model Asset {
   temperatureMinC          Float?
   temperatureMaxC          Float?
   temperatureAlertsEnabled Boolean @default(false)
+  temperatureAlertEmail    String?
 
   companyId Int
   company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
 
-  telemetry  Telemetry[]
-  dispatches Dispatch[]
+  telemetry     Telemetry[]
+  dispatches    Dispatch[]
+  notifications NotificationEvent[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -143,7 +146,9 @@ model Dispatch {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  statusEvents DispatchStatusEvent[]
+  statusEvents  DispatchStatusEvent[]
+  shares        DispatchShare[]
+  notifications NotificationEvent[]
 
   @@unique([companyId, loadNumber])
   @@index([companyId, status])
@@ -163,3 +168,57 @@ model DispatchStatusEvent {
 
   @@index([dispatchId, createdAt])
 }
+
+model DispatchShare {
+  id Int @id @default(autoincrement())
+
+  token         String  @unique
+  customerName  String?
+  customerEmail String
+
+  allowLocation    Boolean @default(true)
+  allowTemperature Boolean @default(true)
+  allowEta         Boolean @default(true)
+
+  expiresAt DateTime?
+  revokedAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  dispatchId Int
+  dispatch   Dispatch @relation(fields: [dispatchId], references: [id], onDelete: Cascade)
+
+  @@index([dispatchId])
+  @@index([customerEmail])
+  @@index([expiresAt])
+}
+
+model NotificationEvent {
+  id Int @id @default(autoincrement())
+
+  type     String
+  severity String @default("info")
+  title    String
+  message  String
+
+  emailRecipients String?
+  emailSent       Boolean @default(false)
+  emailedAt       DateTime?
+
+  companyId Int
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  assetId Int?
+  asset   Asset? @relation(fields: [assetId], references: [id], onDelete: SetNull)
+
+  dispatchId Int?
+  dispatch   Dispatch? @relation(fields: [dispatchId], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now())
+
+  @@index([companyId, createdAt])
+  @@index([assetId, createdAt])
+  @@index([dispatchId, createdAt])
+}
+

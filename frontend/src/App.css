@@ -5588,3 +5588,470 @@ button:disabled {
   color: #94a3b8;
 }
 
+
+/* =====================================================
+   MAVERICK CUSTOMER SHARING / EMAIL NOTIFICATIONS
+   ===================================================== */
+
+.dispatch-share-button {
+  border-color:
+    rgba(96, 165, 250, 0.35);
+}
+
+.share-load-modal {
+  width: min(760px, calc(100vw - 32px));
+  max-height: min(820px, calc(100vh - 40px));
+  overflow: auto;
+}
+
+.share-load-form {
+  display: grid;
+  gap: 18px;
+  padding: 2px 0;
+}
+
+.share-load-grid {
+  display: grid;
+  grid-template-columns:
+    repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.share-load-grid label {
+  display: grid;
+  gap: 7px;
+  color: #aab7c8;
+  font-size: 0.74rem;
+}
+
+.share-load-grid label:last-child {
+  grid-column:
+    1 / -1;
+  max-width: 230px;
+}
+
+.share-load-grid input,
+.share-load-grid select,
+.share-created-link input {
+  width: 100%;
+  min-width: 0;
+  height: 40px;
+  padding: 0 11px;
+  border:
+    1px solid
+    rgba(148, 163, 184, 0.2);
+  border-radius: 8px;
+  outline: 0;
+  background: #121f32;
+  color: #e7eef8;
+}
+
+.share-load-grid input:focus,
+.share-load-grid select:focus,
+.share-created-link input:focus {
+  border-color:
+    rgba(96, 165, 250, 0.75);
+}
+
+.share-permissions {
+  display: grid;
+  grid-template-columns:
+    repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  padding: 13px;
+  border:
+    1px solid
+    rgba(148, 163, 184, 0.13);
+  border-radius: 10px;
+  background:
+    rgba(15, 23, 42, 0.35);
+}
+
+.share-created-link {
+  display: grid;
+  gap: 9px;
+  padding: 13px;
+  border:
+    1px solid
+    rgba(74, 222, 128, 0.2);
+  border-radius: 10px;
+  background:
+    rgba(34, 197, 94, 0.07);
+}
+
+.share-created-link > div {
+  display: grid;
+  grid-template-columns:
+    minmax(0, 1fr) auto;
+  gap: 8px;
+}
+
+.share-existing {
+  display: grid;
+  gap: 8px;
+}
+
+.share-existing > strong {
+  font-size: 0.76rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.share-existing-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 11px 12px;
+  border:
+    1px solid
+    rgba(148, 163, 184, 0.14);
+  border-radius: 9px;
+  background: #111d2f;
+}
+
+.share-existing-row > div {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+
+.share-existing-row small {
+  color: #8292a7;
+}
+
+.share-existing-row.revoked {
+  opacity: 0.5;
+}
+
+.temperature-email-help {
+  display: block;
+  margin-top: -4px;
+  color: #8292a7;
+  font-size: 0.68rem;
+  line-height: 1.45;
+}
+
+.backend-notification-list {
+  display: grid;
+  max-height: 330px;
+  overflow: auto;
+  border-bottom:
+    1px solid
+    rgba(148, 163, 184, 0.12);
+}
+
+.backend-notification-item {
+  width: 100%;
+  display: grid;
+  grid-template-columns:
+    30px minmax(0, 1fr);
+  gap: 10px;
+  padding: 11px 12px;
+  border: 0;
+  border-bottom:
+    1px solid
+    rgba(148, 163, 184, 0.09);
+  background: transparent;
+  color: inherit;
+  text-align: left;
+}
+
+.backend-notification-item:hover {
+  background:
+    rgba(96, 165, 250, 0.07);
+}
+
+.backend-notification-icon {
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: #1e3a5f;
+  color: #93c5fd;
+  font-weight: 850;
+}
+
+.backend-notification-item.critical .backend-notification-icon {
+  background:
+    rgba(239, 68, 68, 0.18);
+  color: #fca5a5;
+}
+
+.backend-notification-item.success .backend-notification-icon {
+  background:
+    rgba(34, 197, 94, 0.17);
+  color: #86efac;
+}
+
+.backend-notification-item > div {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+
+.backend-notification-item strong {
+  font-size: 0.73rem;
+}
+
+.backend-notification-item small {
+  color: #a6b4c5;
+  font-size: 0.66rem;
+  line-height: 1.35;
+}
+
+.backend-notification-item em {
+  color: #66768b;
+  font-size: 0.6rem;
+  font-style: normal;
+}
+
+/* =====================================================
+   PUBLIC LOAD TRACKING
+   ===================================================== */
+
+.public-track-shell {
+  min-height: 100vh;
+  background:
+    linear-gradient(
+      180deg,
+      #08111f 0%,
+      #0d1828 100%
+    );
+  color: #edf4fc;
+  overflow: auto;
+}
+
+.public-track-header {
+  min-height: 72px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 14px
+    clamp(18px, 4vw, 54px);
+  border-bottom:
+    1px solid
+    rgba(148, 163, 184, 0.14);
+  background:
+    rgba(8, 17, 31, 0.94);
+}
+
+.public-track-brand {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.public-track-brand img,
+.public-track-message img {
+  width: 44px;
+  height: 44px;
+  border-radius: 10px;
+  object-fit: cover;
+}
+
+.public-track-brand > div {
+  display: grid;
+  gap: 2px;
+}
+
+.public-track-brand strong {
+  letter-spacing: 0.14em;
+}
+
+.public-track-brand span,
+.public-track-updated {
+  color: #8292a7;
+  font-size: 0.7rem;
+}
+
+.public-track-main {
+  width:
+    min(1180px, calc(100% - 32px));
+  margin: 0 auto;
+  padding: 28px 0 50px;
+}
+
+.public-track-hero {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  margin-bottom: 18px;
+}
+
+.public-track-hero h1 {
+  margin: 3px 0;
+  font-size:
+    clamp(1.8rem, 4vw, 2.7rem);
+}
+
+.public-track-hero p {
+  margin: 0;
+  color: #94a3b8;
+}
+
+.public-track-status {
+  padding: 10px 14px;
+  border-radius: 999px;
+  background:
+    rgba(37, 99, 235, 0.18);
+  color: #93c5fd;
+  font-size: 0.75rem;
+  font-weight: 850;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.public-track-status.delivered {
+  background:
+    rgba(34, 197, 94, 0.16);
+  color: #86efac;
+}
+
+.public-track-status.cancelled {
+  background:
+    rgba(239, 68, 68, 0.16);
+  color: #fca5a5;
+}
+
+.public-track-grid {
+  display: grid;
+  grid-template-columns:
+    repeat(3, minmax(0, 1fr));
+  gap: 14px;
+  margin-bottom: 14px;
+}
+
+.public-track-card,
+.public-track-map-card {
+  border:
+    1px solid
+    rgba(148, 163, 184, 0.14);
+  border-radius: 14px;
+  background: #111d2d;
+  box-shadow:
+    0 18px 50px
+    rgba(2, 6, 23, 0.22);
+}
+
+.public-track-card {
+  padding: 18px;
+}
+
+.public-track-card > span {
+  color: #7f90a5;
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+}
+
+.public-track-card > strong {
+  display: block;
+  margin-top: 7px;
+  color: #f8fafc;
+}
+
+.public-track-card p {
+  margin: 6px 0;
+  color: #cbd5e1;
+  font-size: 0.78rem;
+  line-height: 1.45;
+}
+
+.public-track-card small {
+  color: #728198;
+}
+
+.public-track-map-card {
+  height: 430px;
+  overflow: hidden;
+  margin-bottom: 14px;
+}
+
+.public-track-map {
+  width: 100%;
+  height: 100%;
+}
+
+.public-track-history-card {
+  margin-bottom: 20px;
+}
+
+.public-track-card-heading {
+  margin-bottom: 12px;
+  font-size: 0.76rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.public-track-timeline {
+  display: grid;
+  gap: 11px;
+}
+
+.public-track-timeline-item {
+  display: grid;
+  grid-template-columns:
+    14px minmax(0, 1fr);
+  gap: 9px;
+  align-items: start;
+}
+
+.public-track-timeline-item i {
+  width: 9px;
+  height: 9px;
+  margin-top: 4px;
+  border-radius: 50%;
+  background: #3b82f6;
+}
+
+.public-track-timeline-item > div {
+  display: grid;
+  gap: 2px;
+}
+
+.public-track-timeline-item span {
+  color: #7f90a5;
+  font-size: 0.67rem;
+}
+
+.public-track-message {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  place-content: center;
+  gap: 12px;
+  padding: 30px;
+  text-align: center;
+}
+
+.public-track-message span {
+  color: #94a3b8;
+}
+
+@media (max-width: 760px) {
+  .share-load-grid,
+  .share-permissions,
+  .public-track-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .share-load-grid label:last-child {
+    grid-column: auto;
+    max-width: none;
+  }
+
+  .public-track-header,
+  .public-track-hero {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .public-track-map-card {
+    height: 340px;
+  }
+}

@@ -8,6 +8,7 @@ import cors from 'cors'
 import dotenv from 'dotenv'
 import bcrypt from 'bcryptjs'
 import jwt from 'jsonwebtoken'
+import { randomBytes } from 'node:crypto'
 
 import { PrismaClient } from './generated/prisma/client.js'
 import { PrismaPg } from '@prisma/adapter-pg'
@@ -52,6 +53,411 @@ if (!JWT_SECRET) {
   throw new Error(
     'JWT_SECRET is not configured'
   )
+}
+
+
+const RESEND_API_KEY =
+  process.env.RESEND_API_KEY?.trim() || ''
+
+const EMAIL_FROM =
+  process.env.EMAIL_FROM?.trim() ||
+  'Maverick <onboarding@resend.dev>'
+
+const PUBLIC_FRONTEND_URL =
+  (
+    process.env.PUBLIC_FRONTEND_URL?.trim() ||
+    'https://maverick-tracking.onrender.com'
+  ).replace(/\/+$/, '')
+
+const DEFAULT_NOTIFICATION_EMAIL =
+  process.env.NOTIFICATION_EMAIL
+    ?.trim()
+    .toLowerCase() ||
+  process.env.ADMIN_EMAIL
+    ?.trim()
+    .toLowerCase() ||
+  ''
+
+function escapeHtml(
+  value: unknown
+) {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;')
+}
+
+function uniqueEmails(
+  values: Array<string | null | undefined>
+) {
+  return Array.from(
+    new Set(
+      values
+        .flatMap(
+          (value) =>
+            typeof value === 'string'
+              ? value
+                  .split(/[;,]/)
+                  .map((item) =>
+                    item.trim().toLowerCase()
+                  )
+              : []
+        )
+        .filter((value) =>
+          /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(
+            value
+          )
+        )
+    )
+  )
+}
+
+async function sendMaverickEmail({
+  to,
+  subject,
+  html
+}: {
+  to: string[]
+  subject: string
+  html: string
+}) {
+  const recipients =
+    uniqueEmails(to)
+
+  if (
+    recipients.length === 0 ||
+    !RESEND_API_KEY
+  ) {
+    return {
+      ok: false,
+      skipped: true,
+      recipients
+    }
+  }
+
+  try {
+    const response =
+      await fetch(
+        'https://api.resend.com/emails',
+        {
+          method: 'POST',
+          headers: {
+            Authorization:
+              `Bearer ${RESEND_API_KEY}`,
+            'Content-Type':
+              'application/json'
+          },
+          body: JSON.stringify({
+            from: EMAIL_FROM,
+            to: recipients,
+            subject,
+            html
+          })
+        }
+      )
+
+    if (!response.ok) {
+      console.error(
+        'Email delivery failed:',
+        response.status,
+        await response.text()
+      )
+
+      return {
+        ok: false,
+        skipped: false,
+        recipients
+      }
+    }
+
+    return {
+      ok: true,
+      skipped: false,
+      recipients
+    }
+  } catch (error) {
+    console.error(
+      'Email delivery error:',
+      error
+    )
+
+    return {
+      ok: false,
+      skipped: false,
+      recipients
+    }
+  }
+}
+
+async function createNotificationEvent({
+  companyId,
+  assetId = null,
+  dispatchId = null,
+  type,
+  severity = 'info',
+  title,
+  message,
+  recipients = [],
+  emailSent = false
+}: {
+  companyId: number
+  assetId?: number | null
+  dispatchId?: number | null
+  type: string
+  severity?: string
+  title: string
+  message: string
+  recipients?: string[]
+  emailSent?: boolean
+}) {
+  return prisma.notificationEvent.create({
+    data: {
+      companyId,
+      assetId,
+      dispatchId,
+      type,
+      severity,
+      title,
+      message,
+      emailRecipients:
+        recipients.length > 0
+          ? recipients.join(', ')
+          : null,
+      emailSent,
+      emailedAt:
+        emailSent
+          ? new Date()
+          : null
+    }
+  })
+}
+
+function dispatchStatusLabel(
+  status: string
+) {
+  return status === 'ASSIGNED'
+    ? 'Assigned'
+    : status === 'EN_ROUTE_TO_PICKUP'
+      ? 'En Route to Pickup'
+      : status === 'AT_PICKUP'
+        ? 'At Pickup'
+        : status === 'LOADED'
+          ? 'Loaded'
+          : status === 'IN_TRANSIT'
+            ? 'In Transit'
+            : status === 'AT_DELIVERY'
+              ? 'At Delivery'
+              : status === 'DELIVERED'
+                ? 'Delivered'
+                : status === 'CANCELLED'
+                  ? 'Cancelled'
+                  : status
+}
+
+function classifyTemperature(
+  temperatureC: number,
+  minC: number,
+  maxC: number
+) {
+  if (temperatureC < minC) {
+    return 'LOW'
+  }
+
+  if (temperatureC > maxC) {
+    return 'HIGH'
+  }
+
+  return 'NORMAL'
+}
+
+async function processTemperatureAlertTransition({
+  asset,
+  previousTemperatureC,
+  currentTemperatureC
+}: {
+  asset: {
+    id: number
+    companyId: number
+    deviceId: string
+    name: string
+    temperatureMinC: number | null
+    temperatureMaxC: number | null
+    temperatureAlertsEnabled: boolean
+    temperatureAlertEmail: string | null
+  }
+  previousTemperatureC: number | null
+  currentTemperatureC: number
+}) {
+  const activeDispatch =
+    await prisma.dispatch.findFirst({
+      where: {
+        assetId: asset.id,
+        companyId: asset.companyId,
+        status: {
+          notIn: [
+            'DELIVERED',
+            'CANCELLED'
+          ]
+        }
+      },
+      include: {
+        shares: {
+          where: {
+            revokedAt: null,
+            OR: [
+              {
+                expiresAt: null
+              },
+              {
+                expiresAt: {
+                  gt: new Date()
+                }
+              }
+            ]
+          }
+        }
+      },
+      orderBy: {
+        updatedAt: 'desc'
+      }
+    })
+
+  const dispatchHasLimits =
+    activeDispatch?.temperatureMinC != null &&
+    activeDispatch?.temperatureMaxC != null
+
+  const assetHasLimits =
+    asset.temperatureAlertsEnabled &&
+    asset.temperatureMinC != null &&
+    asset.temperatureMaxC != null
+
+  if (
+    !dispatchHasLimits &&
+    !assetHasLimits
+  ) {
+    return
+  }
+
+  const minC =
+    Number(
+      dispatchHasLimits
+        ? activeDispatch!.temperatureMinC
+        : asset.temperatureMinC
+    )
+
+  const maxC =
+    Number(
+      dispatchHasLimits
+        ? activeDispatch!.temperatureMaxC
+        : asset.temperatureMaxC
+    )
+
+  const currentState =
+    classifyTemperature(
+      currentTemperatureC,
+      minC,
+      maxC
+    )
+
+  const previousState =
+    previousTemperatureC == null
+      ? 'UNKNOWN'
+      : classifyTemperature(
+          previousTemperatureC,
+          minC,
+          maxC
+        )
+
+  if (
+    currentState === previousState ||
+    (
+      currentState === 'NORMAL' &&
+      previousState === 'UNKNOWN'
+    )
+  ) {
+    return
+  }
+
+  const temperatureF =
+    currentTemperatureC * 9 / 5 + 32
+
+  const minF =
+    minC * 9 / 5 + 32
+
+  const maxF =
+    maxC * 9 / 5 + 32
+
+  const loadText =
+    activeDispatch
+      ? `Load ${activeDispatch.loadNumber}`
+      : 'Asset temperature limits'
+
+  const title =
+    currentState === 'NORMAL'
+      ? 'Temperature Restored'
+      : currentState === 'HIGH'
+        ? 'High Temperature Alert'
+        : 'Low Temperature Alert'
+
+  const message =
+    currentState === 'NORMAL'
+      ? `${asset.name} returned to the configured range (${minF.toFixed(1)}°F–${maxF.toFixed(1)}°F). Current temperature: ${temperatureF.toFixed(1)}°F.`
+      : `${asset.name} is ${currentState === 'HIGH' ? 'above' : 'below'} the configured range (${minF.toFixed(1)}°F–${maxF.toFixed(1)}°F). Current temperature: ${temperatureF.toFixed(1)}°F. ${loadText}.`
+
+  const recipients =
+    uniqueEmails([
+      asset.temperatureAlertEmail,
+      DEFAULT_NOTIFICATION_EMAIL,
+      ...(
+        activeDispatch?.shares
+          .map((share) =>
+            share.customerEmail
+          ) || []
+      )
+    ])
+
+  const emailResult =
+    await sendMaverickEmail({
+      to: recipients,
+      subject:
+        `Maverick: ${title} — ${asset.name}`,
+      html: `
+        <div style="font-family:Arial,sans-serif;max-width:640px;margin:auto;color:#0f172a">
+          <h2>${escapeHtml(title)}</h2>
+          <p>${escapeHtml(message)}</p>
+          <table style="border-collapse:collapse;width:100%;margin:18px 0">
+            <tr><td style="padding:8px;border-bottom:1px solid #e2e8f0">Asset</td><td style="padding:8px;border-bottom:1px solid #e2e8f0"><strong>${escapeHtml(asset.name)}</strong></td></tr>
+            <tr><td style="padding:8px;border-bottom:1px solid #e2e8f0">Device</td><td style="padding:8px;border-bottom:1px solid #e2e8f0">${escapeHtml(asset.deviceId)}</td></tr>
+            <tr><td style="padding:8px;border-bottom:1px solid #e2e8f0">Current</td><td style="padding:8px;border-bottom:1px solid #e2e8f0">${temperatureF.toFixed(1)}°F</td></tr>
+            <tr><td style="padding:8px;border-bottom:1px solid #e2e8f0">Range</td><td style="padding:8px;border-bottom:1px solid #e2e8f0">${minF.toFixed(1)}°F – ${maxF.toFixed(1)}°F</td></tr>
+          </table>
+          <p style="color:#64748b;font-size:12px">Maverick Fleet Monitoring</p>
+        </div>
+      `
+    })
+
+  await createNotificationEvent({
+    companyId: asset.companyId,
+    assetId: asset.id,
+    dispatchId:
+      activeDispatch?.id ?? null,
+    type:
+      currentState === 'NORMAL'
+        ? 'TEMPERATURE_RESTORED'
+        : 'TEMPERATURE_ALERT',
+    severity:
+      currentState === 'NORMAL'
+        ? 'success'
+        : 'critical',
+    title,
+    message,
+    recipients:
+      emailResult.recipients,
+    emailSent:
+      emailResult.ok
+  })
 }
 
 // =====================================================
@@ -514,6 +920,59 @@ app.get(
   }
 )
 
+
+// =====================================================
+// NOTIFICATIONS
+// =====================================================
+
+app.get(
+  '/api/notifications',
+  requireAuth,
+  async (
+    req: AuthenticatedRequest,
+    res: Response
+  ) => {
+    try {
+      const companyId =
+        req.user?.companyId
+
+      if (!companyId) {
+        return res.status(401).json({
+          ok: false,
+          message: 'Invalid session'
+        })
+      }
+
+      const notifications =
+        await prisma.notificationEvent.findMany({
+          where: {
+            companyId
+          },
+          orderBy: {
+            createdAt: 'desc'
+          },
+          take: 50
+        })
+
+      return res.json({
+        ok: true,
+        notifications
+      })
+    } catch (error) {
+      console.error(
+        'Get notifications error:',
+        error
+      )
+
+      return res.status(500).json({
+        ok: false,
+        message:
+          'Unable to load notifications'
+      })
+    }
+  }
+)
+
 app.get(
   '/api/assets',
   requireAuth,
@@ -550,6 +1009,7 @@ app.get(
             temperatureMinC: true,
             temperatureMaxC: true,
             temperatureAlertsEnabled: true,
+            temperatureAlertEmail: true,
             createdAt: true,
             updatedAt: true
           }
@@ -640,6 +1100,7 @@ app.patch(
         temperatureMinC?: number | null
         temperatureMaxC?: number | null
         temperatureAlertsEnabled?: boolean
+        temperatureAlertEmail?: string | null
       } = {}
 
       // ---------------------------------
@@ -751,6 +1212,42 @@ app.patch(
       }
 
       // ---------------------------------
+      // EMAIL DE ALERTAS
+      // ---------------------------------
+
+      if (
+        req.body?.temperatureAlertEmail !==
+        undefined
+      ) {
+        const value =
+          req.body.temperatureAlertEmail
+
+        if (
+          value === null ||
+          (
+            typeof value === 'string' &&
+            value.trim() === ''
+          )
+        ) {
+          data.temperatureAlertEmail = null
+        } else if (
+          typeof value === 'string' &&
+          /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(
+            value.trim()
+          )
+        ) {
+          data.temperatureAlertEmail =
+            value.trim().toLowerCase()
+        } else {
+          return res.status(400).json({
+            ok: false,
+            message:
+              'Enter a valid temperature alert email'
+          })
+        }
+      }
+
+      // ---------------------------------
       // VALIDAR LIMITES FINALES
       // ---------------------------------
 
@@ -817,6 +1314,7 @@ app.patch(
             temperatureMinC: true,
             temperatureMaxC: true,
             temperatureAlertsEnabled: true,
+            temperatureAlertEmail: true,
             createdAt: true,
             updatedAt: true
           }
@@ -950,6 +1448,14 @@ app.get(
                 createdAt: 'desc'
               },
               take: 20
+            },
+            shares: {
+              where: {
+                revokedAt: null
+              },
+              orderBy: {
+                createdAt: 'desc'
+              }
             }
           },
           orderBy: [
@@ -1014,6 +1520,11 @@ app.get(
           include: {
             asset: true,
             statusEvents: {
+              orderBy: {
+                createdAt: 'desc'
+              }
+            },
+            shares: {
               orderBy: {
                 createdAt: 'desc'
               }
@@ -1282,6 +1793,14 @@ app.post(
               orderBy: {
                 createdAt: 'desc'
               }
+            },
+            shares: {
+              where: {
+                revokedAt: null
+              },
+              orderBy: {
+                createdAt: 'desc'
+              }
             }
           }
         })
@@ -1499,6 +2018,14 @@ app.patch(
               orderBy: {
                 createdAt: 'desc'
               }
+            },
+            shares: {
+              where: {
+                revokedAt: null
+              },
+              orderBy: {
+                createdAt: 'desc'
+              }
             }
           }
         })
@@ -1610,9 +2137,108 @@ app.post(
               orderBy: {
                 createdAt: 'desc'
               }
+            },
+            shares: {
+              where: {
+                revokedAt: null
+              },
+              orderBy: {
+                createdAt: 'desc'
+              }
             }
           }
         })
+
+      if (
+        existing.status !== status
+      ) {
+        const title =
+          `Load ${updated.loadNumber}: ${dispatchStatusLabel(status)}`
+
+        const message =
+          `${updated.loadNumber} status changed from ${dispatchStatusLabel(existing.status)} to ${dispatchStatusLabel(status)}.`
+
+        const activeShares =
+          await prisma.dispatchShare.findMany({
+            where: {
+              dispatchId:
+                updated.id,
+              revokedAt: null,
+              OR: [
+                {
+                  expiresAt: null
+                },
+                {
+                  expiresAt: {
+                    gt: new Date()
+                  }
+                }
+              ]
+            }
+          })
+
+        let anyEmailSent = false
+        const emailRecipients: string[] = []
+
+        for (
+          const share of activeShares
+        ) {
+          const trackingUrl =
+            `${PUBLIC_FRONTEND_URL}/track/${share.token}`
+
+          const result =
+            await sendMaverickEmail({
+              to: [
+                share.customerEmail
+              ],
+              subject:
+                `Maverick: ${title}`,
+              html: `
+                <div style="font-family:Arial,sans-serif;max-width:640px;margin:auto;color:#0f172a">
+                  <h2>${escapeHtml(title)}</h2>
+                  <p>${escapeHtml(message)}</p>
+                  <p><strong>Pickup:</strong> ${escapeHtml(updated.pickupName)}</p>
+                  <p><strong>Delivery:</strong> ${escapeHtml(updated.deliveryName)}</p>
+                  <p style="margin:28px 0">
+                    <a href="${trackingUrl}" style="display:inline-block;background:#2563eb;color:white;text-decoration:none;padding:12px 18px;border-radius:8px;font-weight:700">View Live Load</a>
+                  </p>
+                </div>
+              `
+            })
+
+          anyEmailSent =
+            anyEmailSent ||
+            result.ok
+
+          emailRecipients.push(
+            ...result.recipients
+          )
+        }
+
+        await createNotificationEvent({
+          companyId,
+          assetId:
+            updated.assetId,
+          dispatchId:
+            updated.id,
+          type:
+            'DISPATCH_STATUS',
+          severity:
+            status === 'CANCELLED'
+              ? 'warning'
+              : status === 'DELIVERED'
+                ? 'success'
+                : 'info',
+          title,
+          message,
+          recipients:
+            uniqueEmails(
+              emailRecipients
+            ),
+          emailSent:
+            anyEmailSent
+        })
+      }
 
       return res.json({
         ok: true,
@@ -1633,6 +2259,498 @@ app.post(
   }
 )
 
+
+
+// =====================================================
+// DISPATCH SHARING
+// =====================================================
+
+app.post(
+  '/api/dispatches/:id/share',
+  requireAuth,
+  async (
+    req: AuthenticatedRequest,
+    res: Response
+  ) => {
+    try {
+      const companyId =
+        req.user?.companyId
+
+      const dispatchId =
+        Number(req.params.id)
+
+      const customerEmail =
+        optionalString(
+          req.body?.customerEmail
+        )?.toLowerCase()
+
+      if (
+        !companyId ||
+        !Number.isInteger(dispatchId)
+      ) {
+        return res.status(400).json({
+          ok: false,
+          message: 'Invalid dispatch'
+        })
+      }
+
+      if (
+        !customerEmail ||
+        !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(
+          customerEmail
+        )
+      ) {
+        return res.status(400).json({
+          ok: false,
+          message:
+            'Enter a valid customer email'
+        })
+      }
+
+      const dispatch =
+        await prisma.dispatch.findFirst({
+          where: {
+            id: dispatchId,
+            companyId
+          },
+          include: {
+            asset: true
+          }
+        })
+
+      if (!dispatch) {
+        return res.status(404).json({
+          ok: false,
+          message: 'Dispatch not found'
+        })
+      }
+
+      const expirationDays =
+        Number(req.body?.expirationDays)
+
+      const safeExpirationDays =
+        Number.isFinite(expirationDays)
+          ? Math.max(
+              1,
+              Math.min(
+                30,
+                Math.round(expirationDays)
+              )
+            )
+          : 7
+
+      const token =
+        randomBytes(32)
+          .toString('hex')
+
+      const share =
+        await prisma.dispatchShare.create({
+          data: {
+            dispatchId:
+              dispatch.id,
+            token,
+            customerName:
+              optionalString(
+                req.body?.customerName
+              ),
+            customerEmail,
+            allowLocation:
+              req.body?.allowLocation !== false,
+            allowTemperature:
+              req.body?.allowTemperature !== false,
+            allowEta:
+              req.body?.allowEta !== false,
+            expiresAt:
+              new Date(
+                Date.now() +
+                safeExpirationDays *
+                24 *
+                60 *
+                60 *
+                1000
+              )
+          }
+        })
+
+      const trackingUrl =
+        `${PUBLIC_FRONTEND_URL}/track/${share.token}`
+
+      const emailResult =
+        await sendMaverickEmail({
+          to: [
+            customerEmail
+          ],
+          subject:
+            `Maverick tracking — Load ${dispatch.loadNumber}`,
+          html: `
+            <div style="font-family:Arial,sans-serif;max-width:640px;margin:auto;color:#0f172a">
+              <h2>Load ${escapeHtml(dispatch.loadNumber)}</h2>
+              <p>${escapeHtml(share.customerName || 'Hello')}, your load has been shared with you through Maverick.</p>
+              <p><strong>Status:</strong> ${escapeHtml(dispatchStatusLabel(dispatch.status))}</p>
+              <p><strong>Pickup:</strong> ${escapeHtml(dispatch.pickupName)} — ${escapeHtml(dispatch.pickupAddress)}</p>
+              <p><strong>Delivery:</strong> ${escapeHtml(dispatch.deliveryName)} — ${escapeHtml(dispatch.deliveryAddress)}</p>
+              <p style="margin:28px 0">
+                <a href="${trackingUrl}" style="display:inline-block;background:#2563eb;color:white;text-decoration:none;padding:12px 18px;border-radius:8px;font-weight:700">View Live Load</a>
+              </p>
+              <p style="color:#64748b;font-size:12px">This secure link expires in ${safeExpirationDays} day${safeExpirationDays === 1 ? '' : 's'}.</p>
+            </div>
+          `
+        })
+
+      await createNotificationEvent({
+        companyId,
+        assetId:
+          dispatch.assetId,
+        dispatchId:
+          dispatch.id,
+        type:
+          'LOAD_SHARED',
+        severity:
+          'info',
+        title:
+          'Load Shared',
+        message:
+          `${dispatch.loadNumber} shared with ${customerEmail}`,
+        recipients:
+          emailResult.recipients,
+        emailSent:
+          emailResult.ok
+      })
+
+      return res.status(201).json({
+        ok: true,
+        share: {
+          ...share,
+          trackingUrl,
+          emailSent:
+            emailResult.ok
+        }
+      })
+    } catch (error) {
+      console.error(
+        'Create dispatch share error:',
+        error
+      )
+
+      return res.status(500).json({
+        ok: false,
+        message:
+          'Unable to share load'
+      })
+    }
+  }
+)
+
+app.get(
+  '/api/dispatches/:id/shares',
+  requireAuth,
+  async (
+    req: AuthenticatedRequest,
+    res: Response
+  ) => {
+    try {
+      const companyId =
+        req.user?.companyId
+
+      const dispatchId =
+        Number(req.params.id)
+
+      if (
+        !companyId ||
+        !Number.isInteger(dispatchId)
+      ) {
+        return res.status(400).json({
+          ok: false,
+          message: 'Invalid dispatch'
+        })
+      }
+
+      const dispatch =
+        await prisma.dispatch.findFirst({
+          where: {
+            id: dispatchId,
+            companyId
+          },
+          select: {
+            id: true
+          }
+        })
+
+      if (!dispatch) {
+        return res.status(404).json({
+          ok: false,
+          message: 'Dispatch not found'
+        })
+      }
+
+      const shares =
+        await prisma.dispatchShare.findMany({
+          where: {
+            dispatchId
+          },
+          orderBy: {
+            createdAt: 'desc'
+          }
+        })
+
+      return res.json({
+        ok: true,
+        shares:
+          shares.map((share) => ({
+            ...share,
+            trackingUrl:
+              `${PUBLIC_FRONTEND_URL}/track/${share.token}`
+          }))
+      })
+    } catch (error) {
+      console.error(
+        'Get dispatch shares error:',
+        error
+      )
+
+      return res.status(500).json({
+        ok: false,
+        message:
+          'Unable to load shared links'
+      })
+    }
+  }
+)
+
+app.delete(
+  '/api/dispatches/:id/shares/:shareId',
+  requireAuth,
+  async (
+    req: AuthenticatedRequest,
+    res: Response
+  ) => {
+    try {
+      const companyId =
+        req.user?.companyId
+
+      const dispatchId =
+        Number(req.params.id)
+
+      const shareId =
+        Number(req.params.shareId)
+
+      if (
+        !companyId ||
+        !Number.isInteger(dispatchId) ||
+        !Number.isInteger(shareId)
+      ) {
+        return res.status(400).json({
+          ok: false,
+          message: 'Invalid shared link'
+        })
+      }
+
+      const share =
+        await prisma.dispatchShare.findFirst({
+          where: {
+            id: shareId,
+            dispatchId,
+            dispatch: {
+              companyId
+            }
+          }
+        })
+
+      if (!share) {
+        return res.status(404).json({
+          ok: false,
+          message:
+            'Shared link not found'
+        })
+      }
+
+      const updated =
+        await prisma.dispatchShare.update({
+          where: {
+            id: share.id
+          },
+          data: {
+            revokedAt: new Date()
+          }
+        })
+
+      return res.json({
+        ok: true,
+        share: updated
+      })
+    } catch (error) {
+      console.error(
+        'Revoke dispatch share error:',
+        error
+      )
+
+      return res.status(500).json({
+        ok: false,
+        message:
+          'Unable to revoke shared link'
+      })
+    }
+  }
+)
+
+app.get(
+  '/api/public/track/:token',
+  async (
+    req,
+    res
+  ) => {
+    try {
+      const token =
+        String(
+          req.params.token || ''
+        ).trim()
+
+      if (!token) {
+        return res.status(400).json({
+          ok: false,
+          message:
+            'Invalid tracking link'
+        })
+      }
+
+      const share =
+        await prisma.dispatchShare.findUnique({
+          where: {
+            token
+          },
+          include: {
+            dispatch: {
+              include: {
+                asset: true,
+                statusEvents: {
+                  orderBy: {
+                    createdAt: 'desc'
+                  },
+                  take: 12
+                }
+              }
+            }
+          }
+        })
+
+      if (
+        !share ||
+        share.revokedAt ||
+        (
+          share.expiresAt &&
+          share.expiresAt <= new Date()
+        )
+      ) {
+        return res.status(404).json({
+          ok: false,
+          message:
+            'This tracking link is no longer available'
+        })
+      }
+
+      const latestTelemetry =
+        share.dispatch.assetId
+          ? await prisma.telemetry.findFirst({
+              where: {
+                assetId:
+                  share.dispatch.assetId,
+                isBackfill: false
+              },
+              orderBy: {
+                receivedAt: 'desc'
+              }
+            })
+          : null
+
+      return res.json({
+        ok: true,
+        share: {
+          customerName:
+            share.customerName,
+          allowLocation:
+            share.allowLocation,
+          allowTemperature:
+            share.allowTemperature,
+          allowEta:
+            share.allowEta,
+          expiresAt:
+            share.expiresAt
+        },
+        dispatch: {
+          loadNumber:
+            share.dispatch.loadNumber,
+          status:
+            share.dispatch.status,
+          pickupName:
+            share.dispatch.pickupName,
+          pickupAddress:
+            share.dispatch.pickupAddress,
+          pickupScheduledAt:
+            share.dispatch.pickupScheduledAt,
+          deliveryName:
+            share.dispatch.deliveryName,
+          deliveryAddress:
+            share.dispatch.deliveryAddress,
+          deliveryScheduledAt:
+            share.dispatch.deliveryScheduledAt,
+          commodity:
+            share.dispatch.commodity,
+          referenceNumber:
+            share.dispatch.referenceNumber,
+          asset:
+            share.dispatch.asset
+              ? {
+                  name:
+                    share.dispatch.asset.name,
+                  deviceId:
+                    share.dispatch.asset.deviceId
+                }
+              : null,
+          statusEvents:
+            share.dispatch.statusEvents
+        },
+        telemetry:
+          latestTelemetry
+            ? {
+                receivedAt:
+                  latestTelemetry.receivedAt,
+                temperature:
+                  share.allowTemperature
+                    ? latestTelemetry.temperature
+                    : null,
+                latitude:
+                  share.allowLocation
+                    ? latestTelemetry.latitude
+                    : null,
+                longitude:
+                  share.allowLocation
+                    ? latestTelemetry.longitude
+                    : null,
+                speedKph:
+                  share.allowLocation
+                    ? latestTelemetry.speedKph
+                    : null,
+                movementStatus:
+                  share.allowLocation
+                    ? latestTelemetry.movementStatus
+                    : null
+              }
+            : null
+      })
+    } catch (error) {
+      console.error(
+        'Public tracking error:',
+        error
+      )
+
+      return res.status(500).json({
+        ok: false,
+        message:
+          'Unable to load tracking information'
+      })
+    }
+  }
+)
 
 // =====================================================
 // RECIBIR TELEMETRIA
@@ -1753,11 +2871,34 @@ app.post(
       // ---------------------------------
       
       const asset =
-  await prisma.asset.findUnique({
-    where: {
-      deviceId
-    }
-  })
+        await prisma.asset.findUnique({
+          where: {
+            deviceId
+          }
+        })
+
+      const previousLiveTelemetry =
+        (
+          asset &&
+          !safeIsBackfill
+        )
+          ? await prisma.telemetry.findFirst({
+              where: {
+                assetId:
+                  asset.id,
+                isBackfill:
+                  false
+              },
+              orderBy: {
+                receivedAt:
+                  'desc'
+              },
+              select: {
+                temperature:
+                  true
+              }
+            })
+          : null
 
       await prisma.telemetry.create({
   data: {
@@ -1795,6 +2936,20 @@ app.post(
       asset?.id ?? null
   }
 })
+
+      if (
+        asset &&
+        !safeIsBackfill
+      ) {
+        await processTemperatureAlertTransition({
+          asset,
+          previousTemperatureC:
+            previousLiveTelemetry
+              ?.temperature ?? null,
+          currentTemperatureC:
+            temperature
+        })
+      }
 
       // ---------------------------------
       // LOG EN FAHRENHEIT

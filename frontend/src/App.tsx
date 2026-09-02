@@ -63,6 +63,33 @@ type DispatchStatusEvent = {
   createdAt: string
 }
 
+type DispatchShareRecord = {
+  id: number
+  customerName: string | null
+  customerEmail: string
+  allowLocation: boolean
+  allowTemperature: boolean
+  allowEta: boolean
+  expiresAt: string | null
+  revokedAt: string | null
+  createdAt: string
+  trackingUrl?: string
+}
+
+type NotificationRecord = {
+  id: number
+  type: string
+  severity: string
+  title: string
+  message: string
+  emailRecipients: string | null
+  emailSent: boolean
+  emailedAt: string | null
+  assetId: number | null
+  dispatchId: number | null
+  createdAt: string
+}
+
 type DispatchRecord = {
   id: number
   loadNumber: string
@@ -84,6 +111,7 @@ type DispatchRecord = {
   updatedAt: string
   asset: any | null
   statusEvents: DispatchStatusEvent[]
+  shares?: DispatchShareRecord[]
 }
 
 type RoutePoint = {
@@ -585,6 +613,399 @@ function readStoredUser() {
   }
 }
 
+
+function publicDispatchStatusLabel(
+  status: string
+) {
+  return status === 'ASSIGNED'
+    ? 'Assigned'
+    : status === 'EN_ROUTE_TO_PICKUP'
+      ? 'En Route to Pickup'
+      : status === 'AT_PICKUP'
+        ? 'At Pickup'
+        : status === 'LOADED'
+          ? 'Loaded'
+          : status === 'IN_TRANSIT'
+            ? 'In Transit'
+            : status === 'AT_DELIVERY'
+              ? 'At Delivery'
+              : status === 'DELIVERED'
+                ? 'Delivered'
+                : status === 'CANCELLED'
+                  ? 'Cancelled'
+                  : status
+}
+
+function PublicLoadTrackingPage({
+  token
+}: {
+  token: string
+}) {
+  const [
+    data,
+    setData
+  ] = useState<any>(null)
+
+  const [
+    loading,
+    setLoading
+  ] = useState(true)
+
+  const [
+    error,
+    setError
+  ] = useState('')
+
+  const loadPublicTracking =
+    useCallback(
+      async () => {
+        try {
+          const response =
+            await fetch(
+              `${API_BASE}/api/public/track/${encodeURIComponent(
+                token
+              )}`
+            )
+
+          const payload =
+            await response.json()
+
+          if (
+            !response.ok ||
+            !payload.ok
+          ) {
+            setError(
+              payload.message ||
+              'Tracking link unavailable.'
+            )
+            setData(null)
+            return
+          }
+
+          setData(payload)
+          setError('')
+        } catch {
+          setError(
+            'Unable to connect to Maverick.'
+          )
+        } finally {
+          setLoading(false)
+        }
+      },
+      [token]
+    )
+
+  useEffect(() => {
+    loadPublicTracking()
+
+    const timer =
+      window.setInterval(
+        loadPublicTracking,
+        30000
+      )
+
+    return () =>
+      window.clearInterval(timer)
+  }, [
+    loadPublicTracking
+  ])
+
+  const telemetry =
+    data?.telemetry ?? null
+
+  const dispatch =
+    data?.dispatch ?? null
+
+  const hasLocation =
+    telemetry?.latitude != null &&
+    telemetry?.longitude != null
+
+  const temperatureF =
+    telemetry?.temperature != null
+      ? celsiusToFahrenheit(
+          Number(
+            telemetry.temperature
+          )
+        ).toFixed(1)
+      : null
+
+  const formatPublicTime = (
+    value?: string | null
+  ) => {
+    if (!value) {
+      return 'Not available'
+    }
+
+    const date =
+      new Date(value)
+
+    return Number.isNaN(
+      date.getTime()
+    )
+      ? 'Not available'
+      : date.toLocaleString()
+  }
+
+  if (loading) {
+    return (
+      <div className="public-track-shell">
+        <div className="public-track-message">
+          <img
+            src={maverickLogo}
+            alt="Maverick"
+          />
+          <strong>
+            Loading secure load tracking…
+          </strong>
+        </div>
+      </div>
+    )
+  }
+
+  if (
+    error ||
+    !dispatch
+  ) {
+    return (
+      <div className="public-track-shell">
+        <div className="public-track-message">
+          <img
+            src={maverickLogo}
+            alt="Maverick"
+          />
+          <strong>
+            Tracking link unavailable
+          </strong>
+          <span>
+            {
+              error ||
+              'This load is no longer shared.'
+            }
+          </span>
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <div className="public-track-shell">
+      <header className="public-track-header">
+        <div className="public-track-brand">
+          <img
+            src={maverickLogo}
+            alt="Maverick"
+          />
+          <div>
+            <strong>
+              MAVERICK
+            </strong>
+            <span>
+              Secure Load Tracking
+            </span>
+          </div>
+        </div>
+
+        <div className="public-track-updated">
+          Updated {
+            formatPublicTime(
+              telemetry?.receivedAt
+            )
+          }
+        </div>
+      </header>
+
+      <main className="public-track-main">
+        <section className="public-track-hero">
+          <div>
+            <span className="page-kicker">
+              Load
+            </span>
+            <h1>
+              {dispatch.loadNumber}
+            </h1>
+            <p>
+              {
+                dispatch.asset?.name ||
+                dispatch.asset?.deviceId ||
+                'Maverick load'
+              }
+            </p>
+          </div>
+
+          <div
+            className={
+              `public-track-status ${String(
+                dispatch.status
+              ).toLowerCase()}`
+            }
+          >
+            {
+              publicDispatchStatusLabel(
+                dispatch.status
+              )
+            }
+          </div>
+        </section>
+
+        <section className="public-track-grid">
+          <article className="public-track-card">
+            <span>
+              Pickup
+            </span>
+            <strong>
+              {dispatch.pickupName}
+            </strong>
+            <p>
+              {dispatch.pickupAddress}
+            </p>
+            <small>
+              Scheduled {
+                formatPublicTime(
+                  dispatch.pickupScheduledAt
+                )
+              }
+            </small>
+          </article>
+
+          <article className="public-track-card">
+            <span>
+              Current
+            </span>
+            <strong>
+              {
+                dispatch.asset?.name ||
+                'Assigned trailer'
+              }
+            </strong>
+            <p>
+              {
+                temperatureF != null
+                  ? `${temperatureF}°F`
+                  : 'Temperature hidden'
+              }
+            </p>
+            <small>
+              {
+                telemetry?.movementStatus ||
+                'Latest telemetry'
+              }
+            </small>
+          </article>
+
+          <article className="public-track-card">
+            <span>
+              Delivery
+            </span>
+            <strong>
+              {dispatch.deliveryName}
+            </strong>
+            <p>
+              {dispatch.deliveryAddress}
+            </p>
+            <small>
+              Scheduled {
+                formatPublicTime(
+                  dispatch.deliveryScheduledAt
+                )
+              }
+            </small>
+          </article>
+        </section>
+
+        {
+          hasLocation && (
+            <section className="public-track-map-card">
+              <MapContainer
+                center={[
+                  Number(
+                    telemetry.latitude
+                  ),
+                  Number(
+                    telemetry.longitude
+                  )
+                ]}
+                zoom={13}
+                className="public-track-map"
+              >
+                <TileLayer
+                  attribution="&copy; OpenStreetMap contributors"
+                  url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+                />
+
+                <Marker
+                  position={[
+                    Number(
+                      telemetry.latitude
+                    ),
+                    Number(
+                      telemetry.longitude
+                    )
+                  ]}
+                  icon={
+                    createTrailerIcon(
+                      String(
+                        telemetry.movementStatus ||
+                        ''
+                      ).toLowerCase() ===
+                        'moving'
+                        ? 'moving'
+                        : 'parked',
+                      true,
+                      true
+                    )
+                  }
+                />
+              </MapContainer>
+            </section>
+          )
+        }
+
+        <section className="public-track-card public-track-history-card">
+          <div className="public-track-card-heading">
+            <span>
+              Load Progress
+            </span>
+          </div>
+
+          <div className="public-track-timeline">
+            {
+              (
+                dispatch.statusEvents ||
+                []
+              ).map(
+                (event: any) => (
+                  <div
+                    key={event.id}
+                    className="public-track-timeline-item"
+                  >
+                    <i />
+                    <div>
+                      <strong>
+                        {
+                          publicDispatchStatusLabel(
+                            event.status
+                          )
+                        }
+                      </strong>
+                      <span>
+                        {
+                          formatPublicTime(
+                            event.createdAt
+                          )
+                        }
+                      </span>
+                    </div>
+                  </div>
+                )
+              )
+            }
+          </div>
+        </section>
+      </main>
+    </div>
+  )
+}
+
 function App() {
   // =====================================================
   // LOGIN / SESSION
@@ -761,6 +1182,58 @@ function App() {
     temperatureMinF: '',
     temperatureMaxF: '',
     notes: ''
+  })
+
+  const [
+    backendNotifications,
+    setBackendNotifications
+  ] = useState<NotificationRecord[]>([])
+
+  const [
+    shareDispatchOpen,
+    setShareDispatchOpen
+  ] = useState(false)
+
+  const [
+    shareDispatchSaving,
+    setShareDispatchSaving
+  ] = useState(false)
+
+  const [
+    shareDispatchId,
+    setShareDispatchId
+  ] = useState<number | null>(null)
+
+  const [
+    shareDispatchLoadNumber,
+    setShareDispatchLoadNumber
+  ] = useState('')
+
+  const [
+    shareDispatchError,
+    setShareDispatchError
+  ] = useState('')
+
+  const [
+    shareDispatchUrl,
+    setShareDispatchUrl
+  ] = useState('')
+
+  const [
+    shareExisting,
+    setShareExisting
+  ] = useState<DispatchShareRecord[]>([])
+
+  const [
+    shareDispatchForm,
+    setShareDispatchForm
+  ] = useState({
+    customerName: '',
+    customerEmail: '',
+    expirationDays: '7',
+    allowLocation: true,
+    allowTemperature: true,
+    allowEta: true
   })
 
   const [
@@ -983,6 +1456,11 @@ function App() {
     temperatureAlertsEnabled,
     setTemperatureAlertsEnabled
   ] = useState(false)
+
+  const [
+    temperatureAlertEmail,
+    setTemperatureAlertEmail
+  ] = useState('')
 
   const [
     temperatureLimitsSaving,
@@ -1469,6 +1947,268 @@ function App() {
     isLoggedIn,
     loadDispatches
   ])
+
+
+  const loadBackendNotifications =
+    useCallback(
+      async () => {
+        const token =
+          localStorage.getItem(
+            'maverick_token'
+          )
+
+        if (!token) {
+          return
+        }
+
+        try {
+          const response =
+            await fetch(
+              `${API_BASE}/api/notifications`,
+              {
+                headers: {
+                  Authorization:
+                    `Bearer ${token}`
+                }
+              }
+            )
+
+          const payload =
+            await response.json()
+
+          if (
+            response.ok &&
+            payload.ok
+          ) {
+            setBackendNotifications(
+              payload.notifications ||
+              []
+            )
+          }
+        } catch {
+          // Keep the dashboard usable if the
+          // notification service is temporarily unavailable.
+        }
+      },
+      []
+    )
+
+  useEffect(() => {
+    if (!isLoggedIn) {
+      return
+    }
+
+    loadBackendNotifications()
+
+    const interval =
+      setInterval(
+        loadBackendNotifications,
+        15000
+      )
+
+    return () =>
+      clearInterval(interval)
+  }, [
+    isLoggedIn,
+    loadBackendNotifications
+  ])
+
+  const openShareDispatch = (
+    dispatch: DispatchRecord
+  ) => {
+    setShareDispatchId(
+      dispatch.id
+    )
+    setShareDispatchLoadNumber(
+      dispatch.loadNumber
+    )
+    setShareDispatchError('')
+    setShareDispatchUrl('')
+    setShareExisting(
+      dispatch.shares || []
+    )
+    setShareDispatchForm({
+      customerName: '',
+      customerEmail: '',
+      expirationDays: '7',
+      allowLocation: true,
+      allowTemperature: true,
+      allowEta: true
+    })
+    setShareDispatchOpen(true)
+  }
+
+  const createDispatchShare =
+    async () => {
+      const token =
+        localStorage.getItem(
+          'maverick_token'
+        )
+
+      if (
+        !token ||
+        shareDispatchId == null
+      ) {
+        setShareDispatchError(
+          'Session or load information is unavailable.'
+        )
+        return
+      }
+
+      if (
+        !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(
+          shareDispatchForm.customerEmail.trim()
+        )
+      ) {
+        setShareDispatchError(
+          'Enter a valid customer email.'
+        )
+        return
+      }
+
+      setShareDispatchSaving(true)
+      setShareDispatchError('')
+
+      try {
+        const response =
+          await fetch(
+            `${API_BASE}/api/dispatches/${shareDispatchId}/share`,
+            {
+              method: 'POST',
+              headers: {
+                'Content-Type':
+                  'application/json',
+                Authorization:
+                  `Bearer ${token}`
+              },
+              body: JSON.stringify({
+                customerName:
+                  shareDispatchForm.customerName,
+                customerEmail:
+                  shareDispatchForm.customerEmail,
+                expirationDays:
+                  Number(
+                    shareDispatchForm.expirationDays
+                  ),
+                allowLocation:
+                  shareDispatchForm.allowLocation,
+                allowTemperature:
+                  shareDispatchForm.allowTemperature,
+                allowEta:
+                  shareDispatchForm.allowEta
+              })
+            }
+          )
+
+        const payload =
+          await response.json()
+
+        if (
+          !response.ok ||
+          !payload.ok
+        ) {
+          setShareDispatchError(
+            payload.message ||
+            'Unable to share this load.'
+          )
+          return
+        }
+
+        setShareDispatchUrl(
+          payload.share.trackingUrl ||
+          ''
+        )
+
+        setShareExisting(
+          (current) => [
+            payload.share,
+            ...current
+          ]
+        )
+
+        await Promise.all([
+          loadDispatches(),
+          loadBackendNotifications()
+        ])
+      } catch {
+        setShareDispatchError(
+          'Unable to connect to Maverick.'
+        )
+      } finally {
+        setShareDispatchSaving(false)
+      }
+    }
+
+  const revokeDispatchShare =
+    async (
+      shareId: number
+    ) => {
+      const token =
+        localStorage.getItem(
+          'maverick_token'
+        )
+
+      if (
+        !token ||
+        shareDispatchId == null
+      ) {
+        return
+      }
+
+      setShareDispatchSaving(true)
+      setShareDispatchError('')
+
+      try {
+        const response =
+          await fetch(
+            `${API_BASE}/api/dispatches/${shareDispatchId}/shares/${shareId}`,
+            {
+              method: 'DELETE',
+              headers: {
+                Authorization:
+                  `Bearer ${token}`
+              }
+            }
+          )
+
+        const payload =
+          await response.json()
+
+        if (
+          !response.ok ||
+          !payload.ok
+        ) {
+          setShareDispatchError(
+            payload.message ||
+            'Unable to revoke this link.'
+          )
+          return
+        }
+
+        setShareExisting(
+          (current) =>
+            current.map(
+              (share) =>
+                share.id === shareId
+                  ? {
+                      ...share,
+                      revokedAt:
+                        payload.share
+                          .revokedAt
+                    }
+                  : share
+            )
+        )
+
+        await loadDispatches()
+      } catch {
+        setShareDispatchError(
+          'Unable to connect to Maverick.'
+        )
+      } finally {
+        setShareDispatchSaving(false)
+      }
+    }
 
   const resetNewDispatchForm = () => {
     setNewDispatchForm({
@@ -2999,6 +3739,13 @@ function App() {
     deviceAlertCount +
     temperatureAlertCount
 
+  const notificationBadgeCount =
+    activeAlertCount +
+    Math.min(
+      backendNotifications.length,
+      9
+    )
+
   // =====================================================
   // ACTIONS
   // =====================================================
@@ -3182,6 +3929,12 @@ function App() {
       )
     )
 
+    setTemperatureAlertEmail(
+      selectedAsset
+        .temperatureAlertEmail ||
+      ''
+    )
+
     setTemperatureLimitsOpen(true)
   }
 
@@ -3266,6 +4019,19 @@ function App() {
         return
       }
 
+      if (
+        temperatureAlertsEnabled &&
+        temperatureAlertEmail.trim() &&
+        !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(
+          temperatureAlertEmail.trim()
+        )
+      ) {
+        setTemperatureLimitsError(
+          'Enter a valid notification email.'
+        )
+        return
+      }
+
       const temperatureMinC =
         minF === null
           ? null
@@ -3298,7 +4064,10 @@ function App() {
               body: JSON.stringify({
                 temperatureMinC,
                 temperatureMaxC,
-                temperatureAlertsEnabled
+                temperatureAlertsEnabled,
+                temperatureAlertEmail:
+                  temperatureAlertEmail.trim() ||
+                  null
               })
             }
           )
@@ -4760,6 +5529,21 @@ function App() {
         assetToSelect
       )
     }
+  }
+
+  const publicTrackingMatch =
+    window.location.pathname.match(
+      /^\/track\/([a-f0-9]{32,})$/i
+    )
+
+  if (publicTrackingMatch) {
+    return (
+      <PublicLoadTrackingPage
+        token={
+          publicTrackingMatch[1]
+        }
+      />
+    )
   }
 
   // =====================================================
@@ -7114,6 +7898,18 @@ function App() {
                                         Edit Load
                                       </button>
 
+                                      <button
+                                        className="secondary-action dispatch-share-button"
+                                        onClick={() =>
+                                          openShareDispatch(
+                                            dispatch
+                                          )
+                                        }
+                                        type="button"
+                                      >
+                                        Share Load
+                                      </button>
+
                                       {
                                         dispatch.asset?.deviceId && (
                                           <button
@@ -8770,7 +9566,83 @@ function App() {
             </div>
 
             {
-              activeAlertCount === 0
+              backendNotifications.length > 0 && (
+                <div className="backend-notification-list">
+                  {
+                    backendNotifications
+                      .slice(0, 8)
+                      .map(
+                        (notification) => (
+                          <button
+                            key={notification.id}
+                            className={
+                              `backend-notification-item ${notification.severity}`
+                            }
+                            onClick={() => {
+                              setNotificationsOpen(
+                                false
+                              )
+
+                              if (
+                                notification.dispatchId
+                              ) {
+                                setActiveView(
+                                  'operations'
+                                )
+                              }
+                            }}
+                            type="button"
+                          >
+                            <span className="backend-notification-icon">
+                              {
+                                notification.type ===
+                                  'TEMPERATURE_ALERT'
+                                  ? '!'
+                                  : notification.type ===
+                                      'TEMPERATURE_RESTORED'
+                                    ? '✓'
+                                    : notification.type ===
+                                        'DISPATCH_STATUS'
+                                      ? '↻'
+                                      : '↗'
+                              }
+                            </span>
+
+                            <div>
+                              <strong>
+                                {
+                                  notification.title
+                                }
+                              </strong>
+                              <small>
+                                {
+                                  notification.message
+                                }
+                              </small>
+                              <em>
+                                {
+                                  new Date(
+                                    notification.createdAt
+                                  ).toLocaleString()
+                                }
+                                {
+                                  notification.emailSent
+                                    ? ' · Email sent'
+                                    : ''
+                                }
+                              </em>
+                            </div>
+                          </button>
+                        )
+                      )
+                  }
+                </div>
+              )
+            }
+
+            {
+              activeAlertCount === 0 &&
+              backendNotifications.length === 0
                 ? (
                   <p>
                     No active alerts.
@@ -9969,6 +10841,343 @@ function App() {
       {/* ================================= */}
 
       {
+        shareDispatchOpen && (
+          <div className="modal-backdrop">
+            <section className="modal-card share-load-modal">
+              <div className="modal-header">
+                <div>
+                  <span className="page-kicker">
+                    Customer Tracking
+                  </span>
+                  <h2>
+                    Share {
+                      shareDispatchLoadNumber
+                    }
+                  </h2>
+                </div>
+
+                <button
+                  className="modal-close"
+                  onClick={() =>
+                    setShareDispatchOpen(
+                      false
+                    )
+                  }
+                  type="button"
+                  disabled={
+                    shareDispatchSaving
+                  }
+                >
+                  ×
+                </button>
+              </div>
+
+              <div className="share-load-form">
+                <div className="share-load-grid">
+                  <label>
+                    Customer name
+                    <input
+                      value={
+                        shareDispatchForm
+                          .customerName
+                      }
+                      onChange={
+                        (event) =>
+                          setShareDispatchForm(
+                            (current) => ({
+                              ...current,
+                              customerName:
+                                event.target.value
+                            })
+                          )
+                      }
+                      placeholder="Customer / receiver"
+                    />
+                  </label>
+
+                  <label>
+                    Customer email
+                    <input
+                      type="email"
+                      value={
+                        shareDispatchForm
+                          .customerEmail
+                      }
+                      onChange={
+                        (event) =>
+                          setShareDispatchForm(
+                            (current) => ({
+                              ...current,
+                              customerEmail:
+                                event.target.value
+                            })
+                          )
+                      }
+                      placeholder="customer@example.com"
+                    />
+                  </label>
+
+                  <label>
+                    Link expires
+                    <select
+                      value={
+                        shareDispatchForm
+                          .expirationDays
+                      }
+                      onChange={
+                        (event) =>
+                          setShareDispatchForm(
+                            (current) => ({
+                              ...current,
+                              expirationDays:
+                                event.target.value
+                            })
+                          )
+                      }
+                    >
+                      <option value="1">
+                        1 day
+                      </option>
+                      <option value="3">
+                        3 days
+                      </option>
+                      <option value="7">
+                        7 days
+                      </option>
+                      <option value="14">
+                        14 days
+                      </option>
+                      <option value="30">
+                        30 days
+                      </option>
+                    </select>
+                  </label>
+                </div>
+
+                <div className="share-permissions">
+                  <label className="toggle-row">
+                    <span>
+                      Live location
+                    </span>
+                    <input
+                      type="checkbox"
+                      checked={
+                        shareDispatchForm
+                          .allowLocation
+                      }
+                      onChange={
+                        (event) =>
+                          setShareDispatchForm(
+                            (current) => ({
+                              ...current,
+                              allowLocation:
+                                event.target.checked
+                            })
+                          )
+                      }
+                    />
+                    <i className="toggle" />
+                  </label>
+
+                  <label className="toggle-row">
+                    <span>
+                      Temperature
+                    </span>
+                    <input
+                      type="checkbox"
+                      checked={
+                        shareDispatchForm
+                          .allowTemperature
+                      }
+                      onChange={
+                        (event) =>
+                          setShareDispatchForm(
+                            (current) => ({
+                              ...current,
+                              allowTemperature:
+                                event.target.checked
+                            })
+                          )
+                      }
+                    />
+                    <i className="toggle" />
+                  </label>
+
+                  <label className="toggle-row">
+                    <span>
+                      ETA / schedule
+                    </span>
+                    <input
+                      type="checkbox"
+                      checked={
+                        shareDispatchForm
+                          .allowEta
+                      }
+                      onChange={
+                        (event) =>
+                          setShareDispatchForm(
+                            (current) => ({
+                              ...current,
+                              allowEta:
+                                event.target.checked
+                            })
+                          )
+                      }
+                    />
+                    <i className="toggle" />
+                  </label>
+                </div>
+
+                {
+                  shareDispatchUrl && (
+                    <div className="share-created-link">
+                      <strong>
+                        Tracking link created
+                      </strong>
+
+                      <div>
+                        <input
+                          readOnly
+                          value={
+                            shareDispatchUrl
+                          }
+                        />
+
+                        <button
+                          className="secondary-action"
+                          onClick={() => {
+                            navigator.clipboard
+                              ?.writeText(
+                                shareDispatchUrl
+                              )
+                          }}
+                          type="button"
+                        >
+                          Copy
+                        </button>
+                      </div>
+                    </div>
+                  )
+                }
+
+                {
+                  shareDispatchError && (
+                    <div className="rename-error">
+                      {
+                        shareDispatchError
+                      }
+                    </div>
+                  )
+                }
+
+                {
+                  shareExisting.length > 0 && (
+                    <div className="share-existing">
+                      <strong>
+                        Shared links
+                      </strong>
+
+                      {
+                        shareExisting.map(
+                          (share) => (
+                            <div
+                              key={share.id}
+                              className={
+                                share.revokedAt
+                                  ? 'share-existing-row revoked'
+                                  : 'share-existing-row'
+                              }
+                            >
+                              <div>
+                                <strong>
+                                  {
+                                    share.customerName ||
+                                    share.customerEmail
+                                  }
+                                </strong>
+                                <small>
+                                  {
+                                    share.customerEmail
+                                  }
+                                  {' · '}
+                                  {
+                                    share.revokedAt
+                                      ? 'Revoked'
+                                      : share.expiresAt
+                                        ? `Expires ${new Date(
+                                            share.expiresAt
+                                          ).toLocaleDateString()}`
+                                        : 'No expiration'
+                                  }
+                                </small>
+                              </div>
+
+                              {
+                                !share.revokedAt && (
+                                  <button
+                                    className="secondary-action"
+                                    onClick={() =>
+                                      revokeDispatchShare(
+                                        share.id
+                                      )
+                                    }
+                                    type="button"
+                                    disabled={
+                                      shareDispatchSaving
+                                    }
+                                  >
+                                    Revoke
+                                  </button>
+                                )
+                              }
+                            </div>
+                          )
+                        )
+                      }
+                    </div>
+                  )
+                }
+              </div>
+
+              <div className="modal-actions">
+                <button
+                  className="secondary-action"
+                  onClick={() =>
+                    setShareDispatchOpen(
+                      false
+                    )
+                  }
+                  type="button"
+                  disabled={
+                    shareDispatchSaving
+                  }
+                >
+                  Close
+                </button>
+
+                <button
+                  className="primary-action"
+                  onClick={
+                    createDispatchShare
+                  }
+                  type="button"
+                  disabled={
+                    shareDispatchSaving
+                  }
+                >
+                  {
+                    shareDispatchSaving
+                      ? 'Sharing...'
+                      : 'Create & Email Link'
+                  }
+                </button>
+              </div>
+            </section>
+          </div>
+        )
+      }
+
+      {
         temperatureLimitsOpen && (
           <div
             className="modal-backdrop"
@@ -10111,6 +11320,34 @@ function App() {
 
                   <i className="toggle" />
                 </label>
+
+                <label
+                  htmlFor="temperature-alert-email"
+                >
+                  Notification email
+                </label>
+
+                <input
+                  id="temperature-alert-email"
+                  type="email"
+                  value={
+                    temperatureAlertEmail
+                  }
+                  onChange={
+                    (event) =>
+                      setTemperatureAlertEmail(
+                        event.target.value
+                      )
+                  }
+                  placeholder="dispatcher@company.com"
+                  disabled={
+                    temperatureLimitsSaving
+                  }
+                />
+
+                <small className="temperature-email-help">
+                  Maverick sends an email when temperature leaves the configured range and another when it returns to normal. Active shared-load customers can also receive load temperature alerts.
+                </small>
 
                 {
                   selectedActiveDispatch &&

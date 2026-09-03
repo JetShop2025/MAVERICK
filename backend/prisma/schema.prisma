@@ -16,6 +16,7 @@ model Company {
   updatedAt DateTime @updatedAt
 
   users         User[]
+  driverProfiles DriverProfile[]
   assets        Asset[]
   dispatches    Dispatch[]
   notifications NotificationEvent[]
@@ -32,10 +33,36 @@ model User {
   companyId Int
   company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
 
+  driverProfile    DriverProfile?
+  driverDispatches Dispatch[] @relation("DriverDispatches")
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   @@index([companyId])
+}
+
+model DriverProfile {
+  id Int @id @default(autoincrement())
+
+  userId Int  @unique
+  user   User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  companyId Int
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  firstName       String
+  lastName        String
+  phone           String?
+  licenseNumber   String?
+  licenseState    String?
+  profilePhotoUrl String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([companyId])
+  @@index([lastName, firstName])
 }
 
 model Asset {
@@ -113,6 +140,13 @@ model Telemetry {
   @@index([source])
 }
 
+enum DriverAssignmentStatus {
+  UNASSIGNED
+  PENDING
+  ACCEPTED
+  DECLINED
+}
+
 enum DispatchStatus {
   ASSIGNED
   EN_ROUTE_TO_PICKUP
@@ -134,6 +168,13 @@ model Dispatch {
 
   assetId Int?
   asset   Asset? @relation(fields: [assetId], references: [id], onDelete: SetNull)
+
+  driverId Int?
+  driver   User? @relation("DriverDispatches", fields: [driverId], references: [id], onDelete: SetNull)
+
+  assignmentStatus DriverAssignmentStatus @default(UNASSIGNED)
+  acceptedAt       DateTime?
+  declinedAt       DateTime?
 
   pickupName        String
   pickupAddress     String
@@ -167,6 +208,7 @@ model Dispatch {
   @@unique([companyId, loadNumber])
   @@index([companyId, status])
   @@index([assetId, status])
+  @@index([driverId, assignmentStatus])
   @@index([pickupScheduledAt])
   @@index([deliveryScheduledAt])
 }

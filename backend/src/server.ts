@@ -807,7 +807,7 @@ app.post(
           }
         })
 
-      if (!user) {
+      if (!user || !user.active) {
         return res.status(401).json({
           ok: false,
           message:
@@ -933,7 +933,9 @@ app.get(
             name: true,
             role: true,
             companyId: true,
-            createdAt: true
+            active: true,
+            createdAt: true,
+            driverProfile: true
           }
         })
 
@@ -959,6 +961,912 @@ app.get(
       })
     }
   }
+)
+
+
+// =====================================================
+// DRIVERS / DRIVER PROFILES
+// =====================================================
+
+function isCompanyAdmin(
+  role: string | undefined
+) {
+  return (
+    role === 'company_admin' ||
+    role === 'superadmin'
+  )
+}
+
+function isDriver(
+  role: string | undefined
+) {
+  return role === 'driver'
+}
+
+const driverInclude = {
+  driverProfile: true
+} as const
+
+app.get(
+  '/api/drivers',
+  requireAuth,
+  async (
+    req: AuthenticatedRequest,
+    res: Response
+  ) => {
+    try {
+      const companyId =
+        req.user?.companyId
+
+      if (!companyId) {
+        return res.status(401).json({
+          ok: false,
+          message: 'Invalid session'
+        })
+      }
+
+      if (!isCompanyAdmin(req.user?.role)) {
+        return res.status(403).json({
+          ok: false,
+          message:
+            'You do not have permission to view drivers'
+        })
+      }
+
+      const drivers =
+        await prisma.user.findMany({
+          where: {
+            companyId,
+            role: 'driver',
+            active: true
+          },
+          include: driverInclude,
+          orderBy: {
+            name: 'asc'
+          }
+        })
+
+      return res.json({
+        ok: true,
+        drivers: drivers.map((driver) => ({
+          id: driver.id,
+          email: driver.email,
+          name: driver.name,
+          role: driver.role,
+          active: driver.active,
+          companyId: driver.companyId,
+          profile: driver.driverProfile
+        }))
+      })
+    } catch (error) {
+      console.error(
+        'Get drivers error:',
+        error
+      )
+
+      return res.status(500).json({
+        ok: false,
+        message: 'Unable to load drivers'
+      })
+    }
+  }
+)
+
+app.post(
+  '/api/drivers',
+  requireAuth,
+  async (
+    req: AuthenticatedRequest,
+    res: Response
+  ) => {
+    try {
+      const companyId =
+        req.user?.companyId
+
+      if (!companyId) {
+        return res.status(401).json({
+          ok: false,
+          message: 'Invalid session'
+        })
+      }
+
+      if (!isCompanyAdmin(req.user?.role)) {
+        return res.status(403).json({
+          ok: false,
+          message:
+            'You do not have permission to create drivers'
+        })
+      }
+
+      const email =
+        optionalString(
+          req.body?.email
+        )?.toLowerCase()
+
+      const password =
+        optionalString(
+          req.body?.password
+        )
+
+      const firstName =
+        optionalString(
+          req.body?.firstName
+        )
+
+      const lastName =
+        optionalString(
+          req.body?.lastName
+        )
+
+      if (
+        !email ||
+        !password ||
+        !firstName ||
+        !lastName
+      ) {
+        return res.status(400).json({
+          ok: false,
+          message:
+            'Email, password, first name and last name are required'
+        })
+      }
+
+      if (
+        !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(
+          email
+        )
+      ) {
+        return res.status(400).json({
+          ok: false,
+          message: 'Enter a valid email'
+        })
+      }
+
+      if (password.length < 8) {
+        return res.status(400).json({
+          ok: false,
+          message:
+            'Driver password must be at least 8 characters'
+        })
+      }
+
+      const existing =
+        await prisma.user.findUnique({
+          where: {
+            email
+          }
+        })
+
+      if (existing) {
+        return res.status(409).json({
+          ok: false,
+          message:
+            'A user with that email already exists'
+        })
+      }
+
+      const passwordHash =
+        await bcrypt.hash(
+          password,
+          12
+        )
+
+      const driver =
+        await prisma.user.create({
+          data: {
+            email,
+            passwordHash,
+            name: `${firstName} ${lastName}`,
+            role: 'driver',
+            active: true,
+            companyId,
+            driverProfile: {
+              create: {
+                companyId,
+                firstName,
+                lastName,
+                phone:
+                  optionalString(
+                    req.body?.phone
+                  ),
+                licenseNumber:
+                  optionalString(
+                    req.body?.licenseNumber
+                  ),
+                licenseState:
+                  optionalString(
+                    req.body?.licenseState
+                  ),
+                profilePhotoUrl:
+                  optionalString(
+                    req.body?.profilePhotoUrl
+                  )
+              }
+            }
+          },
+          include: driverInclude
+        })
+
+      return res.status(201).json({
+        ok: true,
+        driver: {
+          id: driver.id,
+          email: driver.email,
+          name: driver.name,
+          role: driver.role,
+          active: driver.active,
+          companyId: driver.companyId,
+          profile: driver.driverProfile
+        }
+      })
+    } catch (error: any) {
+      console.error(
+        'Create driver error:',
+        error
+      )
+
+      if (error?.code === 'P2002') {
+        return res.status(409).json({
+          ok: false,
+          message:
+            'A user with that email already exists'
+        })
+      }
+
+      return res.status(500).json({
+        ok: false,
+        message: 'Unable to create driver'
+      })
+    }
+  }
+)
+
+app.patch(
+  '/api/drivers/:id',
+  requireAuth,
+  async (
+    req: AuthenticatedRequest,
+    res: Response
+  ) => {
+    try {
+      const companyId =
+        req.user?.companyId
+
+      const driverId =
+        Number(req.params.id)
+
+      if (
+        !companyId ||
+        !Number.isInteger(driverId)
+      ) {
+        return res.status(400).json({
+          ok: false,
+          message: 'Invalid driver'
+        })
+      }
+
+      if (!isCompanyAdmin(req.user?.role)) {
+        return res.status(403).json({
+          ok: false,
+          message:
+            'You do not have permission to edit drivers'
+        })
+      }
+
+      const existing =
+        await prisma.user.findFirst({
+          where: {
+            id: driverId,
+            companyId,
+            role: 'driver'
+          },
+          include: driverInclude
+        })
+
+      if (!existing) {
+        return res.status(404).json({
+          ok: false,
+          message: 'Driver not found'
+        })
+      }
+
+      const profileData: Record<string, any> = {}
+      const userData: Record<string, any> = {}
+
+      const profileStringFields = [
+        'firstName',
+        'lastName',
+        'phone',
+        'licenseNumber',
+        'licenseState',
+        'profilePhotoUrl'
+      ] as const
+
+      for (const field of profileStringFields) {
+        if (req.body?.[field] !== undefined) {
+          profileData[field] =
+            optionalString(
+              req.body[field]
+            )
+        }
+      }
+
+      if (req.body?.active !== undefined) {
+        if (typeof req.body.active !== 'boolean') {
+          return res.status(400).json({
+            ok: false,
+            message: 'Invalid active value'
+          })
+        }
+
+        userData.active = req.body.active
+      }
+
+      if (req.body?.email !== undefined) {
+        const email =
+          optionalString(
+            req.body.email
+          )?.toLowerCase()
+
+        if (
+          !email ||
+          !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(
+            email
+          )
+        ) {
+          return res.status(400).json({
+            ok: false,
+            message: 'Enter a valid email'
+          })
+        }
+
+        userData.email = email
+      }
+
+      if (req.body?.password !== undefined) {
+        const password =
+          optionalString(
+            req.body.password
+          )
+
+        if (!password || password.length < 8) {
+          return res.status(400).json({
+            ok: false,
+            message:
+              'Driver password must be at least 8 characters'
+          })
+        }
+
+        userData.passwordHash =
+          await bcrypt.hash(
+            password,
+            12
+          )
+      }
+
+      const finalFirstName =
+        profileData.firstName !== undefined
+          ? profileData.firstName
+          : existing.driverProfile?.firstName
+
+      const finalLastName =
+        profileData.lastName !== undefined
+          ? profileData.lastName
+          : existing.driverProfile?.lastName
+
+      if (!finalFirstName || !finalLastName) {
+        return res.status(400).json({
+          ok: false,
+          message:
+            'Driver first name and last name are required'
+        })
+      }
+
+      userData.name =
+        `${finalFirstName} ${finalLastName}`
+
+      const updated =
+        await prisma.user.update({
+          where: {
+            id: existing.id
+          },
+          data: {
+            ...userData,
+            driverProfile: {
+              upsert: {
+                create: {
+                  companyId,
+                  firstName: finalFirstName,
+                  lastName: finalLastName,
+                  phone:
+                    profileData.phone ?? null,
+                  licenseNumber:
+                    profileData.licenseNumber ?? null,
+                  licenseState:
+                    profileData.licenseState ?? null,
+                  profilePhotoUrl:
+                    profileData.profilePhotoUrl ?? null
+                },
+                update: profileData
+              }
+            }
+          },
+          include: driverInclude
+        })
+
+      return res.json({
+        ok: true,
+        driver: {
+          id: updated.id,
+          email: updated.email,
+          name: updated.name,
+          role: updated.role,
+          active: updated.active,
+          companyId: updated.companyId,
+          profile: updated.driverProfile
+        }
+      })
+    } catch (error: any) {
+      console.error(
+        'Update driver error:',
+        error
+      )
+
+      if (error?.code === 'P2002') {
+        return res.status(409).json({
+          ok: false,
+          message:
+            'A user with that email already exists'
+        })
+      }
+
+      return res.status(500).json({
+        ok: false,
+        message: 'Unable to update driver'
+      })
+    }
+  }
+)
+
+app.get(
+  '/api/driver/me',
+  requireAuth,
+  async (
+    req: AuthenticatedRequest,
+    res: Response
+  ) => {
+    try {
+      if (!isDriver(req.user?.role)) {
+        return res.status(403).json({
+          ok: false,
+          message: 'Driver account required'
+        })
+      }
+
+      const driver =
+        await prisma.user.findFirst({
+          where: {
+            id: req.user!.userId,
+            companyId: req.user!.companyId,
+            role: 'driver',
+            active: true
+          },
+          include: driverInclude
+        })
+
+      if (!driver) {
+        return res.status(404).json({
+          ok: false,
+          message: 'Driver profile not found'
+        })
+      }
+
+      return res.json({
+        ok: true,
+        driver: {
+          id: driver.id,
+          email: driver.email,
+          name: driver.name,
+          companyId: driver.companyId,
+          profile: driver.driverProfile
+        }
+      })
+    } catch (error) {
+      console.error(
+        'Driver me error:',
+        error
+      )
+
+      return res.status(500).json({
+        ok: false,
+        message:
+          'Unable to load driver profile'
+      })
+    }
+  }
+)
+
+app.patch(
+  '/api/driver/me',
+  requireAuth,
+  async (
+    req: AuthenticatedRequest,
+    res: Response
+  ) => {
+    try {
+      if (!isDriver(req.user?.role)) {
+        return res.status(403).json({
+          ok: false,
+          message: 'Driver account required'
+        })
+      }
+
+      const existing =
+        await prisma.user.findFirst({
+          where: {
+            id: req.user!.userId,
+            companyId: req.user!.companyId,
+            role: 'driver',
+            active: true
+          },
+          include: driverInclude
+        })
+
+      if (!existing) {
+        return res.status(404).json({
+          ok: false,
+          message: 'Driver profile not found'
+        })
+      }
+
+      const profileData: Record<string, any> = {}
+
+      for (
+        const field of [
+          'firstName',
+          'lastName',
+          'phone',
+          'licenseNumber',
+          'licenseState',
+          'profilePhotoUrl'
+        ] as const
+      ) {
+        if (req.body?.[field] !== undefined) {
+          profileData[field] =
+            optionalString(
+              req.body[field]
+            )
+        }
+      }
+
+      const finalFirstName =
+        profileData.firstName !== undefined
+          ? profileData.firstName
+          : existing.driverProfile?.firstName
+
+      const finalLastName =
+        profileData.lastName !== undefined
+          ? profileData.lastName
+          : existing.driverProfile?.lastName
+
+      if (!finalFirstName || !finalLastName) {
+        return res.status(400).json({
+          ok: false,
+          message:
+            'Driver first name and last name are required'
+        })
+      }
+
+      const updated =
+        await prisma.user.update({
+          where: {
+            id: existing.id
+          },
+          data: {
+            name:
+              `${finalFirstName} ${finalLastName}`,
+            driverProfile: {
+              upsert: {
+                create: {
+                  companyId: existing.companyId,
+                  firstName: finalFirstName,
+                  lastName: finalLastName,
+                  phone:
+                    profileData.phone ?? null,
+                  licenseNumber:
+                    profileData.licenseNumber ?? null,
+                  licenseState:
+                    profileData.licenseState ?? null,
+                  profilePhotoUrl:
+                    profileData.profilePhotoUrl ?? null
+                },
+                update: profileData
+              }
+            }
+          },
+          include: driverInclude
+        })
+
+      return res.json({
+        ok: true,
+        driver: {
+          id: updated.id,
+          email: updated.email,
+          name: updated.name,
+          companyId: updated.companyId,
+          profile: updated.driverProfile
+        }
+      })
+    } catch (error) {
+      console.error(
+        'Update own driver profile error:',
+        error
+      )
+
+      return res.status(500).json({
+        ok: false,
+        message:
+          'Unable to update driver profile'
+      })
+    }
+  }
+)
+
+app.get(
+  '/api/driver/assignments',
+  requireAuth,
+  async (
+    req: AuthenticatedRequest,
+    res: Response
+  ) => {
+    try {
+      if (!isDriver(req.user?.role)) {
+        return res.status(403).json({
+          ok: false,
+          message: 'Driver account required'
+        })
+      }
+
+      const assignments =
+        await prisma.dispatch.findMany({
+          where: {
+            companyId: req.user!.companyId,
+            driverId: req.user!.userId
+          },
+          include: {
+            asset: {
+              select: {
+                id: true,
+                deviceId: true,
+                name: true,
+                assetType: true,
+                trackingSource: true
+              }
+            },
+            driver: {
+              select: {
+                id: true,
+                email: true,
+                name: true,
+                driverProfile: true
+              }
+            },
+            statusEvents: {
+              orderBy: {
+                createdAt: 'desc'
+              },
+              take: 20
+            }
+          },
+          orderBy: [
+            {
+              completedAt: 'asc'
+            },
+            {
+              updatedAt: 'desc'
+            }
+          ]
+        })
+
+      return res.json({
+        ok: true,
+        assignments
+      })
+    } catch (error) {
+      console.error(
+        'Driver assignments error:',
+        error
+      )
+
+      return res.status(500).json({
+        ok: false,
+        message:
+          'Unable to load driver assignments'
+      })
+    }
+  }
+)
+
+async function respondToDriverAssignment({
+  req,
+  res,
+  action
+}: {
+  req: AuthenticatedRequest
+  res: Response
+  action: 'ACCEPTED' | 'DECLINED'
+}) {
+  try {
+    if (!isDriver(req.user?.role)) {
+      return res.status(403).json({
+        ok: false,
+        message: 'Driver account required'
+      })
+    }
+
+    const dispatchId =
+      Number(req.params.id)
+
+    if (!Number.isInteger(dispatchId)) {
+      return res.status(400).json({
+        ok: false,
+        message: 'Invalid dispatch'
+      })
+    }
+
+    const existing =
+      await prisma.dispatch.findFirst({
+        where: {
+          id: dispatchId,
+          companyId: req.user!.companyId,
+          driverId: req.user!.userId
+        }
+      })
+
+    if (!existing) {
+      return res.status(404).json({
+        ok: false,
+        message:
+          'Assignment not found for this driver'
+      })
+    }
+
+    if (
+      existing.status === 'DELIVERED' ||
+      existing.status === 'CANCELLED'
+    ) {
+      return res.status(409).json({
+        ok: false,
+        message:
+          'This load is already closed'
+      })
+    }
+
+    if (
+      existing.assignmentStatus !== 'PENDING'
+    ) {
+      return res.status(409).json({
+        ok: false,
+        message:
+          `Assignment is already ${existing.assignmentStatus.toLowerCase()}`
+      })
+    }
+
+    const now = new Date()
+
+    const updated =
+      await prisma.dispatch.update({
+        where: {
+          id: existing.id
+        },
+        data: {
+          assignmentStatus: action,
+          acceptedAt:
+            action === 'ACCEPTED'
+              ? now
+              : null,
+          declinedAt:
+            action === 'DECLINED'
+              ? now
+              : null,
+          statusEvents: {
+            create: {
+              status: existing.status,
+              notes:
+                action === 'ACCEPTED'
+                  ? 'Driver accepted assignment'
+                  : 'Driver declined assignment'
+            }
+          }
+        },
+        include: {
+          asset: true,
+          driver: {
+            select: {
+              id: true,
+              email: true,
+              name: true,
+              driverProfile: true
+            }
+          },
+          statusEvents: {
+            orderBy: {
+              createdAt: 'desc'
+            }
+          }
+        }
+      })
+
+    await createNotificationEvent({
+      companyId: existing.companyId,
+      assetId: existing.assetId,
+      dispatchId: existing.id,
+      type:
+        action === 'ACCEPTED'
+          ? 'DRIVER_ASSIGNMENT_ACCEPTED'
+          : 'DRIVER_ASSIGNMENT_DECLINED',
+      severity:
+        action === 'ACCEPTED'
+          ? 'success'
+          : 'warning',
+      title:
+        `Load ${existing.loadNumber}: driver ${
+          action === 'ACCEPTED'
+            ? 'accepted'
+            : 'declined'
+        }`,
+      message:
+        `${req.user!.email} ${
+          action === 'ACCEPTED'
+            ? 'accepted'
+            : 'declined'
+        } load ${existing.loadNumber}.`
+    })
+
+    return res.json({
+      ok: true,
+      dispatch: updated
+    })
+  } catch (error) {
+    console.error(
+      'Driver assignment response error:',
+      error
+    )
+
+    return res.status(500).json({
+      ok: false,
+      message:
+        'Unable to update driver assignment'
+    })
+  }
+}
+
+app.post(
+  '/api/driver/dispatches/:id/accept',
+  requireAuth,
+  async (
+    req: AuthenticatedRequest,
+    res: Response
+  ) =>
+    respondToDriverAssignment({
+      req,
+      res,
+      action: 'ACCEPTED'
+    })
+)
+
+app.post(
+  '/api/driver/dispatches/:id/decline',
+  requireAuth,
+  async (
+    req: AuthenticatedRequest,
+    res: Response
+  ) =>
+    respondToDriverAssignment({
+      req,
+      res,
+      action: 'DECLINED'
+    })
 )
 
 
@@ -1490,6 +2398,15 @@ app.get(
                 trackingSource: true
               }
             },
+            driver: {
+              select: {
+                id: true,
+                email: true,
+                name: true,
+                active: true,
+                driverProfile: true
+              }
+            },
             statusEvents: {
               orderBy: {
                 createdAt: 'desc'
@@ -1566,6 +2483,15 @@ app.get(
           },
           include: {
             asset: true,
+            driver: {
+              select: {
+                id: true,
+                email: true,
+                name: true,
+                active: true,
+                driverProfile: true
+              }
+            },
             statusEvents: {
               orderBy: {
                 createdAt: 'desc'
@@ -1813,6 +2739,78 @@ app.post(
         assetId = asset.id
       }
 
+      let driverId: number | null = null
+
+      if (
+        req.body?.driverId !== null &&
+        req.body?.driverId !== undefined &&
+        req.body?.driverId !== ''
+      ) {
+        const requestedDriverId =
+          Number(req.body.driverId)
+
+        if (!Number.isInteger(requestedDriverId)) {
+          return res.status(400).json({
+            ok: false,
+            message: 'Invalid driver'
+          })
+        }
+
+        const driver =
+          await prisma.user.findFirst({
+            where: {
+              id: requestedDriverId,
+              companyId,
+              role: 'driver',
+              active: true
+            },
+            include: {
+              driverProfile: true
+            }
+          })
+
+        if (!driver) {
+          return res.status(404).json({
+            ok: false,
+            message: 'Driver not found'
+          })
+        }
+
+        const conflictingDriverLoad =
+          await prisma.dispatch.findFirst({
+            where: {
+              companyId,
+              driverId: driver.id,
+              assignmentStatus: {
+                in: [
+                  'PENDING',
+                  'ACCEPTED'
+                ]
+              },
+              status: {
+                notIn: [
+                  'DELIVERED',
+                  'CANCELLED'
+                ]
+              }
+            },
+            select: {
+              id: true,
+              loadNumber: true
+            }
+          })
+
+        if (conflictingDriverLoad) {
+          return res.status(409).json({
+            ok: false,
+            message:
+              `Driver is already assigned to ${conflictingDriverLoad.loadNumber}`
+          })
+        }
+
+        driverId = driver.id
+      }
+
       const requestedStatus =
         isDispatchStatus(
           req.body?.status
@@ -1853,6 +2851,13 @@ app.post(
           data: {
             companyId,
             assetId,
+            driverId,
+            assignmentStatus:
+              driverId != null
+                ? 'PENDING'
+                : 'UNASSIGNED',
+            acceptedAt: null,
+            declinedAt: null,
             loadNumber,
             status: requestedStatus,
 
@@ -1921,6 +2926,15 @@ app.post(
           },
           include: {
             asset: true,
+            driver: {
+              select: {
+                id: true,
+                email: true,
+                name: true,
+                active: true,
+                driverProfile: true
+              }
+            },
             statusEvents: {
               orderBy: {
                 createdAt: 'desc'
@@ -2075,6 +3089,87 @@ app.patch(
         }
       }
 
+      if (req.body?.driverId !== undefined) {
+        if (
+          req.body.driverId === null ||
+          req.body.driverId === ''
+        ) {
+          data.driverId = null
+          data.assignmentStatus = 'UNASSIGNED'
+          data.acceptedAt = null
+          data.declinedAt = null
+        } else {
+          const requestedDriverId =
+            Number(req.body.driverId)
+
+          if (!Number.isInteger(requestedDriverId)) {
+            return res.status(400).json({
+              ok: false,
+              message: 'Invalid driver'
+            })
+          }
+
+          const driver =
+            await prisma.user.findFirst({
+              where: {
+                id: requestedDriverId,
+                companyId,
+                role: 'driver',
+                active: true
+              }
+            })
+
+          if (!driver) {
+            return res.status(404).json({
+              ok: false,
+              message: 'Driver not found'
+            })
+          }
+
+          const conflictingDriverLoad =
+            await prisma.dispatch.findFirst({
+              where: {
+                companyId,
+                driverId: driver.id,
+                id: {
+                  not: dispatchId
+                },
+                assignmentStatus: {
+                  in: [
+                    'PENDING',
+                    'ACCEPTED'
+                  ]
+                },
+                status: {
+                  notIn: [
+                    'DELIVERED',
+                    'CANCELLED'
+                  ]
+                }
+              },
+              select: {
+                id: true,
+                loadNumber: true
+              }
+            })
+
+          if (conflictingDriverLoad) {
+            return res.status(409).json({
+              ok: false,
+              message:
+                `Driver is already assigned to ${conflictingDriverLoad.loadNumber}`
+            })
+          }
+
+          if (existing.driverId !== driver.id) {
+            data.driverId = driver.id
+            data.assignmentStatus = 'PENDING'
+            data.acceptedAt = null
+            data.declinedAt = null
+          }
+        }
+      }
+
       const stringFields = [
         'loadNumber',
         'pickupName',
@@ -2146,6 +3241,15 @@ app.patch(
           data,
           include: {
             asset: true,
+            driver: {
+              select: {
+                id: true,
+                email: true,
+                name: true,
+                active: true,
+                driverProfile: true
+              }
+            },
             statusEvents: {
               orderBy: {
                 createdAt: 'desc'

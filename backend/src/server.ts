@@ -983,6 +983,37 @@ function isDriver(
   return role === 'driver'
 }
 
+async function isTruckOnlineForDispatch(
+  assetId: number
+) {
+  const latestTelemetry =
+    await prisma.telemetry.findFirst({
+      where: {
+        assetId,
+        isBackfill: false
+      },
+      orderBy: {
+        receivedAt: 'desc'
+      },
+      select: {
+        receivedAt: true
+      }
+    })
+
+  if (!latestTelemetry?.receivedAt) {
+    return false
+  }
+
+  const ageMs =
+    Date.now() -
+    latestTelemetry.receivedAt.getTime()
+
+  return (
+    ageMs >= 0 &&
+    ageMs < 120000
+  )
+}
+
 const driverInclude = {
   driverProfile: true
 } as const
@@ -2710,6 +2741,23 @@ app.post(
           })
         }
 
+        if (
+          String(asset.assetType).toUpperCase() === 'TRK'
+        ) {
+          const truckOnline =
+            await isTruckOnlineForDispatch(
+              asset.id
+            )
+
+          if (!truckOnline) {
+            return res.status(409).json({
+              ok: false,
+              message:
+                'TRK must be online before it can be assigned to a load'
+            })
+          }
+        }
+
         const conflicting =
           await prisma.dispatch.findFirst({
             where: {
@@ -3135,6 +3183,24 @@ app.patch(
               ok: false,
               message: 'Asset not found'
             })
+          }
+
+          if (
+            existing.assetId !== asset.id &&
+            String(asset.assetType).toUpperCase() === 'TRK'
+          ) {
+            const truckOnline =
+              await isTruckOnlineForDispatch(
+                asset.id
+              )
+
+            if (!truckOnline) {
+              return res.status(409).json({
+                ok: false,
+                message:
+                  'TRK must be online before it can be assigned to a load'
+              })
+            }
           }
 
           const conflicting =

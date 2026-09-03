@@ -3247,7 +3247,7 @@ function App() {
           null
         )
 
-  const availableAssets =
+  const unassignedAssets =
     assets.filter(
       (asset) =>
         !activeDispatches.some(
@@ -3314,6 +3314,49 @@ function App() {
 
       return 'offline'
     }
+
+  const isAssetAssignableToDispatch = (
+    asset: any
+  ) => {
+    if (assetTypeCode(asset) !== 'TRK') {
+      return true
+    }
+
+    const item =
+      fleetTelemetry[
+        asset.deviceId
+      ]
+
+    return (
+      getDeviceStatusForTelemetry(
+        item
+      ) === 'online'
+    )
+  }
+
+  const availableAssets =
+    unassignedAssets.filter(
+      isAssetAssignableToDispatch
+    )
+
+  const editableAssets =
+    assets.filter((asset) => {
+      if (
+        String(asset.id) ===
+        editDispatchForm.assetId
+      ) {
+        return true
+      }
+
+      return (
+        !activeDispatches.some(
+          (dispatch) =>
+            dispatch.asset?.id === asset.id &&
+            dispatch.id !== editingDispatchId
+        ) &&
+        isAssetAssignableToDispatch(asset)
+      )
+    })
 
   const deviceStatus =
     getDeviceStatusForTelemetry(
@@ -9355,6 +9398,9 @@ function App() {
                                 {availableAssets.map((asset) => (
                                   <option key={asset.id} value={asset.id}>
                                     {asset.name || asset.deviceId} ({asset.deviceId})
+                                    {assetTypeCode(asset) === 'TRK'
+                                      ? ' · ONLINE'
+                                      : ''}
                                   </option>
                                 ))}
                               </select>
@@ -9920,11 +9966,31 @@ function App() {
                                 }
                               >
                                 <option value="">Unassigned asset</option>
-                                {assets.map((asset) => (
-                                  <option key={asset.id} value={asset.id}>
-                                    {asset.name || asset.deviceId} ({asset.deviceId})
-                                  </option>
-                                ))}
+                                {editableAssets.map((asset) => {
+                                  const isCurrent =
+                                    String(asset.id) ===
+                                    editDispatchForm.assetId
+
+                                  const online =
+                                    assetTypeCode(asset) !== 'TRK' ||
+                                    isAssetAssignableToDispatch(asset)
+
+                                  return (
+                                    <option
+                                      key={asset.id}
+                                      value={asset.id}
+                                    >
+                                      {asset.name || asset.deviceId} ({asset.deviceId})
+                                      {assetTypeCode(asset) === 'TRK'
+                                        ? online
+                                          ? ' · ONLINE'
+                                          : isCurrent
+                                            ? ' · OFFLINE · CURRENT'
+                                            : ''
+                                        : ''}
+                                    </option>
+                                  )
+                                })}
                               </select>
                             </label>
                             <label>

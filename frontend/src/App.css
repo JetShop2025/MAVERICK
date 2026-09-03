@@ -7670,3 +7670,365 @@ button:disabled {
   font-size: 0.68rem;
 }
 
+/* =====================================================
+   MAVTRACK OPERATIONS — REAL LOAD FIELDS + NO OVERFLOW
+   Authoritative final override.
+   ===================================================== */
+
+.workspace-page.operations-master-detail,
+.workspace-page.operations-master-detail *,
+.dispatch-modal,
+.dispatch-modal * {
+  min-width: 0;
+}
+
+.workspace-page.operations-master-detail {
+  width: 100%;
+  max-width: 100%;
+  overflow: hidden;
+}
+
+.workspace-page.operations-master-detail .operations-commandbar,
+.workspace-page.operations-master-detail .operations-split-workspace,
+.workspace-page.operations-master-detail .operations-loads-pane,
+.workspace-page.operations-master-detail .operations-detail-pane {
+  width: 100%;
+  max-width: 100%;
+}
+
+.workspace-page.operations-master-detail .operations-commandbar {
+  grid-template-columns: minmax(220px, 1fr) minmax(0, auto);
+}
+
+.workspace-page.operations-master-detail .operations-command-actions {
+  max-width: 100%;
+  overflow: hidden;
+}
+
+.workspace-page.operations-master-detail .operations-split-workspace {
+  grid-template-columns: minmax(0, 63%) minmax(0, 37%);
+  overflow: hidden;
+}
+
+.workspace-page.operations-master-detail .operations-loads-pane,
+.workspace-page.operations-master-detail .operations-detail-pane {
+  overflow: hidden;
+}
+
+.workspace-page.operations-master-detail .operations-load-table-head,
+.workspace-page.operations-master-detail .operations-load-row {
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  grid-template-columns:
+    minmax(92px, 1.05fr)
+    minmax(112px, 1.25fr)
+    minmax(112px, 1.25fr)
+    minmax(72px, 0.78fr)
+    minmax(92px, 0.92fr)
+    minmax(58px, 0.58fr)
+    minmax(62px, 0.64fr)
+    minmax(62px, 0.62fr);
+  gap: 6px;
+}
+
+.workspace-page.operations-master-detail .operations-load-scroll {
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+
+.workspace-page.operations-master-detail .operations-load-cell,
+.workspace-page.operations-master-detail .operations-load-actions {
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+}
+
+.workspace-page.operations-master-detail .operations-load-cell strong,
+.workspace-page.operations-master-detail .operations-load-cell small {
+  display: block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workspace-page.operations-master-detail .operations-load-cell.movement-cell strong {
+  display: -webkit-box;
+  white-space: normal;
+}
+
+.workspace-page.operations-master-detail .dispatch-status-pill {
+  max-width: 100%;
+}
+
+.workspace-page.operations-master-detail .operations-load-actions button {
+  width: 100%;
+  max-width: 58px;
+  padding-inline: 5px;
+}
+
+.workspace-page.operations-master-detail .operations-detail-header,
+.workspace-page.operations-master-detail .operations-detail-scroll {
+  width: 100%;
+  max-width: 100%;
+}
+
+.workspace-page.operations-master-detail .operations-detail-scroll {
+  overflow-x: hidden;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+}
+
+.workspace-page.operations-master-detail .operations-detail-title-row {
+  min-width: 0;
+  flex-wrap: wrap;
+}
+
+.workspace-page.operations-master-detail .operations-detail-title-row h2 {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workspace-page.operations-master-detail .operations-summary-card,
+.workspace-page.operations-master-detail .operations-route-card,
+.workspace-page.operations-master-detail .operations-progress-card,
+.workspace-page.operations-master-detail .operations-load-data-card,
+.workspace-page.operations-master-detail .operations-detail-bottom-grid {
+  width: 100%;
+  max-width: 100%;
+}
+
+.workspace-page.operations-master-detail .operations-summary-card > div,
+.workspace-page.operations-master-detail .operations-route-stop,
+.workspace-page.operations-master-detail .operations-assigned-card,
+.workspace-page.operations-master-detail .operations-quick-actions-card {
+  min-width: 0;
+  overflow: hidden;
+}
+
+.workspace-page.operations-master-detail .operations-summary-card strong,
+.workspace-page.operations-master-detail .operations-summary-card small,
+.workspace-page.operations-master-detail .operations-route-stop strong,
+.workspace-page.operations-master-detail .operations-route-stop small,
+.workspace-page.operations-master-detail .operations-assigned-card dd {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.workspace-page.operations-master-detail .operations-route-stop strong,
+.workspace-page.operations-master-detail .operations-route-stop small {
+  white-space: nowrap;
+}
+
+.workspace-page.operations-master-detail .operations-load-data-card {
+  margin-bottom: 10px;
+  padding: 11px 13px;
+  border: 1px solid rgba(148, 163, 184, 0.12);
+  border-radius: 9px;
+  background: rgba(14, 27, 45, 0.58);
+}
+
+.workspace-page.operations-master-detail .operations-load-data-card h3 {
+  margin: 2px 0 0;
+  font-size: 0.82rem;
+}
+
+.workspace-page.operations-master-detail .operations-assignment-chip {
+  max-width: 120px;
+  padding: 4px 7px;
+  overflow: hidden;
+  border: 1px solid rgba(96, 165, 250, 0.22);
+  border-radius: 999px;
+  background: rgba(37, 99, 235, 0.11);
+  color: #93c5fd;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.55rem;
+  font-weight: 800;
+}
+
+.workspace-page.operations-master-detail .operations-load-data-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0 12px;
+  margin: 9px 0 0;
+}
+
+.workspace-page.operations-master-detail .operations-load-data-grid > div {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(54px, 0.75fr) minmax(0, 1.25fr);
+  gap: 6px;
+  padding: 5px 0;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.07);
+}
+
+.workspace-page.operations-master-detail .operations-load-data-grid dt,
+.workspace-page.operations-master-detail .operations-load-data-grid dd {
+  min-width: 0;
+  margin: 0;
+  font-size: 0.58rem;
+  line-height: 1.3;
+}
+
+.workspace-page.operations-master-detail .operations-load-data-grid dt {
+  color: #7f90a6;
+}
+
+.workspace-page.operations-master-detail .operations-load-data-grid dd {
+  overflow: hidden;
+  color: #dce7f5;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workspace-page.operations-master-detail .operations-driver-instructions {
+  margin-top: 9px;
+  padding: 8px 9px;
+  border-radius: 7px;
+  background: rgba(15, 23, 42, 0.42);
+}
+
+.workspace-page.operations-master-detail .operations-driver-instructions span {
+  color: #7f90a6;
+  font-size: 0.56rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.workspace-page.operations-master-detail .operations-driver-instructions p {
+  margin: 4px 0 0;
+  overflow-wrap: anywhere;
+  color: #d5dfeb;
+  font-size: 0.61rem;
+  line-height: 1.4;
+}
+
+/* Real load create/edit modal */
+.dispatch-modal {
+  width: min(1040px, calc(100vw - 32px));
+  max-width: calc(100vw - 32px);
+  max-height: calc(100vh - 32px);
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+
+.dispatch-form-grid-real {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 11px 12px;
+}
+
+.dispatch-form-grid-real .span-2 {
+  grid-column: span 2;
+}
+
+.dispatch-form-grid-real .span-3 {
+  grid-column: 1 / -1;
+}
+
+.dispatch-form-section-title {
+  margin-top: 5px;
+  padding: 8px 0 5px;
+  border-bottom: 1px solid rgba(96, 165, 250, 0.18);
+  color: #7fb5ff;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-size: 0.64rem;
+  font-weight: 850;
+}
+
+.dispatch-form-grid-real label,
+.dispatch-form-grid-real input,
+.dispatch-form-grid-real select,
+.dispatch-form-grid-real textarea {
+  width: 100%;
+  max-width: 100%;
+}
+
+.dispatch-form-grid-real input,
+.dispatch-form-grid-real select {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.dispatch-form-grid-real textarea {
+  min-height: 76px;
+  resize: vertical;
+}
+
+@media (max-width: 1480px) {
+  .workspace-page.operations-master-detail .operations-split-workspace {
+    grid-template-columns: minmax(0, 65%) minmax(0, 35%);
+  }
+
+  .workspace-page.operations-master-detail .operations-load-table-head,
+  .workspace-page.operations-master-detail .operations-load-row {
+    grid-template-columns:
+      minmax(86px, 1fr)
+      minmax(104px, 1.18fr)
+      minmax(104px, 1.18fr)
+      minmax(68px, 0.72fr)
+      minmax(82px, 0.86fr)
+      54px
+      58px
+      56px;
+    gap: 5px;
+    padding-inline: 10px;
+  }
+
+  .workspace-page.operations-master-detail .operations-load-cell strong {
+    font-size: 0.69rem;
+  }
+
+  .workspace-page.operations-master-detail .operations-load-cell small {
+    font-size: 0.56rem;
+  }
+
+  .workspace-page.operations-master-detail .operations-load-data-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 1180px) {
+  .workspace-page.operations-master-detail {
+    overflow: auto;
+  }
+
+  .workspace-page.operations-master-detail .operations-split-workspace {
+    grid-template-columns: 1fr;
+    overflow: visible;
+  }
+
+  .workspace-page.operations-master-detail .operations-loads-pane,
+  .workspace-page.operations-master-detail .operations-detail-pane {
+    overflow: hidden;
+  }
+
+  .dispatch-form-grid-real {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .dispatch-form-grid-real .span-3 {
+    grid-column: 1 / -1;
+  }
+}
+
+@media (max-width: 720px) {
+  .dispatch-form-grid-real {
+    grid-template-columns: 1fr;
+  }
+
+  .dispatch-form-grid-real .span-2,
+  .dispatch-form-grid-real .span-3 {
+    grid-column: 1;
+  }
+
+  .workspace-page.operations-master-detail .operations-load-data-grid {
+    grid-template-columns: 1fr;
+  }
+}

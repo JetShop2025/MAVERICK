@@ -90,6 +90,22 @@ type NotificationRecord = {
   createdAt: string
 }
 
+type DriverRecord = {
+  id: number
+  email: string
+  name: string
+  role: string
+  active: boolean
+  profile?: {
+    firstName?: string | null
+    lastName?: string | null
+    phone?: string | null
+    licenseNumber?: string | null
+    licenseState?: string | null
+    profilePhotoUrl?: string | null
+  } | null
+}
+
 type DispatchRecord = {
   id: number
   loadNumber: string
@@ -102,6 +118,35 @@ type DispatchRecord = {
   deliveryScheduledAt: string | null
   commodity: string | null
   referenceNumber: string | null
+
+  dispatcherName?: string | null
+  poNumber?: string | null
+  bolNumber?: string | null
+  carrierName?: string | null
+  lessorName?: string | null
+  truckNumber?: string | null
+  trailerNumber?: string | null
+
+  pickupPhone?: string | null
+  pickupReference?: string | null
+  deliveryPhone?: string | null
+  deliveryReference?: string | null
+
+  units?: number | null
+  weightLbs?: number | null
+  miles?: number | null
+  carrierPay?: number | null
+  rateType?: string | null
+
+  driverInstructions?: string | null
+  termsAndAgreement?: string | null
+
+  driverId?: number | null
+  assignmentStatus?: 'UNASSIGNED' | 'PENDING' | 'ACCEPTED' | 'DECLINED'
+  acceptedAt?: string | null
+  declinedAt?: string | null
+  driver?: DriverRecord | null
+
   temperatureSetpointC: number | null
   temperatureMinC: number | null
   temperatureMaxC: number | null
@@ -1223,22 +1268,46 @@ function App() {
   ] = useState(false)
 
   const [
+    drivers,
+    setDrivers
+  ] = useState<DriverRecord[]>([])
+
+  const [
     newDispatchForm,
     setNewDispatchForm
   ] = useState({
     loadNumber: '',
+    dispatcherName: '',
+    poNumber: '',
+    bolNumber: '',
+    referenceNumber: '',
+    driverId: '',
     assetId: '',
+    truckNumber: '',
+    trailerNumber: '',
+    carrierName: '',
+    lessorName: '',
     pickupName: '',
     pickupAddress: '',
+    pickupPhone: '',
+    pickupReference: '',
     pickupScheduledAt: '',
     deliveryName: '',
     deliveryAddress: '',
+    deliveryPhone: '',
+    deliveryReference: '',
     deliveryScheduledAt: '',
     commodity: '',
-    referenceNumber: '',
+    units: '',
+    weightLbs: '',
+    miles: '',
+    carrierPay: '',
+    rateType: '',
     temperatureSetpointF: '',
     temperatureMinF: '',
     temperatureMaxF: '',
+    driverInstructions: '',
+    termsAndAgreement: '',
     notes: ''
   })
 
@@ -1314,18 +1383,37 @@ function App() {
     setEditDispatchForm
   ] = useState({
     loadNumber: '',
+    dispatcherName: '',
+    poNumber: '',
+    bolNumber: '',
+    referenceNumber: '',
+    driverId: '',
     assetId: '',
+    truckNumber: '',
+    trailerNumber: '',
+    carrierName: '',
+    lessorName: '',
     pickupName: '',
     pickupAddress: '',
+    pickupPhone: '',
+    pickupReference: '',
     pickupScheduledAt: '',
     deliveryName: '',
     deliveryAddress: '',
+    deliveryPhone: '',
+    deliveryReference: '',
     deliveryScheduledAt: '',
     commodity: '',
-    referenceNumber: '',
+    units: '',
+    weightLbs: '',
+    miles: '',
+    carrierPay: '',
+    rateType: '',
     temperatureSetpointF: '',
     temperatureMinF: '',
     temperatureMaxF: '',
+    driverInstructions: '',
+    termsAndAgreement: '',
     notes: ''
   })
 
@@ -2023,6 +2111,59 @@ function App() {
     loadDispatches
   ])
 
+  const loadDrivers =
+    useCallback(
+      async () => {
+        const token =
+          localStorage.getItem(
+            'maverick_token'
+          )
+
+        if (!token) {
+          return
+        }
+
+        try {
+          const response =
+            await fetch(
+              `${API_BASE}/api/drivers`,
+              {
+                headers: {
+                  Authorization:
+                    `Bearer ${token}`
+                }
+              }
+            )
+
+          const payload =
+            await response.json()
+
+          if (
+            response.ok &&
+            payload.ok
+          ) {
+            setDrivers(
+              payload.drivers || []
+            )
+          }
+        } catch {
+          // Driver list is optional for the load screen.
+        }
+      },
+      []
+    )
+
+  useEffect(() => {
+    if (!isLoggedIn) {
+      return
+    }
+
+    loadDrivers()
+  }, [
+    isLoggedIn,
+    loadDrivers
+  ])
+
 
   const loadBackendNotifications =
     useCallback(
@@ -2288,18 +2429,37 @@ function App() {
   const resetNewDispatchForm = () => {
     setNewDispatchForm({
       loadNumber: '',
+      dispatcherName: '',
+      poNumber: '',
+      bolNumber: '',
+      referenceNumber: '',
+      driverId: '',
       assetId: '',
+      truckNumber: '',
+      trailerNumber: '',
+      carrierName: '',
+      lessorName: '',
       pickupName: '',
       pickupAddress: '',
+      pickupPhone: '',
+      pickupReference: '',
       pickupScheduledAt: '',
       deliveryName: '',
       deliveryAddress: '',
+      deliveryPhone: '',
+      deliveryReference: '',
       deliveryScheduledAt: '',
       commodity: '',
-      referenceNumber: '',
+      units: '',
+      weightLbs: '',
+      miles: '',
+      carrierPay: '',
+      rateType: '',
       temperatureSetpointF: '',
       temperatureMinF: '',
       temperatureMaxF: '',
+      driverInstructions: '',
+      termsAndAgreement: '',
       notes: ''
     })
   }
@@ -2391,6 +2551,54 @@ function App() {
                   newDispatchForm.commodity,
                 referenceNumber:
                   newDispatchForm.referenceNumber,
+                dispatcherName:
+                  newDispatchForm.dispatcherName,
+                poNumber:
+                  newDispatchForm.poNumber,
+                bolNumber:
+                  newDispatchForm.bolNumber,
+                driverId:
+                  newDispatchForm.driverId
+                    ? Number(newDispatchForm.driverId)
+                    : null,
+                truckNumber:
+                  newDispatchForm.truckNumber,
+                trailerNumber:
+                  newDispatchForm.trailerNumber,
+                carrierName:
+                  newDispatchForm.carrierName,
+                lessorName:
+                  newDispatchForm.lessorName,
+                pickupPhone:
+                  newDispatchForm.pickupPhone,
+                pickupReference:
+                  newDispatchForm.pickupReference,
+                deliveryPhone:
+                  newDispatchForm.deliveryPhone,
+                deliveryReference:
+                  newDispatchForm.deliveryReference,
+                units:
+                  newDispatchForm.units.trim()
+                    ? Number(newDispatchForm.units)
+                    : null,
+                weightLbs:
+                  newDispatchForm.weightLbs.trim()
+                    ? Number(newDispatchForm.weightLbs)
+                    : null,
+                miles:
+                  newDispatchForm.miles.trim()
+                    ? Number(newDispatchForm.miles)
+                    : null,
+                carrierPay:
+                  newDispatchForm.carrierPay.trim()
+                    ? Number(newDispatchForm.carrierPay)
+                    : null,
+                rateType:
+                  newDispatchForm.rateType,
+                driverInstructions:
+                  newDispatchForm.driverInstructions,
+                termsAndAgreement:
+                  newDispatchForm.termsAndAgreement,
                 temperatureSetpointC:
                   toCelsius(
                     newDispatchForm.temperatureSetpointF
@@ -2486,16 +2694,40 @@ function App() {
     setEditDispatchForm({
       loadNumber:
         dispatch.loadNumber || '',
+      dispatcherName:
+        dispatch.dispatcherName || '',
+      poNumber:
+        dispatch.poNumber || '',
+      bolNumber:
+        dispatch.bolNumber || '',
+      referenceNumber:
+        dispatch.referenceNumber || '',
+      driverId:
+        dispatch.driverId != null
+          ? String(dispatch.driverId)
+          : '',
       assetId:
         dispatch.asset?.id != null
           ? String(
               dispatch.asset.id
             )
           : '',
+      truckNumber:
+        dispatch.truckNumber || '',
+      trailerNumber:
+        dispatch.trailerNumber || '',
+      carrierName:
+        dispatch.carrierName || '',
+      lessorName:
+        dispatch.lessorName || '',
       pickupName:
         dispatch.pickupName || '',
       pickupAddress:
         dispatch.pickupAddress || '',
+      pickupPhone:
+        dispatch.pickupPhone || '',
+      pickupReference:
+        dispatch.pickupReference || '',
       pickupScheduledAt:
         toDateTimeLocalValue(
           dispatch.pickupScheduledAt
@@ -2504,14 +2736,38 @@ function App() {
         dispatch.deliveryName || '',
       deliveryAddress:
         dispatch.deliveryAddress || '',
+      deliveryPhone:
+        dispatch.deliveryPhone || '',
+      deliveryReference:
+        dispatch.deliveryReference || '',
       deliveryScheduledAt:
         toDateTimeLocalValue(
           dispatch.deliveryScheduledAt
         ),
       commodity:
         dispatch.commodity || '',
-      referenceNumber:
-        dispatch.referenceNumber || '',
+      units:
+        dispatch.units != null
+          ? String(dispatch.units)
+          : '',
+      weightLbs:
+        dispatch.weightLbs != null
+          ? String(dispatch.weightLbs)
+          : '',
+      miles:
+        dispatch.miles != null
+          ? String(dispatch.miles)
+          : '',
+      carrierPay:
+        dispatch.carrierPay != null
+          ? String(dispatch.carrierPay)
+          : '',
+      rateType:
+        dispatch.rateType || '',
+      driverInstructions:
+        dispatch.driverInstructions || '',
+      termsAndAgreement:
+        dispatch.termsAndAgreement || '',
       temperatureSetpointF:
         dispatch.temperatureSetpointC != null
           ? celsiusToFahrenheit(
@@ -2668,6 +2924,54 @@ function App() {
                   editDispatchForm.commodity,
                 referenceNumber:
                   editDispatchForm.referenceNumber,
+                dispatcherName:
+                  editDispatchForm.dispatcherName,
+                poNumber:
+                  editDispatchForm.poNumber,
+                bolNumber:
+                  editDispatchForm.bolNumber,
+                driverId:
+                  editDispatchForm.driverId
+                    ? Number(editDispatchForm.driverId)
+                    : null,
+                truckNumber:
+                  editDispatchForm.truckNumber,
+                trailerNumber:
+                  editDispatchForm.trailerNumber,
+                carrierName:
+                  editDispatchForm.carrierName,
+                lessorName:
+                  editDispatchForm.lessorName,
+                pickupPhone:
+                  editDispatchForm.pickupPhone,
+                pickupReference:
+                  editDispatchForm.pickupReference,
+                deliveryPhone:
+                  editDispatchForm.deliveryPhone,
+                deliveryReference:
+                  editDispatchForm.deliveryReference,
+                units:
+                  editDispatchForm.units.trim()
+                    ? Number(editDispatchForm.units)
+                    : null,
+                weightLbs:
+                  editDispatchForm.weightLbs.trim()
+                    ? Number(editDispatchForm.weightLbs)
+                    : null,
+                miles:
+                  editDispatchForm.miles.trim()
+                    ? Number(editDispatchForm.miles)
+                    : null,
+                carrierPay:
+                  editDispatchForm.carrierPay.trim()
+                    ? Number(editDispatchForm.carrierPay)
+                    : null,
+                rateType:
+                  editDispatchForm.rateType,
+                driverInstructions:
+                  editDispatchForm.driverInstructions,
+                termsAndAgreement:
+                  editDispatchForm.termsAndAgreement,
                 temperatureSetpointC:
                   toCelsius(
                     editDispatchForm.temperatureSetpointF
@@ -8532,6 +8836,98 @@ function App() {
                                   </div>
                                 </section>
 
+                                <section className="operations-load-data-card">
+                                  <div className="operations-card-heading-row">
+                                    <div>
+                                      <span className="page-kicker">Load Data</span>
+                                      <h3>Trip Information</h3>
+                                    </div>
+
+                                    <span className="operations-assignment-chip">
+                                      {dispatch.assignmentStatus || 'UNASSIGNED'}
+                                    </span>
+                                  </div>
+
+                                  <dl className="operations-load-data-grid">
+                                    <div>
+                                      <dt>Driver</dt>
+                                      <dd>
+                                        {
+                                          dispatch.driver?.profile?.firstName ||
+                                          dispatch.driver?.profile?.lastName
+                                            ? `${dispatch.driver?.profile?.firstName || ''} ${dispatch.driver?.profile?.lastName || ''}`.trim()
+                                            : dispatch.driver?.name ||
+                                              'Unassigned'
+                                        }
+                                      </dd>
+                                    </div>
+                                    <div>
+                                      <dt>Dispatcher</dt>
+                                      <dd>{dispatch.dispatcherName || '—'}</dd>
+                                    </div>
+                                    <div>
+                                      <dt>PO #</dt>
+                                      <dd>{dispatch.poNumber || '—'}</dd>
+                                    </div>
+                                    <div>
+                                      <dt>B/L #</dt>
+                                      <dd>{dispatch.bolNumber || '—'}</dd>
+                                    </div>
+                                    <div>
+                                      <dt>Pickup Ref</dt>
+                                      <dd>{dispatch.pickupReference || '—'}</dd>
+                                    </div>
+                                    <div>
+                                      <dt>Delivery Ref</dt>
+                                      <dd>{dispatch.deliveryReference || '—'}</dd>
+                                    </div>
+                                    <div>
+                                      <dt>Truck</dt>
+                                      <dd>{dispatch.truckNumber || '—'}</dd>
+                                    </div>
+                                    <div>
+                                      <dt>Trailer</dt>
+                                      <dd>{dispatch.trailerNumber || '—'}</dd>
+                                    </div>
+                                    <div>
+                                      <dt>Units</dt>
+                                      <dd>{dispatch.units ?? '—'}</dd>
+                                    </div>
+                                    <div>
+                                      <dt>Weight</dt>
+                                      <dd>
+                                        {dispatch.weightLbs != null
+                                          ? `${Number(dispatch.weightLbs).toLocaleString()} lb`
+                                          : '—'}
+                                      </dd>
+                                    </div>
+                                    <div>
+                                      <dt>Miles</dt>
+                                      <dd>{dispatch.miles ?? '—'}</dd>
+                                    </div>
+                                    <div>
+                                      <dt>Carrier Pay</dt>
+                                      <dd>
+                                        {dispatch.carrierPay != null
+                                          ? `$${Number(dispatch.carrierPay).toLocaleString(undefined, {
+                                              minimumFractionDigits: 2,
+                                              maximumFractionDigits: 2
+                                            })}`
+                                          : '—'}
+                                      </dd>
+                                    </div>
+                                  </dl>
+
+                                  {
+                                    dispatch.driverInstructions && (
+                                      <div className="operations-driver-instructions">
+                                        <span>Driver Instructions</span>
+                                        <p>{dispatch.driverInstructions}</p>
+                                      </div>
+                                    )
+                                  }
+                                </section>
+
                                 <section className="operations-progress-card">
                                   <div className="operations-card-heading-row">
                                     <div>
@@ -8842,295 +9238,469 @@ function App() {
                         </button>
                       </div>
 
-                      <div className="dispatch-form-grid">
+                      <div className="dispatch-form-grid dispatch-form-grid-real">
+                        <div className="dispatch-form-section-title span-3">
+                          Load / Trip
+                        </div>
                         <label>
-                          <span>Load Number *</span>
+                          <span>Trip / Load Number *</span>
                           <input
-                            value={
-                              newDispatchForm.loadNumber
-                            }
+                            value={newDispatchForm.loadNumber}
                             onChange={(event) =>
-                              setNewDispatchForm(
-                                (current) => ({
-                                  ...current,
-                                  loadNumber:
-                                    event.target.value
-                                })
-                              )
+                              setNewDispatchForm((current) => ({
+                                ...current,
+                                loadNumber: event.target.value
+                              }))
                             }
-                            placeholder="MAV-00021"
+                            placeholder="121333-01"
                           />
                         </label>
-
                         <label>
-                          <span>Asset</span>
-                          <select
-                            value={
-                              newDispatchForm.assetId
-                            }
+                          <span>Dispatcher</span>
+                          <input
+                            value={newDispatchForm.dispatcherName}
                             onChange={(event) =>
-                              setNewDispatchForm(
-                                (current) => ({
-                                  ...current,
-                                  assetId:
-                                    event.target.value
-                                })
-                              )
+                              setNewDispatchForm((current) => ({
+                                ...current,
+                                dispatcherName: event.target.value
+                              }))
+                            }
+                            placeholder="CRI"
+                          />
+                        </label>
+                        <label>
+                          <span>Reference #</span>
+                          <input
+                            value={newDispatchForm.referenceNumber}
+                            onChange={(event) =>
+                              setNewDispatchForm((current) => ({
+                                ...current,
+                                referenceNumber: event.target.value
+                              }))
+                            }
+                            placeholder="Reference"
+                          />
+                        </label>
+                        <label>
+                          <span>P.O. #</span>
+                          <input
+                            value={newDispatchForm.poNumber}
+                            onChange={(event) =>
+                              setNewDispatchForm((current) => ({
+                                ...current,
+                                poNumber: event.target.value
+                              }))
+                            }
+                            placeholder="126543"
+                          />
+                        </label>
+                        <label>
+                          <span>B/L #</span>
+                          <input
+                            value={newDispatchForm.bolNumber}
+                            onChange={(event) =>
+                              setNewDispatchForm((current) => ({
+                                ...current,
+                                bolNumber: event.target.value
+                              }))
+                            }
+                            placeholder="126543"
+                          />
+                        </label>
+                        <label>
+                          <span>Driver</span>
+                          <select
+                            value={newDispatchForm.driverId}
+                            onChange={(event) =>
+                              setNewDispatchForm((current) => ({
+                                ...current,
+                                driverId: event.target.value
+                              }))
                             }
                           >
-                            <option value="">
-                              Unassigned
-                            </option>
-
-                            {
-                              availableAssets.map(
-                                (asset) => (
-                                  <option
-                                    key={asset.id}
-                                    value={asset.id}
-                                  >
-                                    {
-                                      asset.name ||
-                                      asset.deviceId
-                                    }
-                                    {' ('}
-                                    {asset.deviceId}
-                                    {')'}
-                                  </option>
-                                )
-                              )
-                            }
+                            <option value="">Unassigned driver</option>
+                            {drivers.map((driver) => (
+                              <option key={driver.id} value={driver.id}>
+                                {
+                                  driver.profile?.firstName ||
+                                  driver.profile?.lastName
+                                    ? `${driver.profile?.firstName || ''} ${driver.profile?.lastName || ''}`.trim()
+                                    : driver.name || driver.email
+                                }
+                              </option>
+                            ))}
                           </select>
                         </label>
-
+                        <div className="dispatch-form-section-title span-3">
+                          Equipment / Carrier
+                        </div>
+                        <label>
+                          <span>Tracked Asset</span>
+                          <select
+                            value={newDispatchForm.assetId}
+                            onChange={(event) =>
+                              setNewDispatchForm((current) => ({
+                                ...current,
+                                assetId: event.target.value
+                              }))
+                            }
+                          >
+                            <option value="">Unassigned asset</option>
+                            {availableAssets.map((asset) => (
+                              <option key={asset.id} value={asset.id}>
+                                {asset.name || asset.deviceId} ({asset.deviceId})
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                        <label>
+                          <span>Truck #</span>
+                          <input
+                            value={newDispatchForm.truckNumber}
+                            onChange={(event) =>
+                              setNewDispatchForm((current) => ({
+                                ...current,
+                                truckNumber: event.target.value
+                              }))
+                            }
+                            placeholder="TRK-014"
+                          />
+                        </label>
+                        <label>
+                          <span>Trailer #</span>
+                          <input
+                            value={newDispatchForm.trailerNumber}
+                            onChange={(event) =>
+                              setNewDispatchForm((current) => ({
+                                ...current,
+                                trailerNumber: event.target.value
+                              }))
+                            }
+                            placeholder="TRL-205"
+                          />
+                        </label>
+                        <label>
+                          <span>Carrier</span>
+                          <input
+                            value={newDispatchForm.carrierName}
+                            onChange={(event) =>
+                              setNewDispatchForm((current) => ({
+                                ...current,
+                                carrierName: event.target.value
+                              }))
+                            }
+                            placeholder="Darlin's Trucking LLC"
+                          />
+                        </label>
+                        <label>
+                          <span>Lessor</span>
+                          <input
+                            value={newDispatchForm.lessorName}
+                            onChange={(event) =>
+                              setNewDispatchForm((current) => ({
+                                ...current,
+                                lessorName: event.target.value
+                              }))
+                            }
+                            placeholder="Carrier / lessor"
+                          />
+                        </label>
+                        <div className="dispatch-form-section-title span-3">
+                          Pickup
+                        </div>
                         <label>
                           <span>Pickup Facility *</span>
                           <input
-                            value={
-                              newDispatchForm.pickupName
-                            }
+                            value={newDispatchForm.pickupName}
                             onChange={(event) =>
-                              setNewDispatchForm(
-                                (current) => ({
-                                  ...current,
-                                  pickupName:
-                                    event.target.value
-                                })
-                              )
+                              setNewDispatchForm((current) => ({
+                                ...current,
+                                pickupName: event.target.value
+                              }))
+                            }
+                            placeholder="Latitude Salinas"
+                          />
+                        </label>
+                        <label>
+                          <span>Pickup Appointment</span>
+                          <input type="datetime-local"
+                            value={newDispatchForm.pickupScheduledAt}
+                            onChange={(event) =>
+                              setNewDispatchForm((current) => ({
+                                ...current,
+                                pickupScheduledAt: event.target.value
+                              }))
+                            }
+                            placeholder=""
+                          />
+                        </label>
+                        <label>
+                          <span>Pickup Phone</span>
+                          <input
+                            value={newDispatchForm.pickupPhone}
+                            onChange={(event) =>
+                              setNewDispatchForm((current) => ({
+                                ...current,
+                                pickupPhone: event.target.value
+                              }))
+                            }
+                            placeholder="(000) 000-0000"
+                          />
+                        </label>
+                        <label className="span-2">
+                          <span>Pickup Address *</span>
+                          <input
+                            value={newDispatchForm.pickupAddress}
+                            onChange={(event) =>
+                              setNewDispatchForm((current) => ({
+                                ...current,
+                                pickupAddress: event.target.value
+                              }))
+                            }
+                            placeholder="340 El Camino Real, Salinas, CA"
+                          />
+                        </label>
+                        <label>
+                          <span>Pickup Ref #</span>
+                          <input
+                            value={newDispatchForm.pickupReference}
+                            onChange={(event) =>
+                              setNewDispatchForm((current) => ({
+                                ...current,
+                                pickupReference: event.target.value
+                              }))
+                            }
+                            placeholder="126543"
+                          />
+                        </label>
+                        <div className="dispatch-form-section-title span-3">
+                          Delivery
+                        </div>
+                        <label>
+                          <span>Delivery Facility *</span>
+                          <input
+                            value={newDispatchForm.deliveryName}
+                            onChange={(event) =>
+                              setNewDispatchForm((current) => ({
+                                ...current,
+                                deliveryName: event.target.value
+                              }))
                             }
                             placeholder="Taylor Farms"
                           />
                         </label>
-
-                        <label>
-                          <span>Pickup Appointment</span>
-                          <input
-                            type="datetime-local"
-                            value={
-                              newDispatchForm.pickupScheduledAt
-                            }
-                            onChange={(event) =>
-                              setNewDispatchForm(
-                                (current) => ({
-                                  ...current,
-                                  pickupScheduledAt:
-                                    event.target.value
-                                })
-                              )
-                            }
-                          />
-                        </label>
-
-                        <label className="span-2">
-                          <span>Pickup Address *</span>
-                          <input
-                            value={
-                              newDispatchForm.pickupAddress
-                            }
-                            onChange={(event) =>
-                              setNewDispatchForm(
-                                (current) => ({
-                                  ...current,
-                                  pickupAddress:
-                                    event.target.value
-                                })
-                              )
-                            }
-                            placeholder="Salinas, CA"
-                          />
-                        </label>
-
-                        <label>
-                          <span>Delivery Facility *</span>
-                          <input
-                            value={
-                              newDispatchForm.deliveryName
-                            }
-                            onChange={(event) =>
-                              setNewDispatchForm(
-                                (current) => ({
-                                  ...current,
-                                  deliveryName:
-                                    event.target.value
-                                })
-                              )
-                            }
-                            placeholder="Distribution Center"
-                          />
-                        </label>
-
                         <label>
                           <span>Delivery Appointment</span>
-                          <input
-                            type="datetime-local"
-                            value={
-                              newDispatchForm.deliveryScheduledAt
-                            }
+                          <input type="datetime-local"
+                            value={newDispatchForm.deliveryScheduledAt}
                             onChange={(event) =>
-                              setNewDispatchForm(
-                                (current) => ({
-                                  ...current,
-                                  deliveryScheduledAt:
-                                    event.target.value
-                                })
-                              )
+                              setNewDispatchForm((current) => ({
+                                ...current,
+                                deliveryScheduledAt: event.target.value
+                              }))
                             }
+                            placeholder=""
                           />
                         </label>
-
+                        <label>
+                          <span>Delivery Phone</span>
+                          <input
+                            value={newDispatchForm.deliveryPhone}
+                            onChange={(event) =>
+                              setNewDispatchForm((current) => ({
+                                ...current,
+                                deliveryPhone: event.target.value
+                              }))
+                            }
+                            placeholder="(000) 000-0000"
+                          />
+                        </label>
                         <label className="span-2">
                           <span>Delivery Address *</span>
                           <input
-                            value={
-                              newDispatchForm.deliveryAddress
-                            }
+                            value={newDispatchForm.deliveryAddress}
                             onChange={(event) =>
-                              setNewDispatchForm(
-                                (current) => ({
-                                  ...current,
-                                  deliveryAddress:
-                                    event.target.value
-                                })
-                              )
+                              setNewDispatchForm((current) => ({
+                                ...current,
+                                deliveryAddress: event.target.value
+                              }))
                             }
-                            placeholder="Los Angeles, CA"
+                            placeholder="4595 W Main St, Guadalupe, CA"
                           />
                         </label>
-
+                        <label>
+                          <span>Delivery Ref #</span>
+                          <input
+                            value={newDispatchForm.deliveryReference}
+                            onChange={(event) =>
+                              setNewDispatchForm((current) => ({
+                                ...current,
+                                deliveryReference: event.target.value
+                              }))
+                            }
+                            placeholder="Reference"
+                          />
+                        </label>
+                        <div className="dispatch-form-section-title span-3">
+                          Freight / Pay
+                        </div>
                         <label>
                           <span>Commodity</span>
                           <input
-                            value={
-                              newDispatchForm.commodity
-                            }
+                            value={newDispatchForm.commodity}
                             onChange={(event) =>
-                              setNewDispatchForm(
-                                (current) => ({
-                                  ...current,
-                                  commodity:
-                                    event.target.value
-                                })
-                              )
+                              setNewDispatchForm((current) => ({
+                                ...current,
+                                commodity: event.target.value
+                              }))
                             }
                             placeholder="Produce"
                           />
                         </label>
-
                         <label>
-                          <span>Reference / PO</span>
-                          <input
-                            value={
-                              newDispatchForm.referenceNumber
-                            }
+                          <span>Units</span>
+                          <input inputMode="decimal"
+                            value={newDispatchForm.units}
                             onChange={(event) =>
-                              setNewDispatchForm(
-                                (current) => ({
-                                  ...current,
-                                  referenceNumber:
-                                    event.target.value
-                                })
-                              )
+                              setNewDispatchForm((current) => ({
+                                ...current,
+                                units: event.target.value
+                              }))
                             }
-                            placeholder="PO-829183"
+                            placeholder="1"
                           />
                         </label>
-
+                        <label>
+                          <span>Weight (lb)</span>
+                          <input inputMode="decimal"
+                            value={newDispatchForm.weightLbs}
+                            onChange={(event) =>
+                              setNewDispatchForm((current) => ({
+                                ...current,
+                                weightLbs: event.target.value
+                              }))
+                            }
+                            placeholder="0"
+                          />
+                        </label>
+                        <label>
+                          <span>Miles</span>
+                          <input inputMode="decimal"
+                            value={newDispatchForm.miles}
+                            onChange={(event) =>
+                              setNewDispatchForm((current) => ({
+                                ...current,
+                                miles: event.target.value
+                              }))
+                            }
+                            placeholder="0"
+                          />
+                        </label>
+                        <label>
+                          <span>Carrier Pay ($)</span>
+                          <input inputMode="decimal"
+                            value={newDispatchForm.carrierPay}
+                            onChange={(event) =>
+                              setNewDispatchForm((current) => ({
+                                ...current,
+                                carrierPay: event.target.value
+                              }))
+                            }
+                            placeholder="1050.00"
+                          />
+                        </label>
+                        <label>
+                          <span>Rate Type</span>
+                          <input
+                            value={newDispatchForm.rateType}
+                            onChange={(event) =>
+                              setNewDispatchForm((current) => ({
+                                ...current,
+                                rateType: event.target.value
+                              }))
+                            }
+                            placeholder="FLAT"
+                          />
+                        </label>
                         <label>
                           <span>Set Point °F</span>
-                          <input
-                            inputMode="decimal"
-                            value={
-                              newDispatchForm.temperatureSetpointF
-                            }
+                          <input inputMode="decimal"
+                            value={newDispatchForm.temperatureSetpointF}
                             onChange={(event) =>
-                              setNewDispatchForm(
-                                (current) => ({
-                                  ...current,
-                                  temperatureSetpointF:
-                                    event.target.value
-                                })
-                              )
+                              setNewDispatchForm((current) => ({
+                                ...current,
+                                temperatureSetpointF: event.target.value
+                              }))
                             }
                             placeholder="34"
                           />
                         </label>
-
                         <label>
                           <span>Minimum °F</span>
-                          <input
-                            inputMode="decimal"
-                            value={
-                              newDispatchForm.temperatureMinF
-                            }
+                          <input inputMode="decimal"
+                            value={newDispatchForm.temperatureMinF}
                             onChange={(event) =>
-                              setNewDispatchForm(
-                                (current) => ({
-                                  ...current,
-                                  temperatureMinF:
-                                    event.target.value
-                                })
-                              )
+                              setNewDispatchForm((current) => ({
+                                ...current,
+                                temperatureMinF: event.target.value
+                              }))
                             }
                             placeholder="32"
                           />
                         </label>
-
                         <label>
                           <span>Maximum °F</span>
-                          <input
-                            inputMode="decimal"
-                            value={
-                              newDispatchForm.temperatureMaxF
-                            }
+                          <input inputMode="decimal"
+                            value={newDispatchForm.temperatureMaxF}
                             onChange={(event) =>
-                              setNewDispatchForm(
-                                (current) => ({
-                                  ...current,
-                                  temperatureMaxF:
-                                    event.target.value
-                                })
-                              )
+                              setNewDispatchForm((current) => ({
+                                ...current,
+                                temperatureMaxF: event.target.value
+                              }))
                             }
                             placeholder="38"
                           />
                         </label>
-
-                        <label className="span-2">
-                          <span>Notes</span>
+                        <div className="dispatch-form-section-title span-3">
+                          Instructions
+                        </div>
+                        <label className="span-3">
+                          <span>Driver Instructions</span>
                           <textarea
-                            value={
-                              newDispatchForm.notes
-                            }
+                            value={newDispatchForm.driverInstructions}
                             onChange={(event) =>
-                              setNewDispatchForm(
-                                (current) => ({
-                                  ...current,
-                                  notes:
-                                    event.target.value
-                                })
-                              )
+                              setNewDispatchForm((current) => ({
+                                ...current,
+                                driverInstructions: event.target.value
+                              }))
                             }
-                            placeholder="Load notes, driver instructions, appointment details..."
+                            placeholder="Check-in name, seal/load lock instructions, appointment notes..."
+                          />
+                        </label>
+                        <label className="span-3">
+                          <span>Terms / Agreement</span>
+                          <textarea
+                            value={newDispatchForm.termsAndAgreement}
+                            onChange={(event) =>
+                              setNewDispatchForm((current) => ({
+                                ...current,
+                                termsAndAgreement: event.target.value
+                              }))
+                            }
+                            placeholder="Carrier terms, temperature responsibility, appointment requirements..."
+                          />
+                        </label>
+                        <label className="span-3">
+                          <span>Internal Notes</span>
+                          <textarea
+                            value={newDispatchForm.notes}
+                            onChange={(event) =>
+                              setNewDispatchForm((current) => ({
+                                ...current,
+                                notes: event.target.value
+                              }))
+                            }
+                            placeholder="Dispatcher-only notes and internal load details..."
                           />
                         </label>
                       </div>
@@ -9212,295 +9782,469 @@ function App() {
                         </button>
                       </div>
 
-                      <div className="dispatch-form-grid">
+                      <div className="dispatch-form-grid dispatch-form-grid-real">
+                        <div className="dispatch-form-section-title span-3">
+                          Load / Trip
+                        </div>
                         <label>
-                          <span>Load Number *</span>
+                          <span>Trip / Load Number *</span>
                           <input
-                            value={
-                              editDispatchForm.loadNumber
-                            }
+                            value={editDispatchForm.loadNumber}
                             onChange={(event) =>
-                              setEditDispatchForm(
-                                (current) => ({
-                                  ...current,
-                                  loadNumber:
-                                    event.target.value
-                                })
-                              )
+                              setEditDispatchForm((current) => ({
+                                ...current,
+                                loadNumber: event.target.value
+                              }))
                             }
-                            placeholder="MAV-00021"
+                            placeholder="121333-01"
                           />
                         </label>
-
                         <label>
-                          <span>Asset</span>
-                          <select
-                            value={
-                              editDispatchForm.assetId
-                            }
+                          <span>Dispatcher</span>
+                          <input
+                            value={editDispatchForm.dispatcherName}
                             onChange={(event) =>
-                              setEditDispatchForm(
-                                (current) => ({
-                                  ...current,
-                                  assetId:
-                                    event.target.value
-                                })
-                              )
+                              setEditDispatchForm((current) => ({
+                                ...current,
+                                dispatcherName: event.target.value
+                              }))
+                            }
+                            placeholder="CRI"
+                          />
+                        </label>
+                        <label>
+                          <span>Reference #</span>
+                          <input
+                            value={editDispatchForm.referenceNumber}
+                            onChange={(event) =>
+                              setEditDispatchForm((current) => ({
+                                ...current,
+                                referenceNumber: event.target.value
+                              }))
+                            }
+                            placeholder="Reference"
+                          />
+                        </label>
+                        <label>
+                          <span>P.O. #</span>
+                          <input
+                            value={editDispatchForm.poNumber}
+                            onChange={(event) =>
+                              setEditDispatchForm((current) => ({
+                                ...current,
+                                poNumber: event.target.value
+                              }))
+                            }
+                            placeholder="126543"
+                          />
+                        </label>
+                        <label>
+                          <span>B/L #</span>
+                          <input
+                            value={editDispatchForm.bolNumber}
+                            onChange={(event) =>
+                              setEditDispatchForm((current) => ({
+                                ...current,
+                                bolNumber: event.target.value
+                              }))
+                            }
+                            placeholder="126543"
+                          />
+                        </label>
+                        <label>
+                          <span>Driver</span>
+                          <select
+                            value={editDispatchForm.driverId}
+                            onChange={(event) =>
+                              setEditDispatchForm((current) => ({
+                                ...current,
+                                driverId: event.target.value
+                              }))
                             }
                           >
-                            <option value="">
-                              Unassigned
-                            </option>
-
-                            {
-                              assets.map(
-                                (asset) => (
-                                  <option
-                                    key={asset.id}
-                                    value={asset.id}
-                                  >
-                                    {
-                                      asset.name ||
-                                      asset.deviceId
-                                    }
-                                    {' ('}
-                                    {asset.deviceId}
-                                    {')'}
-                                  </option>
-                                )
-                              )
-                            }
+                            <option value="">Unassigned driver</option>
+                            {drivers.map((driver) => (
+                              <option key={driver.id} value={driver.id}>
+                                {
+                                  driver.profile?.firstName ||
+                                  driver.profile?.lastName
+                                    ? `${driver.profile?.firstName || ''} ${driver.profile?.lastName || ''}`.trim()
+                                    : driver.name || driver.email
+                                }
+                              </option>
+                            ))}
                           </select>
                         </label>
-
+                        <div className="dispatch-form-section-title span-3">
+                          Equipment / Carrier
+                        </div>
+                        <label>
+                          <span>Tracked Asset</span>
+                          <select
+                            value={editDispatchForm.assetId}
+                            onChange={(event) =>
+                              setEditDispatchForm((current) => ({
+                                ...current,
+                                assetId: event.target.value
+                              }))
+                            }
+                          >
+                            <option value="">Unassigned asset</option>
+                            {assets.map((asset) => (
+                              <option key={asset.id} value={asset.id}>
+                                {asset.name || asset.deviceId} ({asset.deviceId})
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                        <label>
+                          <span>Truck #</span>
+                          <input
+                            value={editDispatchForm.truckNumber}
+                            onChange={(event) =>
+                              setEditDispatchForm((current) => ({
+                                ...current,
+                                truckNumber: event.target.value
+                              }))
+                            }
+                            placeholder="TRK-014"
+                          />
+                        </label>
+                        <label>
+                          <span>Trailer #</span>
+                          <input
+                            value={editDispatchForm.trailerNumber}
+                            onChange={(event) =>
+                              setEditDispatchForm((current) => ({
+                                ...current,
+                                trailerNumber: event.target.value
+                              }))
+                            }
+                            placeholder="TRL-205"
+                          />
+                        </label>
+                        <label>
+                          <span>Carrier</span>
+                          <input
+                            value={editDispatchForm.carrierName}
+                            onChange={(event) =>
+                              setEditDispatchForm((current) => ({
+                                ...current,
+                                carrierName: event.target.value
+                              }))
+                            }
+                            placeholder="Darlin's Trucking LLC"
+                          />
+                        </label>
+                        <label>
+                          <span>Lessor</span>
+                          <input
+                            value={editDispatchForm.lessorName}
+                            onChange={(event) =>
+                              setEditDispatchForm((current) => ({
+                                ...current,
+                                lessorName: event.target.value
+                              }))
+                            }
+                            placeholder="Carrier / lessor"
+                          />
+                        </label>
+                        <div className="dispatch-form-section-title span-3">
+                          Pickup
+                        </div>
                         <label>
                           <span>Pickup Facility *</span>
                           <input
-                            value={
-                              editDispatchForm.pickupName
-                            }
+                            value={editDispatchForm.pickupName}
                             onChange={(event) =>
-                              setEditDispatchForm(
-                                (current) => ({
-                                  ...current,
-                                  pickupName:
-                                    event.target.value
-                                })
-                              )
+                              setEditDispatchForm((current) => ({
+                                ...current,
+                                pickupName: event.target.value
+                              }))
+                            }
+                            placeholder="Latitude Salinas"
+                          />
+                        </label>
+                        <label>
+                          <span>Pickup Appointment</span>
+                          <input type="datetime-local"
+                            value={editDispatchForm.pickupScheduledAt}
+                            onChange={(event) =>
+                              setEditDispatchForm((current) => ({
+                                ...current,
+                                pickupScheduledAt: event.target.value
+                              }))
+                            }
+                            placeholder=""
+                          />
+                        </label>
+                        <label>
+                          <span>Pickup Phone</span>
+                          <input
+                            value={editDispatchForm.pickupPhone}
+                            onChange={(event) =>
+                              setEditDispatchForm((current) => ({
+                                ...current,
+                                pickupPhone: event.target.value
+                              }))
+                            }
+                            placeholder="(000) 000-0000"
+                          />
+                        </label>
+                        <label className="span-2">
+                          <span>Pickup Address *</span>
+                          <input
+                            value={editDispatchForm.pickupAddress}
+                            onChange={(event) =>
+                              setEditDispatchForm((current) => ({
+                                ...current,
+                                pickupAddress: event.target.value
+                              }))
+                            }
+                            placeholder="340 El Camino Real, Salinas, CA"
+                          />
+                        </label>
+                        <label>
+                          <span>Pickup Ref #</span>
+                          <input
+                            value={editDispatchForm.pickupReference}
+                            onChange={(event) =>
+                              setEditDispatchForm((current) => ({
+                                ...current,
+                                pickupReference: event.target.value
+                              }))
+                            }
+                            placeholder="126543"
+                          />
+                        </label>
+                        <div className="dispatch-form-section-title span-3">
+                          Delivery
+                        </div>
+                        <label>
+                          <span>Delivery Facility *</span>
+                          <input
+                            value={editDispatchForm.deliveryName}
+                            onChange={(event) =>
+                              setEditDispatchForm((current) => ({
+                                ...current,
+                                deliveryName: event.target.value
+                              }))
                             }
                             placeholder="Taylor Farms"
                           />
                         </label>
-
-                        <label>
-                          <span>Pickup Appointment</span>
-                          <input
-                            type="datetime-local"
-                            value={
-                              editDispatchForm.pickupScheduledAt
-                            }
-                            onChange={(event) =>
-                              setEditDispatchForm(
-                                (current) => ({
-                                  ...current,
-                                  pickupScheduledAt:
-                                    event.target.value
-                                })
-                              )
-                            }
-                          />
-                        </label>
-
-                        <label className="span-2">
-                          <span>Pickup Address *</span>
-                          <input
-                            value={
-                              editDispatchForm.pickupAddress
-                            }
-                            onChange={(event) =>
-                              setEditDispatchForm(
-                                (current) => ({
-                                  ...current,
-                                  pickupAddress:
-                                    event.target.value
-                                })
-                              )
-                            }
-                            placeholder="Salinas, CA"
-                          />
-                        </label>
-
-                        <label>
-                          <span>Delivery Facility *</span>
-                          <input
-                            value={
-                              editDispatchForm.deliveryName
-                            }
-                            onChange={(event) =>
-                              setEditDispatchForm(
-                                (current) => ({
-                                  ...current,
-                                  deliveryName:
-                                    event.target.value
-                                })
-                              )
-                            }
-                            placeholder="Distribution Center"
-                          />
-                        </label>
-
                         <label>
                           <span>Delivery Appointment</span>
-                          <input
-                            type="datetime-local"
-                            value={
-                              editDispatchForm.deliveryScheduledAt
-                            }
+                          <input type="datetime-local"
+                            value={editDispatchForm.deliveryScheduledAt}
                             onChange={(event) =>
-                              setEditDispatchForm(
-                                (current) => ({
-                                  ...current,
-                                  deliveryScheduledAt:
-                                    event.target.value
-                                })
-                              )
+                              setEditDispatchForm((current) => ({
+                                ...current,
+                                deliveryScheduledAt: event.target.value
+                              }))
                             }
+                            placeholder=""
                           />
                         </label>
-
+                        <label>
+                          <span>Delivery Phone</span>
+                          <input
+                            value={editDispatchForm.deliveryPhone}
+                            onChange={(event) =>
+                              setEditDispatchForm((current) => ({
+                                ...current,
+                                deliveryPhone: event.target.value
+                              }))
+                            }
+                            placeholder="(000) 000-0000"
+                          />
+                        </label>
                         <label className="span-2">
                           <span>Delivery Address *</span>
                           <input
-                            value={
-                              editDispatchForm.deliveryAddress
-                            }
+                            value={editDispatchForm.deliveryAddress}
                             onChange={(event) =>
-                              setEditDispatchForm(
-                                (current) => ({
-                                  ...current,
-                                  deliveryAddress:
-                                    event.target.value
-                                })
-                              )
+                              setEditDispatchForm((current) => ({
+                                ...current,
+                                deliveryAddress: event.target.value
+                              }))
                             }
-                            placeholder="Los Angeles, CA"
+                            placeholder="4595 W Main St, Guadalupe, CA"
                           />
                         </label>
-
+                        <label>
+                          <span>Delivery Ref #</span>
+                          <input
+                            value={editDispatchForm.deliveryReference}
+                            onChange={(event) =>
+                              setEditDispatchForm((current) => ({
+                                ...current,
+                                deliveryReference: event.target.value
+                              }))
+                            }
+                            placeholder="Reference"
+                          />
+                        </label>
+                        <div className="dispatch-form-section-title span-3">
+                          Freight / Pay
+                        </div>
                         <label>
                           <span>Commodity</span>
                           <input
-                            value={
-                              editDispatchForm.commodity
-                            }
+                            value={editDispatchForm.commodity}
                             onChange={(event) =>
-                              setEditDispatchForm(
-                                (current) => ({
-                                  ...current,
-                                  commodity:
-                                    event.target.value
-                                })
-                              )
+                              setEditDispatchForm((current) => ({
+                                ...current,
+                                commodity: event.target.value
+                              }))
                             }
                             placeholder="Produce"
                           />
                         </label>
-
                         <label>
-                          <span>Reference / PO</span>
-                          <input
-                            value={
-                              editDispatchForm.referenceNumber
-                            }
+                          <span>Units</span>
+                          <input inputMode="decimal"
+                            value={editDispatchForm.units}
                             onChange={(event) =>
-                              setEditDispatchForm(
-                                (current) => ({
-                                  ...current,
-                                  referenceNumber:
-                                    event.target.value
-                                })
-                              )
+                              setEditDispatchForm((current) => ({
+                                ...current,
+                                units: event.target.value
+                              }))
                             }
-                            placeholder="PO-829183"
+                            placeholder="1"
                           />
                         </label>
-
+                        <label>
+                          <span>Weight (lb)</span>
+                          <input inputMode="decimal"
+                            value={editDispatchForm.weightLbs}
+                            onChange={(event) =>
+                              setEditDispatchForm((current) => ({
+                                ...current,
+                                weightLbs: event.target.value
+                              }))
+                            }
+                            placeholder="0"
+                          />
+                        </label>
+                        <label>
+                          <span>Miles</span>
+                          <input inputMode="decimal"
+                            value={editDispatchForm.miles}
+                            onChange={(event) =>
+                              setEditDispatchForm((current) => ({
+                                ...current,
+                                miles: event.target.value
+                              }))
+                            }
+                            placeholder="0"
+                          />
+                        </label>
+                        <label>
+                          <span>Carrier Pay ($)</span>
+                          <input inputMode="decimal"
+                            value={editDispatchForm.carrierPay}
+                            onChange={(event) =>
+                              setEditDispatchForm((current) => ({
+                                ...current,
+                                carrierPay: event.target.value
+                              }))
+                            }
+                            placeholder="1050.00"
+                          />
+                        </label>
+                        <label>
+                          <span>Rate Type</span>
+                          <input
+                            value={editDispatchForm.rateType}
+                            onChange={(event) =>
+                              setEditDispatchForm((current) => ({
+                                ...current,
+                                rateType: event.target.value
+                              }))
+                            }
+                            placeholder="FLAT"
+                          />
+                        </label>
                         <label>
                           <span>Set Point °F</span>
-                          <input
-                            inputMode="decimal"
-                            value={
-                              editDispatchForm.temperatureSetpointF
-                            }
+                          <input inputMode="decimal"
+                            value={editDispatchForm.temperatureSetpointF}
                             onChange={(event) =>
-                              setEditDispatchForm(
-                                (current) => ({
-                                  ...current,
-                                  temperatureSetpointF:
-                                    event.target.value
-                                })
-                              )
+                              setEditDispatchForm((current) => ({
+                                ...current,
+                                temperatureSetpointF: event.target.value
+                              }))
                             }
                             placeholder="34"
                           />
                         </label>
-
                         <label>
                           <span>Minimum °F</span>
-                          <input
-                            inputMode="decimal"
-                            value={
-                              editDispatchForm.temperatureMinF
-                            }
+                          <input inputMode="decimal"
+                            value={editDispatchForm.temperatureMinF}
                             onChange={(event) =>
-                              setEditDispatchForm(
-                                (current) => ({
-                                  ...current,
-                                  temperatureMinF:
-                                    event.target.value
-                                })
-                              )
+                              setEditDispatchForm((current) => ({
+                                ...current,
+                                temperatureMinF: event.target.value
+                              }))
                             }
                             placeholder="32"
                           />
                         </label>
-
                         <label>
                           <span>Maximum °F</span>
-                          <input
-                            inputMode="decimal"
-                            value={
-                              editDispatchForm.temperatureMaxF
-                            }
+                          <input inputMode="decimal"
+                            value={editDispatchForm.temperatureMaxF}
                             onChange={(event) =>
-                              setEditDispatchForm(
-                                (current) => ({
-                                  ...current,
-                                  temperatureMaxF:
-                                    event.target.value
-                                })
-                              )
+                              setEditDispatchForm((current) => ({
+                                ...current,
+                                temperatureMaxF: event.target.value
+                              }))
                             }
                             placeholder="38"
                           />
                         </label>
-
-                        <label className="span-2">
-                          <span>Notes</span>
+                        <div className="dispatch-form-section-title span-3">
+                          Instructions
+                        </div>
+                        <label className="span-3">
+                          <span>Driver Instructions</span>
                           <textarea
-                            value={
-                              editDispatchForm.notes
-                            }
+                            value={editDispatchForm.driverInstructions}
                             onChange={(event) =>
-                              setEditDispatchForm(
-                                (current) => ({
-                                  ...current,
-                                  notes:
-                                    event.target.value
-                                })
-                              )
+                              setEditDispatchForm((current) => ({
+                                ...current,
+                                driverInstructions: event.target.value
+                              }))
                             }
-                            placeholder="Load notes, driver instructions, appointment details..."
+                            placeholder="Check-in name, seal/load lock instructions, appointment notes..."
+                          />
+                        </label>
+                        <label className="span-3">
+                          <span>Terms / Agreement</span>
+                          <textarea
+                            value={editDispatchForm.termsAndAgreement}
+                            onChange={(event) =>
+                              setEditDispatchForm((current) => ({
+                                ...current,
+                                termsAndAgreement: event.target.value
+                              }))
+                            }
+                            placeholder="Carrier terms, temperature responsibility, appointment requirements..."
+                          />
+                        </label>
+                        <label className="span-3">
+                          <span>Internal Notes</span>
+                          <textarea
+                            value={editDispatchForm.notes}
+                            onChange={(event) =>
+                              setEditDispatchForm((current) => ({
+                                ...current,
+                                notes: event.target.value
+                              }))
+                            }
+                            placeholder="Dispatcher-only notes and internal load details..."
                           />
                         </label>
                       </div>

@@ -8032,3 +8032,87 @@ button:disabled {
     grid-template-columns: 1fr;
   }
 }
+
+
+/* =====================================================
+   MAVTRACK DISPATCH MODAL — COMPACT SECTION LAYOUT
+   Keeps the form from becoming one long vertical list.
+   ===================================================== */
+
+.dispatch-form-grid-real {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: start;
+  gap: 12px;
+}
+
+.dispatch-form-group {
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid rgba(148, 163, 184, 0.12);
+  border-radius: 10px;
+  background: rgba(10, 22, 38, 0.42);
+}
+
+.dispatch-form-group-wide {
+  grid-column: 1 / -1;
+}
+
+.dispatch-form-group .dispatch-form-section-title {
+  margin: 0 0 10px;
+  padding: 0 0 7px;
+}
+
+.dispatch-form-group-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px 10px;
+}
+
+.dispatch-form-group-grid label {
+  min-width: 0;
+}
+
+.dispatch-form-group-grid label.wide {
+  grid-column: span 2;
+}
+
+.dispatch-form-group-grid input,
+.dispatch-form-group-grid select,
+.dispatch-form-group-grid textarea {
+  min-height: 36px;
+}
+
+.dispatch-form-group-grid textarea {
+  min-height: 58px;
+  max-height: 96px;
+}
+
+.dispatch-form-group-wide .dispatch-form-group-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.dispatch-modal {
+  width: min(1180px, calc(100vw - 36px));
+}
+
+@media (max-width: 1100px) {
+  .dispatch-form-grid-real {
+    grid-template-columns: 1fr;
+  }
+
+  .dispatch-form-group-wide {
+    grid-column: auto;
+  }
+}
+
+@media (max-width: 760px) {
+  .dispatch-form-group-grid,
+  .dispatch-form-group-wide .dispatch-form-group-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .dispatch-form-group-grid label.wide {
+    grid-column: auto;
+  }
+}

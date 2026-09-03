@@ -8,6 +8,15 @@ import {
 } from "react-native";
 import * as Location from "expo-location";
 
+const API_URL = "https://maverick-1z64.onrender.com";
+const DEVICE_ID = "TRK-TEST-001";
+
+// IMPORTANT:
+// Create mobile/.env and add:
+// EXPO_PUBLIC_MOBILE_TELEMETRY_KEY=YOUR_RENDER_MOBILE_TELEMETRY_KEY
+const MOBILE_TELEMETRY_KEY =
+  process.env.EXPO_PUBLIC_MOBILE_TELEMETRY_KEY ?? "";
+
 type GPSData = {
   latitude: number;
   longitude: number;
@@ -21,12 +30,101 @@ export default function App() {
   const [gps, setGps] = useState<GPSData | null>(null);
   const [tracking, setTracking] = useState(false);
   const [status, setStatus] = useState("GPS STOPPED");
+  const [serverStatus, setServerStatus] = useState("NOT CONNECTED");
   const [error, setError] = useState("");
 
-  const subscription = useRef<Location.LocationSubscription | null>(null);
+  const subscription =
+    useRef<Location.LocationSubscription | null>(null);
+
+  const sendTelemetry = async (
+    location: Location.LocationObject
+  ) => {
+    try {
+      if (!MOBILE_TELEMETRY_KEY) {
+        setServerStatus("KEY MISSING");
+        setError(
+          "Missing EXPO_PUBLIC_MOBILE_TELEMETRY_KEY in mobile/.env"
+        );
+        return;
+      }
+
+      setServerStatus("SENDING...");
+
+      const speedKph =
+        location.coords.speed != null &&
+        location.coords.speed >= 0
+          ? location.coords.speed * 3.6
+          : null;
+
+      const response = await fetch(
+        `${API_URL}/api/mobile/telemetry`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "x-mavtrack-key": MOBILE_TELEMETRY_KEY,
+          },
+          body: JSON.stringify({
+            deviceId: DEVICE_ID,
+            latitude: location.coords.latitude,
+            longitude: location.coords.longitude,
+            altitude: location.coords.altitude,
+            speedKph,
+            heading: location.coords.heading,
+            accuracy: location.coords.accuracy,
+            recordedAt: new Date(
+              location.timestamp
+            ).toISOString(),
+          }),
+        }
+      );
+
+      let data: any = null;
+
+      try {
+        data = await response.json();
+      } catch {
+        data = null;
+      }
+
+      console.log(
+        "MAVTRACK RESPONSE:",
+        response.status,
+        data
+      );
+
+      if (!response.ok || !data?.ok) {
+        setServerStatus("SEND FAILED");
+        setError(
+          data?.message ||
+            `MAVTRACK server error (${response.status})`
+        );
+        return;
+      }
+
+      setServerStatus("CONNECTED");
+      setError("");
+    } catch (err) {
+      console.error(
+        "Telemetry send error:",
+        err
+      );
+
+      setServerStatus("OFFLINE");
+      setError(
+        err instanceof Error
+          ? err.message
+          : "Unable to connect to MAVTRACK"
+      );
+    }
+  };
 
   const startTracking = async () => {
     try {
+      if (subscription.current) {
+        return;
+      }
+
       setError("");
       setStatus("REQUESTING GPS PERMISSION...");
 
@@ -42,6 +140,7 @@ export default function App() {
       }
 
       setStatus("ACQUIRING GPS...");
+      setTracking(true);
 
       subscription.current =
         await Location.watchPositionAsync(
@@ -61,12 +160,14 @@ export default function App() {
             });
 
             setStatus("GPS ACTIVE");
-            setTracking(true);
+
+            void sendTelemetry(location);
           }
         );
     } catch (err) {
       console.error(err);
 
+      setTracking(false);
       setStatus("GPS ERROR");
       setError(
         err instanceof Error
@@ -84,6 +185,7 @@ export default function App() {
 
     setTracking(false);
     setStatus("GPS STOPPED");
+    setServerStatus("NOT CONNECTED");
   };
 
   const speedMph =
@@ -99,10 +201,12 @@ export default function App() {
       </View>
 
       <View style={styles.assetCard}>
-        <Text style={styles.label}>ASSIGNED TRUCK</Text>
+        <Text style={styles.label}>
+          ASSIGNED TRUCK
+        </Text>
 
         <Text style={styles.truckNumber}>
-          TRK-TEST-001
+          {DEVICE_ID}
         </Text>
 
         <View style={styles.statusRow}>
@@ -114,9 +218,24 @@ export default function App() {
                 : styles.statusOffline,
             ]}
           />
-
           <Text style={styles.statusText}>
             {status}
+          </Text>
+        </View>
+
+        <View style={styles.serverRow}>
+          <Text style={styles.serverLabel}>
+            MAVTRACK SERVER
+          </Text>
+          <Text
+            style={[
+              styles.serverValue,
+              serverStatus === "CONNECTED"
+                ? styles.serverConnected
+                : styles.serverDisconnected,
+            ]}
+          >
+            {serverStatus}
           </Text>
         </View>
       </View>
@@ -130,7 +249,6 @@ export default function App() {
           <Text style={styles.dataLabel}>
             Latitude
           </Text>
-
           <Text style={styles.dataValue}>
             {gps
               ? gps.latitude.toFixed(6)
@@ -142,7 +260,6 @@ export default function App() {
           <Text style={styles.dataLabel}>
             Longitude
           </Text>
-
           <Text style={styles.dataValue}>
             {gps
               ? gps.longitude.toFixed(6)
@@ -154,7 +271,6 @@ export default function App() {
           <Text style={styles.dataLabel}>
             Accuracy
           </Text>
-
           <Text style={styles.dataValue}>
             {gps?.accuracy != null
               ? `${gps.accuracy.toFixed(1)} m`
@@ -166,7 +282,6 @@ export default function App() {
           <Text style={styles.dataLabel}>
             Speed
           </Text>
-
           <Text style={styles.dataValue}>
             {gps
               ? `${speedMph.toFixed(1)} mph`
@@ -178,9 +293,9 @@ export default function App() {
           <Text style={styles.dataLabel}>
             Heading
           </Text>
-
           <Text style={styles.dataValue}>
-            {gps?.heading != null
+            {gps?.heading != null &&
+            gps.heading >= 0
               ? `${gps.heading.toFixed(0)}°`
               : "--"}
           </Text>
@@ -190,7 +305,6 @@ export default function App() {
           <Text style={styles.dataLabel}>
             Last Update
           </Text>
-
           <Text style={styles.dataValue}>
             {gps
               ? new Date(
@@ -230,7 +344,7 @@ export default function App() {
       )}
 
       <Text style={styles.footer}>
-        MAVTRACK Driver V1
+        MAVTRACK Driver V1 · {DEVICE_ID}
       </Text>
     </SafeAreaView>
   );
@@ -309,6 +423,35 @@ const styles = StyleSheet.create({
     color: "#CBD5E1",
     fontSize: 12,
     fontWeight: "700",
+  },
+
+  serverRow: {
+    marginTop: 18,
+    paddingTop: 16,
+    borderTopWidth: 1,
+    borderTopColor: "#1E2B3E",
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+
+  serverLabel: {
+    color: "#7D8DA5",
+    fontSize: 11,
+    fontWeight: "700",
+  },
+
+  serverValue: {
+    fontSize: 11,
+    fontWeight: "800",
+  },
+
+  serverConnected: {
+    color: "#22C55E",
+  },
+
+  serverDisconnected: {
+    color: "#F59E0B",
   },
 
   gpsCard: {

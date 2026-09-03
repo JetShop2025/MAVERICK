@@ -45,6 +45,11 @@ model Asset {
   description String?
   active      Boolean @default(true)
 
+  // TRL = trailer tracked by MAV2
+  // TRK = truck tracked by the driver's phone
+  assetType      String @default("TRL")
+  trackingSource String @default("MAV2")
+
   temperatureMinC          Float?
   temperatureMaxC          Float?
   temperatureAlertsEnabled Boolean @default(false)
@@ -61,17 +66,23 @@ model Asset {
   updatedAt DateTime @updatedAt
 
   @@index([companyId])
+  @@index([companyId, assetType])
 }
 
 model Telemetry {
   id             Int     @id @default(autoincrement())
   deviceId       String
-  temperature    Float
+  temperature    Float?
   latitude       Float?
   longitude      Float?
   altitude       Float?
   speedKph       Float?
   movementStatus String?
+
+  // Source and phone GPS metadata.
+  source         String @default("MAV2")
+  accuracyMeters Float?
+  headingDegrees Float?
 
   // Battery and power telemetry reported by MAV2.
   batteryVoltage Float?
@@ -99,6 +110,7 @@ model Telemetry {
   @@index([recordedAt])
   @@index([isBackfill])
   @@index([assetId, recordedAt])
+  @@index([source])
 }
 
 enum DispatchStatus {
@@ -205,7 +217,7 @@ model NotificationEvent {
   message  String
 
   emailRecipients String?
-  emailSent       Boolean @default(false)
+  emailSent       Boolean   @default(false)
   emailedAt       DateTime?
 
   companyId Int
@@ -223,4 +235,3 @@ model NotificationEvent {
   @@index([assetId, createdAt])
   @@index([dispatchId, createdAt])
 }
-

@@ -69,6 +69,9 @@ const PUBLIC_FRONTEND_URL =
     'https://mavtrackfleet.com'
   ).replace(/\/+$/, '')
 
+const MOBILE_TELEMETRY_KEY =
+  process.env.MOBILE_TELEMETRY_KEY?.trim() || ''
+
 const DEFAULT_NOTIFICATION_EMAIL =
   process.env.NOTIFICATION_EMAIL
     ?.trim()
@@ -595,6 +598,8 @@ async function ensureAdminUser() {
         name: 'TRAILER-001',
         description:
           'Maverick tracking unit',
+        assetType: 'TRL',
+        trackingSource: 'MAV2',
         companyId: company.id
       }
     })
@@ -624,6 +629,8 @@ async function ensureAdminUser() {
         name: 'TRAILER-002',
         description:
           'Maverick T-SIM7670G-S3 tracking unit',
+        assetType: 'TRL',
+        trackingSource: 'MAV2',
         companyId: company.id,
         active: true
       }
@@ -631,6 +638,40 @@ async function ensureAdminUser() {
 
   console.log(
     `Asset ready: ${asset2.deviceId}`
+  )
+
+
+  // =====================================
+  // CREAR TRUCK DE PRUEBA / PHONE GPS
+  // =====================================
+
+  const truckTest =
+    await prisma.asset.upsert({
+      where: {
+        deviceId: 'TRK-TEST-001'
+      },
+
+      update: {
+        companyId: company.id,
+        active: true,
+        assetType: 'TRK',
+        trackingSource: 'PHONE'
+      },
+
+      create: {
+        deviceId: 'TRK-TEST-001',
+        name: 'TRK-TEST-001',
+        description:
+          'MAVTRACK Driver phone tracking',
+        companyId: company.id,
+        assetType: 'TRK',
+        trackingSource: 'PHONE',
+        active: true
+      }
+    })
+
+  console.log(
+    `Truck asset ready: ${truckTest.deviceId}`
   )
 
 
@@ -1006,6 +1047,8 @@ app.get(
             name: true,
             description: true,
             active: true,
+            assetType: true,
+            trackingSource: true,
             temperatureMinC: true,
             temperatureMaxC: true,
             temperatureAlertsEnabled: true,
@@ -1311,6 +1354,8 @@ app.patch(
             name: true,
             description: true,
             active: true,
+            assetType: true,
+            trackingSource: true,
             temperatureMinC: true,
             temperatureMaxC: true,
             temperatureAlertsEnabled: true,
@@ -1440,7 +1485,9 @@ app.get(
                 id: true,
                 deviceId: true,
                 name: true,
-                active: true
+                active: true,
+                assetType: true,
+                trackingSource: true
               }
             },
             statusEvents: {
@@ -1557,6 +1604,91 @@ app.get(
     }
   }
 )
+
+app.delete(
+  '/api/dispatches/:id',
+  requireAuth,
+  async (
+    req: AuthenticatedRequest,
+    res: Response
+  ) => {
+    try {
+      const companyId =
+        req.user?.companyId
+
+      const dispatchId =
+        Number(req.params.id)
+
+      if (
+        !companyId ||
+        !Number.isInteger(dispatchId)
+      ) {
+        return res.status(400).json({
+          ok: false,
+          message: 'Invalid dispatch'
+        })
+      }
+
+      const existing =
+        await prisma.dispatch.findFirst({
+          where: {
+            id: dispatchId,
+            companyId
+          },
+          select: {
+            id: true,
+            loadNumber: true,
+            status: true
+          }
+        })
+
+      if (!existing) {
+        return res.status(404).json({
+          ok: false,
+          message: 'Load not found'
+        })
+      }
+
+      if (
+        existing.status !== 'DELIVERED' &&
+        existing.status !== 'CANCELLED'
+      ) {
+        return res.status(409).json({
+          ok: false,
+          message:
+            'Only delivered or cancelled loads can be deleted from Load History.'
+        })
+      }
+
+      await prisma.dispatch.delete({
+        where: {
+          id: existing.id
+        }
+      })
+
+      return res.json({
+        ok: true,
+        deleted: {
+          id: existing.id,
+          loadNumber:
+            existing.loadNumber
+        }
+      })
+    } catch (error) {
+      console.error(
+        'Delete dispatch error:',
+        error
+      )
+
+      return res.status(500).json({
+        ok: false,
+        message:
+          'Unable to delete load'
+      })
+    }
+  }
+)
+
 
 app.post(
   '/api/dispatches',
@@ -3066,7 +3198,11 @@ app.get(
                   name:
                     share.dispatch.asset.name,
                   deviceId:
-                    share.dispatch.asset.deviceId
+                    share.dispatch.asset.deviceId,
+                  assetType:
+                    share.dispatch.asset.assetType,
+                  trackingSource:
+                    share.dispatch.asset.trackingSource
                 }
               : null,
           statusEvents:
@@ -3096,6 +3232,16 @@ app.get(
                 movementStatus:
                   share.allowLocation
                     ? latestTelemetry.movementStatus
+                    : null,
+                source:
+                  latestTelemetry.source,
+                accuracyMeters:
+                  share.allowLocation
+                    ? latestTelemetry.accuracyMeters
+                    : null,
+                headingDegrees:
+                  share.allowLocation
+                    ? latestTelemetry.headingDegrees
                     : null
               }
             : null
@@ -3307,6 +3453,9 @@ app.post(
     movementStatus:
       safeMovementStatus,
 
+    source:
+      'MAV2',
+
     batteryVoltage:
       safeBatteryVoltage,
 
@@ -3415,6 +3564,228 @@ app.post(
 
       console.error(
         'Telemetry error:',
+        error
+      )
+
+      return res.status(500).json({
+        ok: false,
+        message:
+          'Database error'
+      })
+    }
+  }
+)
+
+
+// =====================================================
+// RECIBIR TELEMETRIA MOVIL / TRK
+// =====================================================
+
+app.post(
+  '/api/mobile/telemetry',
+  async (req, res) => {
+    try {
+      const requestKey =
+        typeof req.headers['x-mavtrack-key'] === 'string'
+          ? req.headers['x-mavtrack-key'].trim()
+          : ''
+
+      if (
+        !MOBILE_TELEMETRY_KEY ||
+        requestKey !== MOBILE_TELEMETRY_KEY
+      ) {
+        return res.status(401).json({
+          ok: false,
+          message:
+            'Invalid mobile telemetry credentials'
+        })
+      }
+
+      const {
+        deviceId,
+        latitude,
+        longitude,
+        altitude,
+        speedKph,
+        heading,
+        accuracy,
+        recordedAt
+      } = req.body
+
+      if (
+        typeof deviceId !== 'string' ||
+        !deviceId.trim() ||
+        typeof latitude !== 'number' ||
+        !Number.isFinite(latitude) ||
+        latitude < -90 ||
+        latitude > 90 ||
+        typeof longitude !== 'number' ||
+        !Number.isFinite(longitude) ||
+        longitude < -180 ||
+        longitude > 180
+      ) {
+        return res.status(400).json({
+          ok: false,
+          message:
+            'Invalid mobile GPS data'
+        })
+      }
+
+      const normalizedDeviceId =
+        deviceId.trim()
+
+      const asset =
+        await prisma.asset.findUnique({
+          where: {
+            deviceId:
+              normalizedDeviceId
+          }
+        })
+
+      if (
+        !asset ||
+        !asset.active ||
+        asset.assetType !== 'TRK' ||
+        asset.trackingSource !== 'PHONE'
+      ) {
+        return res.status(404).json({
+          ok: false,
+          message:
+            'Truck asset not found'
+        })
+      }
+
+      const safeAltitude =
+        typeof altitude === 'number' &&
+        Number.isFinite(altitude)
+          ? altitude
+          : null
+
+      const safeSpeedKph =
+        typeof speedKph === 'number' &&
+        Number.isFinite(speedKph)
+          ? Math.max(0, speedKph)
+          : null
+
+      const safeHeading =
+        typeof heading === 'number' &&
+        Number.isFinite(heading)
+          ? (
+              (
+                heading % 360
+              ) + 360
+            ) % 360
+          : null
+
+      const safeAccuracy =
+        typeof accuracy === 'number' &&
+        Number.isFinite(accuracy) &&
+        accuracy >= 0
+          ? accuracy
+          : null
+
+      let safeRecordedAt =
+        new Date()
+
+      if (
+        typeof recordedAt === 'string' &&
+        recordedAt.trim()
+      ) {
+        const parsed =
+          new Date(recordedAt)
+
+        if (
+          !Number.isNaN(
+            parsed.getTime()
+          )
+        ) {
+          safeRecordedAt = parsed
+        }
+      }
+
+      const movementStatus =
+        safeSpeedKph === null
+          ? null
+          : safeSpeedKph >= 5
+            ? 'MOVING'
+            : 'STOPPED'
+
+      const telemetry =
+        await prisma.telemetry.create({
+          data: {
+            deviceId:
+              normalizedDeviceId,
+
+            temperature:
+              null,
+
+            latitude,
+            longitude,
+
+            altitude:
+              safeAltitude,
+
+            speedKph:
+              safeSpeedKph,
+
+            movementStatus,
+
+            source:
+              'PHONE',
+
+            accuracyMeters:
+              safeAccuracy,
+
+            headingDegrees:
+              safeHeading,
+
+            recordedAt:
+              safeRecordedAt,
+
+            isBackfill:
+              false,
+
+            assetId:
+              asset.id
+          }
+        })
+
+      console.log(
+        'Mobile telemetry received:',
+        {
+          deviceId:
+            normalizedDeviceId,
+          latitude,
+          longitude,
+          speedKph:
+            safeSpeedKph,
+          accuracy:
+            safeAccuracy,
+          recordedAt:
+            safeRecordedAt.toISOString()
+        }
+      )
+
+      return res.json({
+        ok: true,
+        message:
+          'Mobile telemetry received',
+        telemetry: {
+          id:
+            telemetry.id,
+          deviceId:
+            normalizedDeviceId,
+          assetId:
+            asset.id,
+          source:
+            'PHONE',
+          recordedAt:
+            telemetry.recordedAt
+        }
+      })
+    } catch (error) {
+      console.error(
+        'Mobile telemetry error:',
         error
       )
 
@@ -3730,6 +4101,9 @@ app.get(
             altitude: true,
             speedKph: true,
             movementStatus: true,
+            source: true,
+            accuracyMeters: true,
+            headingDegrees: true,
             batteryVoltage: true,
             batteryPercent: true,
             recordedAt: true,
@@ -3755,6 +4129,12 @@ app.get(
               row.speedKph,
             movementStatus:
               row.movementStatus,
+            source:
+              row.source,
+            accuracyMeters:
+              row.accuracyMeters,
+            headingDegrees:
+              row.headingDegrees,
             batteryVoltage:
               row.batteryVoltage,
             batteryPercent:

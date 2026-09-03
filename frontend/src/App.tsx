@@ -266,6 +266,36 @@ function createTrailerIcon(
   })
 }
 
+function createTruckIcon(
+  movementStatus: MovementStatus,
+  selected = false,
+  hasDispatch = false
+) {
+  return L.divIcon({
+    className: 'mav-truck-marker-wrapper',
+    html: `
+      <div class="mav-truck-marker ${movementStatus}${selected ? ' selected' : ''}${hasDispatch ? ' has-dispatch' : ''}">
+        <span class="mav-truck-marker-pulse"></span>
+        <span class="mav-truck-marker-icon">TRK</span>
+        ${hasDispatch ? '<span class="mav-truck-load-badge">L</span>' : ''}
+      </div>
+    `,
+    iconSize: [52, 52],
+    iconAnchor: [26, 26],
+    popupAnchor: [0, -30]
+  })
+}
+
+function assetTypeCode(
+  asset: any
+): 'TRK' | 'TRL' {
+  return String(
+    asset?.assetType || 'TRL'
+  ).toUpperCase() === 'TRK'
+    ? 'TRK'
+    : 'TRL'
+}
+
 function MapController({
   latitude,
   longitude,
@@ -874,14 +904,18 @@ function PublicLoadTrackingPage({
             <strong>
               {
                 dispatch.asset?.name ||
-                'Assigned trailer'
+                (assetTypeCode(dispatch.asset) === 'TRK'
+                  ? 'Assigned truck'
+                  : 'Assigned trailer')
               }
             </strong>
             <p>
               {
-                temperatureF != null
-                  ? `${temperatureF}°F`
-                  : 'Temperature hidden'
+                assetTypeCode(dispatch.asset) === 'TRK'
+                  ? 'Phone GPS tracking'
+                  : temperatureF != null
+                    ? `${temperatureF}°F`
+                    : 'Temperature hidden'
               }
             </p>
             <small>
@@ -942,17 +976,31 @@ function PublicLoadTrackingPage({
                     )
                   ]}
                   icon={
-                    createTrailerIcon(
-                      String(
-                        telemetry.movementStatus ||
-                        ''
-                      ).toLowerCase() ===
-                        'moving'
-                        ? 'moving'
-                        : 'parked',
-                      true,
-                      true
-                    )
+                    assetTypeCode(
+                      dispatch.asset
+                    ) === 'TRK'
+                      ? createTruckIcon(
+                          String(
+                            telemetry.movementStatus ||
+                            ''
+                          ).toLowerCase() ===
+                            'moving'
+                            ? 'moving'
+                            : 'parked',
+                          true,
+                          true
+                        )
+                      : createTrailerIcon(
+                          String(
+                            telemetry.movementStatus ||
+                            ''
+                          ).toLowerCase() ===
+                            'moving'
+                            ? 'moving'
+                            : 'parked',
+                          true,
+                          true
+                        )
                   }
                 />
               </MapContainer>
@@ -1138,6 +1186,11 @@ function App() {
     dispatchError,
     setDispatchError
   ] = useState('')
+
+  const [
+    dispatchDeletingId,
+    setDispatchDeletingId
+  ] = useState<number | null>(null)
 
   const [
     dispatchSearch,
@@ -2716,6 +2769,96 @@ function App() {
       }
     }
 
+  const deleteHistoricalDispatch =
+    async (
+      dispatch: DispatchRecord
+    ) => {
+      if (
+        dispatch.status !== 'DELIVERED' &&
+        dispatch.status !== 'CANCELLED'
+      ) {
+        setDispatchError(
+          'Only completed or cancelled loads can be deleted from history.'
+        )
+        return
+      }
+
+      const confirmed =
+        window.confirm(
+          `Delete load ${dispatch.loadNumber}?\n\nThis permanently removes the load from Load History and cannot be undone.`
+        )
+
+      if (!confirmed) {
+        return
+      }
+
+      const token =
+        localStorage.getItem(
+          'maverick_token'
+        )
+
+      if (!token) {
+        return
+      }
+
+      setDispatchError('')
+      setDispatchDeletingId(
+        dispatch.id
+      )
+
+      try {
+        const response =
+          await fetch(
+            `${API_BASE}/api/dispatches/${dispatch.id}`,
+            {
+              method: 'DELETE',
+              headers: {
+                Authorization:
+                  `Bearer ${token}`
+              }
+            }
+          )
+
+        const payload =
+          await response.json()
+
+        if (
+          !response.ok ||
+          !payload.ok
+        ) {
+          setDispatchError(
+            payload.message ||
+            'Unable to delete this load.'
+          )
+          return
+        }
+
+        setDispatches(
+          (current) =>
+            current.filter(
+              (item) =>
+                item.id !==
+                dispatch.id
+            )
+        )
+
+        if (
+          selectedOperationsDispatchId ===
+          dispatch.id
+        ) {
+          setSelectedOperationsDispatchId(
+            -1
+          )
+        }
+      } catch {
+        setDispatchError(
+          'Unable to connect to Maverick.'
+        )
+      } finally {
+        setDispatchDeletingId(null)
+      }
+    }
+
   const activeDispatches =
     dispatches.filter(
       (dispatch) =>
@@ -3128,6 +3271,20 @@ function App() {
               mapFilterSearch
             )
 
+        const typeCode =
+          assetTypeCode(asset)
+
+        const assetTypeMatches =
+          assetTypeFilter === 'all' ||
+          (
+            assetTypeFilter === 'trailer' &&
+            typeCode === 'TRL'
+          ) ||
+          (
+            assetTypeFilter === 'truck' &&
+            typeCode === 'TRK'
+          )
+
         return {
           asset,
           item,
@@ -3140,7 +3297,8 @@ function App() {
           visible:
             statusEnabled &&
             statusMatches &&
-            searchMatches
+            searchMatches &&
+            assetTypeMatches
         }
       })
       .filter(
@@ -3424,6 +3582,17 @@ function App() {
     selectedDeviceId ||
     'Select an asset'
 
+  const selectedAssetType =
+    assetTypeCode(
+      selectedAsset
+    )
+
+  const isSelectedTruck =
+    selectedAssetType === 'TRK'
+
+  const isSelectedTrailer =
+    selectedAssetType === 'TRL'
+
   const hasLocation =
     telemetry?.latitude != null &&
     telemetry?.longitude != null
@@ -3698,10 +3867,15 @@ function App() {
       deviceStatus
 
   const matchesAssetType =
-    assetTypeFilter ===
-      'all' ||
-    assetTypeFilter ===
-      'trailer'
+    assetTypeFilter === 'all' ||
+    (
+      assetTypeFilter === 'trailer' &&
+      selectedAssetType === 'TRL'
+    ) ||
+    (
+      assetTypeFilter === 'truck' &&
+      selectedAssetType === 'TRK'
+    )
 
   const statusToggleEnabled =
     deviceStatus === 'online'
@@ -5805,6 +5979,10 @@ function App() {
 
                                 <small>
                                   {asset.deviceId}
+                                  {' · '}
+                                  <span className={`asset-type-inline ${assetTypeCode(asset).toLowerCase()}`}>
+                                    {assetTypeCode(asset)}
+                                  </span>
                                 </small>
                               </span>
 
@@ -6303,13 +6481,23 @@ function App() {
                             longitude
                           ]}
                           icon={
-                            createTrailerIcon(
-                              movement,
-                              selected,
-                              Boolean(
-                                activeDispatch
-                              )
-                            )
+                            assetTypeCode(
+                              asset
+                            ) === 'TRK'
+                              ? createTruckIcon(
+                                  movement,
+                                  selected,
+                                  Boolean(
+                                    activeDispatch
+                                  )
+                                )
+                              : createTrailerIcon(
+                                  movement,
+                                  selected,
+                                  Boolean(
+                                    activeDispatch
+                                  )
+                                )
                           }
                           opacity={
                             item?.hasCurrentGps
@@ -6356,6 +6544,16 @@ function App() {
                               }
 
                               <br />
+                              Type:{' '}
+                              <strong>
+                                {
+                                  assetTypeCode(
+                                    asset
+                                  )
+                                }
+                              </strong>
+
+                              <br />
                               Status:{' '}
                               <strong>
                                 {statusText}
@@ -6399,12 +6597,20 @@ function App() {
                                 )
                               } mph
 
-                              <br />
-                              Temperature:{' '}
                               {
-                                tempFForAsset != null
-                                  ? `${tempFForAsset.toFixed(1)}°F`
-                                  : 'No data'
+                                assetTypeCode(
+                                  asset
+                                ) === 'TRL' && (
+                                  <>
+                                    <br />
+                                    Temperature:{' '}
+                                    {
+                                      tempFForAsset != null
+                                        ? `${tempFForAsset.toFixed(1)}°F`
+                                        : 'No data'
+                                    }
+                                  </>
+                                )
                               }
 
                               <br />
@@ -6538,7 +6744,11 @@ function App() {
                       </option>
 
                       <option value="trailer">
-                        Trailer
+                        TRL · Trailer
+                      </option>
+
+                      <option value="truck">
+                        TRK · Truck
                       </option>
                     </select>
 
@@ -6848,6 +7058,29 @@ function App() {
 
                         <dl className="asset-details">
 
+                          <div>
+                            <dt>
+                              Asset Type
+                            </dt>
+                            <dd>
+                              <span className={`asset-type-badge ${selectedAssetType.toLowerCase()}`}>
+                                {selectedAssetType}
+                              </span>
+                            </dd>
+                          </div>
+
+                          <div>
+                            <dt>
+                              Tracking Source
+                            </dt>
+                            <dd>
+                              {isSelectedTruck ? 'Phone GPS' : 'MAV2'}
+                            </dd>
+                          </div>
+
+                          {
+                            isSelectedTrailer && (
+                              <>
                           <div
                             className={
                               temperatureOutOfRange
@@ -6932,7 +7165,7 @@ function App() {
                                   </span>
 
                                   <span>
-                                    Internal battery
+                                    MAV2 Battery
                                   </span>
                                 </div>
                               </div>
@@ -7066,6 +7299,46 @@ function App() {
                                   }
                                 </dd>
                               </div>
+                            )
+                          }
+
+                              </>
+                            )
+                          }
+
+                          {
+                            isSelectedTruck && (
+                              <>
+                                <div>
+                                  <dt>
+                                    GPS Accuracy
+                                  </dt>
+                                  <dd>
+                                    {
+                                      telemetry?.accuracyMeters != null
+                                        ? `${Number(
+                                            telemetry.accuracyMeters
+                                          ).toFixed(1)} m`
+                                        : 'Unavailable'
+                                    }
+                                  </dd>
+                                </div>
+
+                                <div>
+                                  <dt>
+                                    Heading
+                                  </dt>
+                                  <dd>
+                                    {
+                                      telemetry?.headingDegrees != null
+                                        ? `${Number(
+                                            telemetry.headingDegrees
+                                          ).toFixed(0)}°`
+                                        : 'Unavailable'
+                                    }
+                                  </dd>
+                                </div>
+                              </>
                             )
                           }
 
@@ -7268,7 +7541,7 @@ function App() {
                   </span>
 
                   <span>
-                    Temp / Battery
+                    Telemetry
                   </span>
 
                   <span>
@@ -7288,6 +7561,12 @@ function App() {
                           (telemetry?.deviceId === asset.deviceId
                             ? telemetry
                             : null)
+
+                        const rowAssetType =
+                          assetTypeCode(asset)
+
+                        const rowIsTruck =
+                          rowAssetType === 'TRK'
 
                         const rowStatus =
                           getDeviceStatusForTelemetry(item)
@@ -7382,6 +7661,10 @@ function App() {
 
                                 <small>
                                   {asset.deviceId}
+                                  {' · '}
+                                  <span className={`asset-type-inline ${rowAssetType.toLowerCase()}`}>
+                                    {rowAssetType}
+                                  </span>
                                 </small>
                               </div>
                             </div>
@@ -7402,31 +7685,58 @@ function App() {
                               {rowMovementLabel}
                             </span>
 
-                            <div>
-                              <span>
-                                {item
-                                  ? rowStatus === 'online'
-                                    ? `${rowTemperatureF}°F`
-                                    : `Last ${rowTemperatureF}°F`
-                                  : 'No data'}
-                              </span>
+                            <div className="fleet-telemetry-cell">
+                              {
+                                rowIsTruck
+                                  ? (
+                                    <>
+                                      <span>
+                                        Phone GPS
+                                      </span>
+                                      <small>
+                                        {
+                                          item?.accuracyMeters != null
+                                            ? `±${Number(
+                                                item.accuracyMeters
+                                              ).toFixed(0)} m`
+                                            : `${(
+                                                Number(
+                                                  item?.speedKph || 0
+                                                ) * 0.621371
+                                              ).toFixed(1)} mph`
+                                        }
+                                      </small>
+                                    </>
+                                  )
+                                  : (
+                                    <>
+                                      <span>
+                                        {item
+                                          ? rowStatus === 'online'
+                                            ? `${rowTemperatureF}°F`
+                                            : `Last ${rowTemperatureF}°F`
+                                          : 'No data'}
+                                      </span>
 
-                              <small
-                                className={
-                                  `battery-state ${rowBatteryLevel}`
-                                }
-                                title={
-                                  rowBatteryPercent != null
-                                    ? `Battery ${rowBatteryPercent}% • ${rowBatteryLabel}`
-                                    : 'Battery unavailable'
-                                }
-                              >
-                                {
-                                  rowBatteryPercent != null
-                                    ? `🔋 ${rowBatteryPercent}%`
-                                    : '🔋 —'
-                                }
-                              </small>
+                                      <small
+                                        className={
+                                          `battery-state ${rowBatteryLevel}`
+                                        }
+                                        title={
+                                          rowBatteryPercent != null
+                                            ? `Battery ${rowBatteryPercent}% • ${rowBatteryLabel}`
+                                            : 'Battery unavailable'
+                                        }
+                                      >
+                                        {
+                                          rowBatteryPercent != null
+                                            ? `🔋 ${rowBatteryPercent}%`
+                                            : '🔋 —'
+                                        }
+                                      </small>
+                                    </>
+                                  )
+                              }
                             </div>
 
                             <span>
@@ -7471,37 +7781,41 @@ function App() {
                                 Rename
                               </button>
 
-                              <button
-                                onClick={() => {
-                                  setSelectedDeviceId(
-                                    asset.deviceId
-                                  )
-                                  setTemperatureLimitsError('')
-                                  setTemperatureMinF(
-                                    asset.temperatureMinC != null
-                                      ? celsiusToFahrenheit(
-                                          Number(asset.temperatureMinC)
-                                        ).toFixed(1)
-                                      : ''
-                                  )
-                                  setTemperatureMaxF(
-                                    asset.temperatureMaxC != null
-                                      ? celsiusToFahrenheit(
-                                          Number(asset.temperatureMaxC)
-                                        ).toFixed(1)
-                                      : ''
-                                  )
-                                  setTemperatureAlertsEnabled(
-                                    Boolean(
-                                      asset.temperatureAlertsEnabled
-                                    )
-                                  )
-                                  setTemperatureLimitsOpen(true)
-                                }}
-                                type="button"
-                              >
-                                Temp Limits
-                              </button>
+                              {
+                                !rowIsTruck && (
+                                  <button
+                                    onClick={() => {
+                                      setSelectedDeviceId(
+                                        asset.deviceId
+                                      )
+                                      setTemperatureLimitsError('')
+                                      setTemperatureMinF(
+                                        asset.temperatureMinC != null
+                                          ? celsiusToFahrenheit(
+                                              Number(asset.temperatureMinC)
+                                            ).toFixed(1)
+                                          : ''
+                                      )
+                                      setTemperatureMaxF(
+                                        asset.temperatureMaxC != null
+                                          ? celsiusToFahrenheit(
+                                              Number(asset.temperatureMaxC)
+                                            ).toFixed(1)
+                                          : ''
+                                      )
+                                      setTemperatureAlertsEnabled(
+                                        Boolean(
+                                          asset.temperatureAlertsEnabled
+                                        )
+                                      )
+                                      setTemperatureLimitsOpen(true)
+                                    }}
+                                    type="button"
+                                  >
+                                    Temp Limits
+                                  </button>
+                                )
+                              }
 
                               <button
                                 onClick={() => {
@@ -7769,6 +8083,9 @@ function App() {
                     <span>Movement</span>
                     <span>Temp</span>
                     <span>ETA</span>
+                    <span className="operations-actions-head">
+                      Actions
+                    </span>
                   </div>
 
                   <div className="operations-load-scroll">
@@ -7937,7 +8254,56 @@ function App() {
                                       dispatch.deliveryScheduledAt
                                     )}
                                   </small>
-                                  <span>›</span>
+                                </div>
+
+                                <div className="operations-load-actions">
+                                  {
+                                    operationsTab === 'history'
+                                      ? (
+                                        <button
+                                          className="operations-delete-row-button"
+                                          type="button"
+                                          disabled={
+                                            dispatchDeletingId ===
+                                            dispatch.id
+                                          }
+                                          onClick={(event) => {
+                                            event.stopPropagation()
+                                            void deleteHistoricalDispatch(
+                                              dispatch
+                                            )
+                                          }}
+                                          aria-label={
+                                            `Delete ${dispatch.loadNumber}`
+                                          }
+                                          title="Delete load from history"
+                                        >
+                                          {
+                                            dispatchDeletingId ===
+                                            dispatch.id
+                                              ? 'Deleting…'
+                                              : 'Delete'
+                                          }
+                                        </button>
+                                      )
+                                      : (
+                                        <button
+                                          className="operations-open-row-button"
+                                          type="button"
+                                          onClick={(event) => {
+                                            event.stopPropagation()
+                                            setSelectedOperationsDispatchId(
+                                              dispatch.id
+                                            )
+                                          }}
+                                          aria-label={
+                                            `Open ${dispatch.loadNumber}`
+                                          }
+                                        >
+                                          View
+                                        </button>
+                                      )
+                                  }
                                 </div>
                               </article>
                             )
@@ -8352,34 +8718,64 @@ function App() {
                                       <strong>Share Load</strong>
                                     </button>
 
-                                    <label>
-                                      <span>Status</span>
-                                      <select
-                                        value={dispatch.status}
-                                        onChange={(event) =>
-                                          updateDispatchStatus(
-                                            dispatch.id,
-                                            event.target.value as DispatchStatus
-                                          )
-                                        }
-                                        aria-label={
-                                          `Status for ${dispatch.loadNumber}`
-                                        }
-                                      >
-                                        {
-                                          dispatchStatusOptions.map(
-                                            (status) => (
-                                              <option
-                                                key={status}
-                                                value={status}
-                                              >
-                                                {dispatchStatusLabel(status)}
-                                              </option>
-                                            )
-                                          )
-                                        }
-                                      </select>
-                                    </label>
+                                    {
+                                      operationsTab === 'history'
+                                        ? (
+                                          <button
+                                            className="operations-delete-detail-button"
+                                            type="button"
+                                            disabled={
+                                              dispatchDeletingId ===
+                                              dispatch.id
+                                            }
+                                            onClick={() =>
+                                              void deleteHistoricalDispatch(
+                                                dispatch
+                                              )
+                                            }
+                                          >
+                                            <span>⌫</span>
+                                            <strong>
+                                              {
+                                                dispatchDeletingId ===
+                                                dispatch.id
+                                                  ? 'Deleting Load…'
+                                                  : 'Delete Load'
+                                              }
+                                            </strong>
+                                          </button>
+                                        )
+                                        : (
+                                          <label>
+                                            <span>Status</span>
+                                            <select
+                                              value={dispatch.status}
+                                              onChange={(event) =>
+                                                updateDispatchStatus(
+                                                  dispatch.id,
+                                                  event.target.value as DispatchStatus
+                                                )
+                                              }
+                                              aria-label={
+                                                `Status for ${dispatch.loadNumber}`
+                                              }
+                                            >
+                                              {
+                                                dispatchStatusOptions.map(
+                                                  (status) => (
+                                                    <option
+                                                      key={status}
+                                                      value={status}
+                                                    >
+                                                      {dispatchStatusLabel(status)}
+                                                    </option>
+                                                  )
+                                                )
+                                              }
+                                            </select>
+                                          </label>
+                                        )
+                                    }
                                   </section>
                                 </div>
 

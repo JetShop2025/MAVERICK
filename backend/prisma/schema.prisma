@@ -15,11 +15,11 @@ model Company {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  users         User[]
+  users          User[]
   driverProfiles DriverProfile[]
-  assets        Asset[]
-  dispatches    Dispatch[]
-  notifications NotificationEvent[]
+  assets         Asset[]
+  dispatches     Dispatch[]
+  notifications  NotificationEvent[]
 }
 
 model User {
@@ -34,7 +34,7 @@ model User {
   company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
 
   driverProfile    DriverProfile?
-  driverDispatches Dispatch[] @relation("DriverDispatches")
+  driverDispatches Dispatch[]     @relation("DriverDispatches")
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -190,6 +190,29 @@ model Dispatch {
 
   commodity       String?
   referenceNumber String?
+
+  dispatcherName String?
+  poNumber       String?
+  bolNumber      String?
+  carrierName    String?
+  lessorName     String?
+  truckNumber    String?
+  trailerNumber  String?
+
+  pickupPhone     String?
+  pickupReference String?
+
+  deliveryPhone     String?
+  deliveryReference String?
+
+  units      Float?
+  weightLbs  Float?
+  miles      Float?
+  carrierPay Float?
+  rateType   String?
+
+  driverInstructions String?
+  termsAndAgreement  String?
 
   temperatureSetpointC Float?
   temperatureMinC      Float?

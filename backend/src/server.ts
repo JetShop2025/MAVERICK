@@ -2900,6 +2900,83 @@ app.post(
                 req.body?.referenceNumber
               ),
 
+            dispatcherName:
+              optionalString(
+                req.body?.dispatcherName
+              ),
+            poNumber:
+              optionalString(
+                req.body?.poNumber
+              ),
+            bolNumber:
+              optionalString(
+                req.body?.bolNumber
+              ),
+            carrierName:
+              optionalString(
+                req.body?.carrierName
+              ),
+            lessorName:
+              optionalString(
+                req.body?.lessorName
+              ),
+            truckNumber:
+              optionalString(
+                req.body?.truckNumber
+              ),
+            trailerNumber:
+              optionalString(
+                req.body?.trailerNumber
+              ),
+
+            pickupPhone:
+              optionalString(
+                req.body?.pickupPhone
+              ),
+            pickupReference:
+              optionalString(
+                req.body?.pickupReference
+              ),
+
+            deliveryPhone:
+              optionalString(
+                req.body?.deliveryPhone
+              ),
+            deliveryReference:
+              optionalString(
+                req.body?.deliveryReference
+              ),
+
+            units:
+              optionalNumber(
+                req.body?.units
+              ),
+            weightLbs:
+              optionalNumber(
+                req.body?.weightLbs
+              ),
+            miles:
+              optionalNumber(
+                req.body?.miles
+              ),
+            carrierPay:
+              optionalNumber(
+                req.body?.carrierPay
+              ),
+            rateType:
+              optionalString(
+                req.body?.rateType
+              ),
+
+            driverInstructions:
+              optionalString(
+                req.body?.driverInstructions
+              ),
+            termsAndAgreement:
+              optionalString(
+                req.body?.termsAndAgreement
+              ),
+
             temperatureSetpointC,
             temperatureMinC,
             temperatureMaxC,
@@ -3174,10 +3251,24 @@ app.patch(
         'loadNumber',
         'pickupName',
         'pickupAddress',
+        'pickupPhone',
+        'pickupReference',
         'deliveryName',
         'deliveryAddress',
+        'deliveryPhone',
+        'deliveryReference',
         'commodity',
         'referenceNumber',
+        'dispatcherName',
+        'poNumber',
+        'bolNumber',
+        'carrierName',
+        'lessorName',
+        'truckNumber',
+        'trailerNumber',
+        'rateType',
+        'driverInstructions',
+        'termsAndAgreement',
         'notes'
       ] as const
 
@@ -3197,6 +3288,10 @@ app.patch(
         'pickupLongitude',
         'deliveryLatitude',
         'deliveryLongitude',
+        'units',
+        'weightLbs',
+        'miles',
+        'carrierPay',
         'temperatureSetpointC',
         'temperatureMinC',
         'temperatureMaxC'

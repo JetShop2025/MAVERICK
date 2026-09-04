@@ -30,6 +30,9 @@ const USER_KEY = "mavtrack_driver_user";
 const TRACKING_DEVICE_KEY =
   "mavtrack_tracking_device_id";
 
+const DEFAULT_TRACKING_DEVICE_ID =
+  "TRK-TEST-001";
+
 type TabName = "home" | "loads" | "profile";
 type LoadFilter = "pending" | "active" | "completed";
 
@@ -40,6 +43,8 @@ type DriverProfile = {
   licenseNumber?: string | null;
   licenseState?: string | null;
   profilePhotoUrl?: string | null;
+  currentTruckNumber?: string | null;
+  currentTrailerNumber?: string | null;
 };
 
 type DriverUser = {
@@ -597,6 +602,50 @@ export default function App() {
     }
   }
 
+  async function saveDriverProfile(
+    fields: {
+      firstName: string;
+      lastName: string;
+      phone: string;
+      licenseNumber: string;
+      licenseState: string;
+      currentTruckNumber: string;
+      currentTrailerNumber: string;
+    }
+  ) {
+    const payload =
+      await apiFetch("/api/driver/me", {
+        method: "PATCH",
+        body: JSON.stringify(fields),
+      });
+
+    const returned =
+      payload.driver ||
+      payload.user ||
+      payload.profile ||
+      null;
+
+    if (returned) {
+      const nextUser: DriverUser = {
+        ...(user || ({} as DriverUser)),
+        ...returned,
+        profile:
+          returned.profile ||
+          returned.driverProfile ||
+          user?.profile ||
+          user?.driverProfile ||
+          null,
+      };
+
+      setUser(nextUser);
+
+      await SecureStore.setItemAsync(
+        USER_KEY,
+        JSON.stringify(nextUser)
+      );
+    }
+  }
+
   async function checkBackgroundTracking() {
     try {
       const started =
@@ -671,22 +720,19 @@ export default function App() {
         ? activeLoads
         : completedLoads;
 
+  const driverProfile =
+    user?.profile || user?.driverProfile;
+
   const trackingDeviceId =
-    activeLoad?.asset?.deviceId || "";
+    activeLoad?.asset?.deviceId ||
+    driverProfile?.currentTruckNumber ||
+    DEFAULT_TRACKING_DEVICE_ID;
 
   async function startTracking() {
-    if (!activeLoad) {
-      Alert.alert(
-        "No active load",
-        "Accept a load before starting truck tracking."
-      );
-      return;
-    }
-
     if (!trackingDeviceId) {
       Alert.alert(
-        "No truck assigned",
-        "This load does not have a tracked TRK asset assigned."
+        "No truck configured",
+        "MavApp does not have a TRK device configured for tracking."
       );
       return;
     }
@@ -725,7 +771,7 @@ export default function App() {
       ) {
         Alert.alert(
           "Background location required",
-          "Choose Always Allow so dispatch can keep seeing the assigned truck while MavApp is in the background."
+          "Choose Always Allow so MAVTRACK can keep receiving this truck's GPS while MavApp is in the background or the screen is locked."
         );
 
         setTrackingStatus(
@@ -765,7 +811,7 @@ export default function App() {
               notificationTitle:
                 "MavApp tracking active",
               notificationBody:
-                `Tracking ${trackingDeviceId} for the active load.`,
+                `Tracking ${trackingDeviceId} for MAVTRACK dispatch.`,
             },
           }
         );
@@ -775,7 +821,7 @@ export default function App() {
       setTrackingStatus(
         "BACKGROUND TRACKING ACTIVE"
       );
-      setServerStatus("CONNECTED");
+      setServerStatus("CONNECTING...");
 
       const current =
         await Location.getCurrentPositionAsync(
@@ -1104,6 +1150,10 @@ export default function App() {
       ) : (
         <ProfileScreen
           user={user}
+          activeLoad={activeLoad}
+          onSave={(fields) =>
+            saveDriverProfile(fields)
+          }
           onLogout={() =>
             void logout()
           }
@@ -1162,7 +1212,7 @@ function HomeScreen({
         Hi, {driverName(user).split(" ")[0]}
       </Text>
       <Text style={styles.greetingCopy}>
-        Here's your current operation.
+        Go online before dispatch assigns a load.
       </Text>
 
       {pendingCount > 0 ? (
@@ -1334,6 +1384,18 @@ function HomeScreen({
             ]}
           >
             {serverStatus}
+          </Text>
+        </View>
+
+        <View style={styles.trackingDeviceRow}>
+          <Text style={styles.trackingDeviceLabel}>
+            TRACKED TRUCK
+          </Text>
+          <Text style={styles.trackingDeviceValue}>
+            {activeLoad?.asset?.deviceId ||
+              user?.profile?.currentTruckNumber ||
+              user?.driverProfile?.currentTruckNumber ||
+              DEFAULT_TRACKING_DEVICE_ID}
           </Text>
         </View>
 
@@ -1779,15 +1841,125 @@ function LoadDetailScreen({
 
 function ProfileScreen({
   user,
+  activeLoad,
+  onSave,
   onLogout,
 }: {
   user: DriverUser | null;
+  activeLoad: Dispatch | null;
+  onSave: (fields: {
+    firstName: string;
+    lastName: string;
+    phone: string;
+    licenseNumber: string;
+    licenseState: string;
+    currentTruckNumber: string;
+    currentTrailerNumber: string;
+  }) => Promise<void>;
   onLogout: () => void;
 }) {
   const profile =
     user?.profile ||
     user?.driverProfile ||
     null;
+
+  const [editing, setEditing] =
+    useState(false);
+  const [saving, setSaving] =
+    useState(false);
+
+  const [form, setForm] = useState({
+    firstName: profile?.firstName || "",
+    lastName: profile?.lastName || "",
+    phone: profile?.phone || "",
+    licenseNumber:
+      profile?.licenseNumber || "",
+    licenseState:
+      profile?.licenseState || "",
+    currentTruckNumber:
+      profile?.currentTruckNumber || "",
+    currentTrailerNumber:
+      profile?.currentTrailerNumber || "",
+  });
+
+  useEffect(() => {
+    setForm({
+      firstName: profile?.firstName || "",
+      lastName: profile?.lastName || "",
+      phone: profile?.phone || "",
+      licenseNumber:
+        profile?.licenseNumber || "",
+      licenseState:
+        profile?.licenseState || "",
+      currentTruckNumber:
+        profile?.currentTruckNumber || "",
+      currentTrailerNumber:
+        profile?.currentTrailerNumber || "",
+    });
+  }, [
+    profile?.firstName,
+    profile?.lastName,
+    profile?.phone,
+    profile?.licenseNumber,
+    profile?.licenseState,
+    profile?.currentTruckNumber,
+    profile?.currentTrailerNumber,
+  ]);
+
+  async function save() {
+    if (
+      !form.firstName.trim() ||
+      !form.lastName.trim()
+    ) {
+      Alert.alert(
+        "Name required",
+        "First name and last name are required."
+      );
+      return;
+    }
+
+    try {
+      setSaving(true);
+      await onSave({
+        firstName: form.firstName.trim(),
+        lastName: form.lastName.trim(),
+        phone: form.phone.trim(),
+        licenseNumber:
+          form.licenseNumber.trim(),
+        licenseState:
+          form.licenseState.trim(),
+        currentTruckNumber:
+          form.currentTruckNumber.trim(),
+        currentTrailerNumber:
+          form.currentTrailerNumber.trim(),
+      });
+      setEditing(false);
+      Alert.alert(
+        "Profile updated",
+        "Your driver information has been saved."
+      );
+    } catch (err) {
+      Alert.alert(
+        "Unable to save profile",
+        err instanceof Error
+          ? err.message
+          : "Please try again."
+      );
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  const currentTruck =
+    activeLoad?.asset?.deviceId ||
+    activeLoad?.truckNumber ||
+    profile?.currentTruckNumber ||
+    "—";
+
+  const currentTrailer =
+    activeLoad?.trailerNumber ||
+    profile?.currentTrailerNumber ||
+    "—";
 
   return (
     <ScrollView
@@ -1824,32 +1996,228 @@ function ProfileScreen({
       </View>
 
       <View style={styles.detailCard}>
+        <View
+          style={{
+            flexDirection: "row",
+            alignItems: "center",
+            justifyContent: "space-between",
+            marginBottom: 16,
+          }}
+        >
+          <DetailSectionTitle
+            title="DRIVER PROFILE"
+          />
+          <Pressable
+            onPress={() =>
+              setEditing((value) => !value)
+            }
+            style={styles.backButton}
+          >
+            <Text
+              style={{
+                color: COLORS.blueLight,
+                fontSize: 11,
+                fontWeight: "900",
+              }}
+            >
+              {editing ? "CANCEL" : "EDIT"}
+            </Text>
+          </Pressable>
+        </View>
+
+        {editing ? (
+          <>
+            <Text style={styles.inputLabel}>
+              FIRST NAME
+            </Text>
+            <TextInput
+              value={form.firstName}
+              onChangeText={(value) =>
+                setForm((current) => ({
+                  ...current,
+                  firstName: value,
+                }))
+              }
+              style={styles.input}
+            />
+
+            <Text style={styles.inputLabel}>
+              LAST NAME
+            </Text>
+            <TextInput
+              value={form.lastName}
+              onChangeText={(value) =>
+                setForm((current) => ({
+                  ...current,
+                  lastName: value,
+                }))
+              }
+              style={styles.input}
+            />
+
+            <Text style={styles.inputLabel}>
+              PHONE NUMBER
+            </Text>
+            <TextInput
+              value={form.phone}
+              onChangeText={(value) =>
+                setForm((current) => ({
+                  ...current,
+                  phone: value,
+                }))
+              }
+              keyboardType="phone-pad"
+              style={styles.input}
+            />
+
+            <Text style={styles.inputLabel}>
+              LICENSE NUMBER
+            </Text>
+            <TextInput
+              value={form.licenseNumber}
+              onChangeText={(value) =>
+                setForm((current) => ({
+                  ...current,
+                  licenseNumber: value,
+                }))
+              }
+              autoCapitalize="characters"
+              style={styles.input}
+            />
+
+            <Text style={styles.inputLabel}>
+              LICENSE STATE
+            </Text>
+            <TextInput
+              value={form.licenseState}
+              onChangeText={(value) =>
+                setForm((current) => ({
+                  ...current,
+                  licenseState: value,
+                }))
+              }
+              autoCapitalize="characters"
+              style={styles.input}
+            />
+
+            <Text style={styles.inputLabel}>
+              CURRENT TRUCK / TRK ASSET
+            </Text>
+            <TextInput
+              value={form.currentTruckNumber}
+              onChangeText={(value) =>
+                setForm((current) => ({
+                  ...current,
+                  currentTruckNumber: value,
+                }))
+              }
+              autoCapitalize="characters"
+              placeholder="TRK-TEST-001"
+              placeholderTextColor="#53657B"
+              style={styles.input}
+            />
+
+            <Text style={styles.inputLabel}>
+              CURRENT TRAILER
+            </Text>
+            <TextInput
+              value={
+                form.currentTrailerNumber
+              }
+              onChangeText={(value) =>
+                setForm((current) => ({
+                  ...current,
+                  currentTrailerNumber:
+                    value,
+                }))
+              }
+              autoCapitalize="characters"
+              placeholder="TRL-205"
+              placeholderTextColor="#53657B"
+              style={styles.input}
+            />
+
+            <Pressable
+              onPress={() => void save()}
+              disabled={saving}
+              style={[
+                styles.primaryButton,
+                { marginTop: 18 },
+                saving &&
+                  styles.buttonDisabled,
+              ]}
+            >
+              {saving ? (
+                <ActivityIndicator
+                  color="#FFFFFF"
+                />
+              ) : (
+                <Text
+                  style={
+                    styles.primaryButtonText
+                  }
+                >
+                  SAVE CHANGES
+                </Text>
+              )}
+            </Pressable>
+          </>
+        ) : (
+          <DetailGrid>
+            <DetailItem
+              label="Phone"
+              value={profile?.phone || "—"}
+            />
+            <DetailItem
+              label="License"
+              value={
+                profile?.licenseNumber || "—"
+              }
+            />
+            <DetailItem
+              label="State"
+              value={
+                profile?.licenseState || "—"
+              }
+            />
+            <DetailItem
+              label="Account"
+              value={
+                user?.active === false
+                  ? "Inactive"
+                  : "Active"
+              }
+            />
+          </DetailGrid>
+        )}
+      </View>
+
+      <View style={styles.detailCard}>
         <DetailSectionTitle
-          title="DRIVER PROFILE"
+          title="CURRENT EQUIPMENT"
         />
         <DetailGrid>
           <DetailItem
-            label="Phone"
-            value={profile?.phone || "—"}
+            label="Truck"
+            value={currentTruck}
           />
           <DetailItem
-            label="License"
+            label="Trailer"
+            value={currentTrailer}
+          />
+          <DetailItem
+            label="Load"
             value={
-              profile?.licenseNumber || "—"
+              activeLoad?.loadNumber ||
+              "No active load"
             }
           />
           <DetailItem
-            label="State"
+            label="Tracking"
             value={
-              profile?.licenseState || "—"
-            }
-          />
-          <DetailItem
-            label="Account"
-            value={
-              user?.active === false
-                ? "Inactive"
-                : "Active"
+              profile?.currentTruckNumber
+                ? "Ready"
+                : "Truck not set"
             }
           />
         </DetailGrid>
@@ -2800,6 +3168,29 @@ const styles = StyleSheet.create({
   serverBadgeOff: {
     color: "#FCD34D",
     backgroundColor: "#35290B",
+  },
+
+  trackingDeviceRow: {
+    marginTop: 16,
+    paddingTop: 14,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    borderTopWidth: 1,
+    borderTopColor: COLORS.border,
+  },
+
+  trackingDeviceLabel: {
+    color: COLORS.muted,
+    fontSize: 8,
+    fontWeight: "800",
+    letterSpacing: 0.8,
+  },
+
+  trackingDeviceValue: {
+    color: COLORS.text,
+    fontSize: 12,
+    fontWeight: "900",
   },
 
   trackingMetrics: {

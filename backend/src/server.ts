@@ -1018,6 +1018,42 @@ const driverInclude = {
   driverProfile: true
 } as const
 
+async function validateDriverEquipment(
+  companyId: number,
+  currentTruckNumber: unknown
+) {
+  const truckNumber =
+    optionalString(currentTruckNumber)
+
+  if (!truckNumber) {
+    return null
+  }
+
+  const truck =
+    await prisma.asset.findFirst({
+      where: {
+        companyId,
+        active: true,
+        assetType: 'TRK',
+        deviceId: {
+          equals: truckNumber,
+          mode: 'insensitive'
+        }
+      },
+      select: {
+        deviceId: true
+      }
+    })
+
+  if (!truck) {
+    throw new Error(
+      'INVALID_DRIVER_TRUCK'
+    )
+  }
+
+  return truck.deviceId
+}
+
 app.get(
   '/api/drivers',
   requireAuth,
@@ -1182,6 +1218,12 @@ app.post(
           12
         )
 
+      const currentTruckNumber =
+        await validateDriverEquipment(
+          companyId,
+          req.body?.currentTruckNumber
+        )
+
       const driver =
         await prisma.user.create({
           data: {
@@ -1211,6 +1253,11 @@ app.post(
                 profilePhotoUrl:
                   optionalString(
                     req.body?.profilePhotoUrl
+                  ),
+                currentTruckNumber,
+                currentTrailerNumber:
+                  optionalString(
+                    req.body?.currentTrailerNumber
                   )
               }
             }
@@ -1235,6 +1282,18 @@ app.post(
         'Create driver error:',
         error
       )
+
+      if (
+        error instanceof Error &&
+        error.message ===
+          'INVALID_DRIVER_TRUCK'
+      ) {
+        return res.status(400).json({
+          ok: false,
+          message:
+            'Current truck must match an active TRK asset in your company'
+        })
+      }
 
       if (error?.code === 'P2002') {
         return res.status(409).json({
@@ -1310,7 +1369,9 @@ app.patch(
         'phone',
         'licenseNumber',
         'licenseState',
-        'profilePhotoUrl'
+        'profilePhotoUrl',
+        'currentTruckNumber',
+        'currentTrailerNumber'
       ] as const
 
       for (const field of profileStringFields) {
@@ -1320,6 +1381,17 @@ app.patch(
               req.body[field]
             )
         }
+      }
+
+      if (
+        req.body?.currentTruckNumber !==
+        undefined
+      ) {
+        profileData.currentTruckNumber =
+          await validateDriverEquipment(
+            companyId,
+            req.body.currentTruckNumber
+          )
       }
 
       if (req.body?.active !== undefined) {
@@ -1416,7 +1488,11 @@ app.patch(
                   licenseState:
                     profileData.licenseState ?? null,
                   profilePhotoUrl:
-                    profileData.profilePhotoUrl ?? null
+                    profileData.profilePhotoUrl ?? null,
+                  currentTruckNumber:
+                    profileData.currentTruckNumber ?? null,
+                  currentTrailerNumber:
+                    profileData.currentTrailerNumber ?? null
                 },
                 update: profileData
               }
@@ -1442,6 +1518,18 @@ app.patch(
         'Update driver error:',
         error
       )
+
+      if (
+        error instanceof Error &&
+        error.message ===
+          'INVALID_DRIVER_TRUCK'
+      ) {
+        return res.status(400).json({
+          ok: false,
+          message:
+            'Current truck must match an active TRK asset in your company'
+        })
+      }
 
       if (error?.code === 'P2002') {
         return res.status(409).json({
@@ -1559,7 +1647,9 @@ app.patch(
           'phone',
           'licenseNumber',
           'licenseState',
-          'profilePhotoUrl'
+          'profilePhotoUrl',
+          'currentTruckNumber',
+          'currentTrailerNumber'
         ] as const
       ) {
         if (req.body?.[field] !== undefined) {
@@ -1568,6 +1658,17 @@ app.patch(
               req.body[field]
             )
         }
+      }
+
+      if (
+        req.body?.currentTruckNumber !==
+        undefined
+      ) {
+        profileData.currentTruckNumber =
+          await validateDriverEquipment(
+            existing.companyId,
+            req.body.currentTruckNumber
+          )
       }
 
       const finalFirstName =
@@ -1609,7 +1710,11 @@ app.patch(
                   licenseState:
                     profileData.licenseState ?? null,
                   profilePhotoUrl:
-                    profileData.profilePhotoUrl ?? null
+                    profileData.profilePhotoUrl ?? null,
+                  currentTruckNumber:
+                    profileData.currentTruckNumber ?? null,
+                  currentTrailerNumber:
+                    profileData.currentTrailerNumber ?? null
                 },
                 update: profileData
               }
@@ -1633,6 +1738,18 @@ app.patch(
         'Update own driver profile error:',
         error
       )
+
+      if (
+        error instanceof Error &&
+        error.message ===
+          'INVALID_DRIVER_TRUCK'
+      ) {
+        return res.status(400).json({
+          ok: false,
+          message:
+            'Current truck must match an active TRK asset in your company'
+        })
+      }
 
       return res.status(500).json({
         ok: false,

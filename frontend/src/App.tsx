@@ -103,6 +103,8 @@ type DriverRecord = {
     licenseNumber?: string | null
     licenseState?: string | null
     profilePhotoUrl?: string | null
+    currentTruckNumber?: string | null
+    currentTrailerNumber?: string | null
   } | null
 }
 
@@ -3357,6 +3359,98 @@ function App() {
         isAssetAssignableToDispatch(asset)
       )
     })
+
+  const getDriverForTruckAsset = (
+    asset: any
+  ) => {
+    if (
+      !asset ||
+      assetTypeCode(asset) !== 'TRK'
+    ) {
+      return null
+    }
+
+    const deviceId =
+      String(asset.deviceId || '')
+        .trim()
+        .toLowerCase()
+
+    return (
+      drivers.find((driver) =>
+        String(
+          driver.profile?.currentTruckNumber || ''
+        )
+          .trim()
+          .toLowerCase() === deviceId
+      ) || null
+    )
+  }
+
+  const applyTrackedAssetSelection = (
+    assetIdValue: string,
+    mode: 'new' | 'edit'
+  ) => {
+    const asset =
+      assets.find(
+        (item) =>
+          String(item.id) === assetIdValue
+      )
+
+    const matchedDriver =
+      getDriverForTruckAsset(asset)
+
+    const applySelection = (
+      current: typeof newDispatchForm
+    ) => ({
+      ...current,
+      assetId: assetIdValue,
+      ...(asset &&
+      assetTypeCode(asset) === 'TRK'
+        ? {
+            driverId:
+              matchedDriver
+                ? String(matchedDriver.id)
+                : '',
+            truckNumber:
+              asset.deviceId || '',
+            trailerNumber:
+              matchedDriver?.profile
+                ?.currentTrailerNumber ||
+              current.trailerNumber
+          }
+        : {})
+    })
+
+    if (mode === 'new') {
+      setNewDispatchForm(
+        (current) =>
+          applySelection(current)
+      )
+    } else {
+      setEditDispatchForm(
+        (current) =>
+          applySelection(current)
+      )
+    }
+  }
+
+  const selectedNewTruckDriver =
+    getDriverForTruckAsset(
+      assets.find(
+        (asset) =>
+          String(asset.id) ===
+          newDispatchForm.assetId
+      )
+    )
+
+  const selectedEditTruckDriver =
+    getDriverForTruckAsset(
+      assets.find(
+        (asset) =>
+          String(asset.id) ===
+          editDispatchForm.assetId
+      )
+    )
 
   const deviceStatus =
     getDeviceStatusForTelemetry(
@@ -8932,33 +9026,6 @@ function App() {
                                       <dt>Trailer</dt>
                                       <dd>{dispatch.trailerNumber || '—'}</dd>
                                     </div>
-                                    <div>
-                                      <dt>Units</dt>
-                                      <dd>{dispatch.units ?? '—'}</dd>
-                                    </div>
-                                    <div>
-                                      <dt>Weight</dt>
-                                      <dd>
-                                        {dispatch.weightLbs != null
-                                          ? `${Number(dispatch.weightLbs).toLocaleString()} lb`
-                                          : '—'}
-                                      </dd>
-                                    </div>
-                                    <div>
-                                      <dt>Miles</dt>
-                                      <dd>{dispatch.miles ?? '—'}</dd>
-                                    </div>
-                                    <div>
-                                      <dt>Carrier Pay</dt>
-                                      <dd>
-                                        {dispatch.carrierPay != null
-                                          ? `$${Number(dispatch.carrierPay).toLocaleString(undefined, {
-                                              minimumFractionDigits: 2,
-                                              maximumFractionDigits: 2
-                                            })}`
-                                          : '—'}
-                                      </dd>
-                                    </div>
                                   </dl>
 
                                   {
@@ -9388,10 +9455,10 @@ function App() {
                               <select
                                 value={newDispatchForm.assetId}
                                 onChange={(event) =>
-                                  setNewDispatchForm((current) => ({
-                                    ...current,
-                                    assetId: event.target.value
-                                  }))
+                                  applyTrackedAssetSelection(
+                                    event.target.value,
+                                    'new'
+                                  )
                                 }
                               >
                                 <option value="">Unassigned asset</option>
@@ -9404,6 +9471,70 @@ function App() {
                                   </option>
                                 ))}
                               </select>
+
+                              {
+                                selectedNewTruckDriver
+                                  ? (
+                                    <div
+                                      style={{
+                                        marginTop: 8,
+                                        padding: '10px 12px',
+                                        border: '1px solid #29384e',
+                                        borderRadius: 8,
+                                        background: '#0d1726',
+                                        color: '#cbd5e1',
+                                        fontSize: 12,
+                                        lineHeight: 1.5
+                                      }}
+                                    >
+                                      <strong style={{ color: '#f8fafc' }}>
+                                        {
+                                          selectedNewTruckDriver.profile?.firstName ||
+                                          selectedNewTruckDriver.profile?.lastName
+                                            ? `${selectedNewTruckDriver.profile?.firstName || ''} ${selectedNewTruckDriver.profile?.lastName || ''}`.trim()
+                                            : selectedNewTruckDriver.name || selectedNewTruckDriver.email
+                                        }
+                                      </strong>
+                                      <div>
+                                        Phone: {selectedNewTruckDriver.profile?.phone || '—'}
+                                      </div>
+                                      <div>
+                                        License: {
+                                          selectedNewTruckDriver.profile?.licenseNumber || '—'
+                                        }{
+                                          selectedNewTruckDriver.profile?.licenseState
+                                            ? ` · ${selectedNewTruckDriver.profile.licenseState}`
+                                            : ''
+                                        }
+                                      </div>
+                                      <div>
+                                        Truck: {selectedNewTruckDriver.profile?.currentTruckNumber || '—'}
+                                        {' · '}
+                                        Trailer: {selectedNewTruckDriver.profile?.currentTrailerNumber || '—'}
+                                      </div>
+                                    </div>
+                                  )
+                                  : newDispatchForm.assetId &&
+                                    assetTypeCode(
+                                      assets.find(
+                                        (asset) =>
+                                          String(asset.id) ===
+                                          newDispatchForm.assetId
+                                      )
+                                    ) === 'TRK'
+                                    ? (
+                                      <small
+                                        style={{
+                                          display: 'block',
+                                          marginTop: 7,
+                                          color: '#f59e0b'
+                                        }}
+                                      >
+                                        No driver has this TRK selected in MavApp profile.
+                                      </small>
+                                    )
+                                    : null
+                              }
                             </label>
                             <label>
                               <span>Truck #</span>
@@ -9605,87 +9736,9 @@ function App() {
                         </section>
                         <section className="dispatch-form-group dispatch-form-group-wide">
                           <div className="dispatch-form-section-title">
-                            FREIGHT / PAY
+                            TEMPERATURE
                           </div>
                           <div className="dispatch-form-group-grid">
-                            <label>
-                              <span>Commodity</span>
-                              <input
-                                value={newDispatchForm.commodity}
-                                onChange={(event) =>
-                                  setNewDispatchForm((current) => ({
-                                    ...current,
-                                    commodity: event.target.value
-                                  }))
-                                }
-                                placeholder="Produce"
-                              />
-                            </label>
-                            <label>
-                              <span>Units</span>
-                              <input inputMode="decimal"
-                                value={newDispatchForm.units}
-                                onChange={(event) =>
-                                  setNewDispatchForm((current) => ({
-                                    ...current,
-                                    units: event.target.value
-                                  }))
-                                }
-                                placeholder="1"
-                              />
-                            </label>
-                            <label>
-                              <span>Weight (lb)</span>
-                              <input inputMode="decimal"
-                                value={newDispatchForm.weightLbs}
-                                onChange={(event) =>
-                                  setNewDispatchForm((current) => ({
-                                    ...current,
-                                    weightLbs: event.target.value
-                                  }))
-                                }
-                                placeholder="0"
-                              />
-                            </label>
-                            <label>
-                              <span>Miles</span>
-                              <input inputMode="decimal"
-                                value={newDispatchForm.miles}
-                                onChange={(event) =>
-                                  setNewDispatchForm((current) => ({
-                                    ...current,
-                                    miles: event.target.value
-                                  }))
-                                }
-                                placeholder="0"
-                              />
-                            </label>
-                            <label>
-                              <span>Carrier Pay ($)</span>
-                              <input inputMode="decimal"
-                                value={newDispatchForm.carrierPay}
-                                onChange={(event) =>
-                                  setNewDispatchForm((current) => ({
-                                    ...current,
-                                    carrierPay: event.target.value
-                                  }))
-                                }
-                                placeholder="1050.00"
-                              />
-                            </label>
-                            <label>
-                              <span>Rate Type</span>
-                              <input
-                                value={newDispatchForm.rateType}
-                                onChange={(event) =>
-                                  setNewDispatchForm((current) => ({
-                                    ...current,
-                                    rateType: event.target.value
-                                  }))
-                                }
-                                placeholder="FLAT"
-                              />
-                            </label>
                             <label>
                               <span>Set Point °F</span>
                               <input inputMode="decimal"
@@ -9959,10 +10012,10 @@ function App() {
                               <select
                                 value={editDispatchForm.assetId}
                                 onChange={(event) =>
-                                  setEditDispatchForm((current) => ({
-                                    ...current,
-                                    assetId: event.target.value
-                                  }))
+                                  applyTrackedAssetSelection(
+                                    event.target.value,
+                                    'edit'
+                                  )
                                 }
                               >
                                 <option value="">Unassigned asset</option>
@@ -9992,6 +10045,70 @@ function App() {
                                   )
                                 })}
                               </select>
+
+                              {
+                                selectedEditTruckDriver
+                                  ? (
+                                    <div
+                                      style={{
+                                        marginTop: 8,
+                                        padding: '10px 12px',
+                                        border: '1px solid #29384e',
+                                        borderRadius: 8,
+                                        background: '#0d1726',
+                                        color: '#cbd5e1',
+                                        fontSize: 12,
+                                        lineHeight: 1.5
+                                      }}
+                                    >
+                                      <strong style={{ color: '#f8fafc' }}>
+                                        {
+                                          selectedEditTruckDriver.profile?.firstName ||
+                                          selectedEditTruckDriver.profile?.lastName
+                                            ? `${selectedEditTruckDriver.profile?.firstName || ''} ${selectedEditTruckDriver.profile?.lastName || ''}`.trim()
+                                            : selectedEditTruckDriver.name || selectedEditTruckDriver.email
+                                        }
+                                      </strong>
+                                      <div>
+                                        Phone: {selectedEditTruckDriver.profile?.phone || '—'}
+                                      </div>
+                                      <div>
+                                        License: {
+                                          selectedEditTruckDriver.profile?.licenseNumber || '—'
+                                        }{
+                                          selectedEditTruckDriver.profile?.licenseState
+                                            ? ` · ${selectedEditTruckDriver.profile.licenseState}`
+                                            : ''
+                                        }
+                                      </div>
+                                      <div>
+                                        Truck: {selectedEditTruckDriver.profile?.currentTruckNumber || '—'}
+                                        {' · '}
+                                        Trailer: {selectedEditTruckDriver.profile?.currentTrailerNumber || '—'}
+                                      </div>
+                                    </div>
+                                  )
+                                  : editDispatchForm.assetId &&
+                                    assetTypeCode(
+                                      assets.find(
+                                        (asset) =>
+                                          String(asset.id) ===
+                                          editDispatchForm.assetId
+                                      )
+                                    ) === 'TRK'
+                                    ? (
+                                      <small
+                                        style={{
+                                          display: 'block',
+                                          marginTop: 7,
+                                          color: '#f59e0b'
+                                        }}
+                                      >
+                                        No driver has this TRK selected in MavApp profile.
+                                      </small>
+                                    )
+                                    : null
+                              }
                             </label>
                             <label>
                               <span>Truck #</span>
@@ -10193,87 +10310,9 @@ function App() {
                         </section>
                         <section className="dispatch-form-group dispatch-form-group-wide">
                           <div className="dispatch-form-section-title">
-                            FREIGHT / PAY
+                            TEMPERATURE
                           </div>
                           <div className="dispatch-form-group-grid">
-                            <label>
-                              <span>Commodity</span>
-                              <input
-                                value={editDispatchForm.commodity}
-                                onChange={(event) =>
-                                  setEditDispatchForm((current) => ({
-                                    ...current,
-                                    commodity: event.target.value
-                                  }))
-                                }
-                                placeholder="Produce"
-                              />
-                            </label>
-                            <label>
-                              <span>Units</span>
-                              <input inputMode="decimal"
-                                value={editDispatchForm.units}
-                                onChange={(event) =>
-                                  setEditDispatchForm((current) => ({
-                                    ...current,
-                                    units: event.target.value
-                                  }))
-                                }
-                                placeholder="1"
-                              />
-                            </label>
-                            <label>
-                              <span>Weight (lb)</span>
-                              <input inputMode="decimal"
-                                value={editDispatchForm.weightLbs}
-                                onChange={(event) =>
-                                  setEditDispatchForm((current) => ({
-                                    ...current,
-                                    weightLbs: event.target.value
-                                  }))
-                                }
-                                placeholder="0"
-                              />
-                            </label>
-                            <label>
-                              <span>Miles</span>
-                              <input inputMode="decimal"
-                                value={editDispatchForm.miles}
-                                onChange={(event) =>
-                                  setEditDispatchForm((current) => ({
-                                    ...current,
-                                    miles: event.target.value
-                                  }))
-                                }
-                                placeholder="0"
-                              />
-                            </label>
-                            <label>
-                              <span>Carrier Pay ($)</span>
-                              <input inputMode="decimal"
-                                value={editDispatchForm.carrierPay}
-                                onChange={(event) =>
-                                  setEditDispatchForm((current) => ({
-                                    ...current,
-                                    carrierPay: event.target.value
-                                  }))
-                                }
-                                placeholder="1050.00"
-                              />
-                            </label>
-                            <label>
-                              <span>Rate Type</span>
-                              <input
-                                value={editDispatchForm.rateType}
-                                onChange={(event) =>
-                                  setEditDispatchForm((current) => ({
-                                    ...current,
-                                    rateType: event.target.value
-                                  }))
-                                }
-                                placeholder="FLAT"
-                              />
-                            </label>
                             <label>
                               <span>Set Point °F</span>
                               <input inputMode="decimal"

@@ -1258,6 +1258,10 @@ app.post(
                 currentTrailerNumber:
                   optionalString(
                     req.body?.currentTrailerNumber
+                  ),
+                currentTrailerLicense:
+                  optionalString(
+                    req.body?.currentTrailerLicense
                   )
               }
             }
@@ -1371,7 +1375,8 @@ app.patch(
         'licenseState',
         'profilePhotoUrl',
         'currentTruckNumber',
-        'currentTrailerNumber'
+        'currentTrailerNumber',
+        'currentTrailerLicense'
       ] as const
 
       for (const field of profileStringFields) {
@@ -1492,7 +1497,9 @@ app.patch(
                   currentTruckNumber:
                     profileData.currentTruckNumber ?? null,
                   currentTrailerNumber:
-                    profileData.currentTrailerNumber ?? null
+                    profileData.currentTrailerNumber ?? null,
+                  currentTrailerLicense:
+                    profileData.currentTrailerLicense ?? null
                 },
                 update: profileData
               }
@@ -1649,7 +1656,8 @@ app.patch(
           'licenseState',
           'profilePhotoUrl',
           'currentTruckNumber',
-          'currentTrailerNumber'
+          'currentTrailerNumber',
+          'currentTrailerLicense'
         ] as const
       ) {
         if (req.body?.[field] !== undefined) {
@@ -1712,9 +1720,13 @@ app.patch(
                   profilePhotoUrl:
                     profileData.profilePhotoUrl ?? null,
                   currentTruckNumber:
-                    profileData.currentTruckNumber ?? null,
+                    profileData.currentTruckNumber ??
+                    existing.driverProfile?.currentTruckNumber ??
+                    null,
                   currentTrailerNumber:
-                    profileData.currentTrailerNumber ?? null
+                    profileData.currentTrailerNumber ?? null,
+                  currentTrailerLicense:
+                    profileData.currentTrailerLicense ?? null
                 },
                 update: profileData
               }
@@ -3093,6 +3105,10 @@ app.post(
               optionalString(
                 req.body?.trailerNumber
               ),
+            trailerLicense:
+              optionalString(
+                req.body?.trailerLicense
+              ),
 
             pickupPhone:
               optionalString(
@@ -3449,6 +3465,7 @@ app.patch(
         'lessorName',
         'truckNumber',
         'trailerNumber',
+        'trailerLicense',
         'rateType',
         'driverInstructions',
         'termsAndAgreement',
@@ -4499,11 +4516,20 @@ app.get(
             dispatch: {
               include: {
                 asset: true,
+                driver: {
+                  select: {
+                    id: true,
+                    name: true,
+                    email: true,
+                    active: true,
+                    driverProfile: true
+                  }
+                },
                 statusEvents: {
                   orderBy: {
                     createdAt: 'desc'
                   },
-                  take: 12
+                  take: 20
                 }
               }
             }
@@ -4525,12 +4551,14 @@ app.get(
         })
       }
 
-      const latestTelemetry =
+      const assetId =
         share.dispatch.assetId
+
+      const latestTelemetry =
+        assetId
           ? await prisma.telemetry.findFirst({
               where: {
-                assetId:
-                  share.dispatch.assetId,
+                assetId,
                 isBackfill: false
               },
               orderBy: {
@@ -4538,6 +4566,49 @@ app.get(
               }
             })
           : null
+
+      // Public tracking must keep the map visible even when the
+      // newest telemetry row has no GPS fix. Use the most recent
+      // valid GPS point for the same asset as a location fallback.
+      const latestLocation =
+        assetId &&
+        share.allowLocation
+          ? await prisma.telemetry.findFirst({
+              where: {
+                assetId,
+                isBackfill: false,
+                latitude: {
+                  not: null
+                },
+                longitude: {
+                  not: null
+                }
+              },
+              orderBy: [
+                {
+                  recordedAt: 'desc'
+                },
+                {
+                  receivedAt: 'desc'
+                }
+              ]
+            })
+          : null
+
+      const hasCurrentLocation =
+        latestTelemetry?.latitude != null &&
+        latestTelemetry?.longitude != null
+
+      const locationSource =
+        hasCurrentLocation
+          ? latestTelemetry
+          : latestLocation
+
+      const driver =
+        share.dispatch.driver
+
+      const profile =
+        driver?.driverProfile ?? null
 
       return res.json({
         ok: true,
@@ -4554,26 +4625,75 @@ app.get(
             share.expiresAt
         },
         dispatch: {
+          id:
+            share.dispatch.id,
           loadNumber:
             share.dispatch.loadNumber,
           status:
             share.dispatch.status,
+
+          dispatcherName:
+            share.dispatch.dispatcherName,
+
           pickupName:
             share.dispatch.pickupName,
           pickupAddress:
             share.dispatch.pickupAddress,
+          pickupPhone:
+            share.dispatch.pickupPhone,
+          pickupReference:
+            share.dispatch.pickupReference,
           pickupScheduledAt:
             share.dispatch.pickupScheduledAt,
+
           deliveryName:
             share.dispatch.deliveryName,
           deliveryAddress:
             share.dispatch.deliveryAddress,
+          deliveryPhone:
+            share.dispatch.deliveryPhone,
+          deliveryReference:
+            share.dispatch.deliveryReference,
           deliveryScheduledAt:
             share.dispatch.deliveryScheduledAt,
+
           commodity:
             share.dispatch.commodity,
           referenceNumber:
             share.dispatch.referenceNumber,
+          poNumber:
+            share.dispatch.poNumber,
+          bolNumber:
+            share.dispatch.bolNumber,
+
+          truckNumber:
+            share.dispatch.truckNumber,
+          trailerNumber:
+            share.dispatch.trailerNumber,
+          trailerLicense:
+            share.dispatch.trailerLicense,
+
+          temperatureSetpointC:
+            share.allowTemperature
+              ? share.dispatch.temperatureSetpointC
+              : null,
+          temperatureMinC:
+            share.allowTemperature
+              ? share.dispatch.temperatureMinC
+              : null,
+          temperatureMaxC:
+            share.allowTemperature
+              ? share.dispatch.temperatureMaxC
+              : null,
+
+          driverInstructions:
+            share.dispatch.driverInstructions,
+          notes:
+            share.dispatch.notes,
+
+          assignmentStatus:
+            share.dispatch.assignmentStatus,
+
           asset:
             share.dispatch.asset
               ? {
@@ -4587,43 +4707,103 @@ app.get(
                     share.dispatch.asset.trackingSource
                 }
               : null,
+
+          driver:
+            driver
+              ? {
+                  id:
+                    driver.id,
+                  name:
+                    driver.name,
+                  email:
+                    driver.email,
+                  phone:
+                    profile?.phone ?? null,
+                  licenseNumber:
+                    profile?.licenseNumber ?? null,
+                  licenseState:
+                    profile?.licenseState ?? null,
+                  currentTruckNumber:
+                    profile?.currentTruckNumber ?? null,
+                  currentTrailerNumber:
+                    profile?.currentTrailerNumber ?? null,
+                  currentTrailerLicense:
+                    profile?.currentTrailerLicense ?? null
+                }
+              : null,
+
           statusEvents:
             share.dispatch.statusEvents
         },
+
         telemetry:
-          latestTelemetry
+          latestTelemetry ||
+          locationSource
             ? {
                 receivedAt:
-                  latestTelemetry.receivedAt,
+                  latestTelemetry?.receivedAt ??
+                  locationSource?.receivedAt ??
+                  null,
+
+                locationReceivedAt:
+                  locationSource?.recordedAt ??
+                  locationSource?.receivedAt ??
+                  null,
+
+                locationIsCurrent:
+                  hasCurrentLocation,
+
                 temperature:
                   share.allowTemperature
-                    ? latestTelemetry.temperature
+                    ? latestTelemetry?.temperature ?? null
                     : null,
+
                 latitude:
                   share.allowLocation
-                    ? latestTelemetry.latitude
+                    ? locationSource?.latitude ?? null
                     : null,
+
                 longitude:
                   share.allowLocation
-                    ? latestTelemetry.longitude
+                    ? locationSource?.longitude ?? null
                     : null,
+
+                altitude:
+                  share.allowLocation
+                    ? locationSource?.altitude ?? null
+                    : null,
+
                 speedKph:
                   share.allowLocation
-                    ? latestTelemetry.speedKph
+                    ? latestTelemetry?.speedKph ??
+                      locationSource?.speedKph ??
+                      null
                     : null,
+
                 movementStatus:
                   share.allowLocation
-                    ? latestTelemetry.movementStatus
+                    ? latestTelemetry?.movementStatus ??
+                      locationSource?.movementStatus ??
+                      null
                     : null,
+
                 source:
-                  latestTelemetry.source,
+                  latestTelemetry?.source ??
+                  locationSource?.source ??
+                  null,
+
                 accuracyMeters:
                   share.allowLocation
-                    ? latestTelemetry.accuracyMeters
+                    ? latestTelemetry?.accuracyMeters ??
+                      locationSource?.accuracyMeters ??
+                      null
                     : null,
+
                 headingDegrees:
                   share.allowLocation
-                    ? latestTelemetry.headingDegrees
+                    ? latestTelemetry?.headingDegrees ??
+                      locationSource?.headingDegrees ??
+                      null
                     : null
               }
             : null

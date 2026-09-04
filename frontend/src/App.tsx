@@ -105,6 +105,7 @@ type DriverRecord = {
     profilePhotoUrl?: string | null
     currentTruckNumber?: string | null
     currentTrailerNumber?: string | null
+    currentTrailerLicense?: string | null
   } | null
 }
 
@@ -128,6 +129,7 @@ type DispatchRecord = {
   lessorName?: string | null
   truckNumber?: string | null
   trailerNumber?: string | null
+  trailerLicense?: string | null
 
   pickupPhone?: string | null
   pickupReference?: string | null
@@ -793,6 +795,12 @@ function PublicLoadTrackingPage({
   const dispatch =
     data?.dispatch ?? null
 
+  const share =
+    data?.share ?? null
+
+  const driver =
+    dispatch?.driver ?? null
+
   const hasLocation =
     telemetry?.latitude != null &&
     telemetry?.longitude != null
@@ -805,6 +813,27 @@ function PublicLoadTrackingPage({
           )
         ).toFixed(1)
       : null
+
+  const speedMph =
+    telemetry?.speedKph != null &&
+    Number.isFinite(
+      Number(telemetry.speedKph)
+    )
+      ? Math.max(
+          0,
+          Number(telemetry.speedKph)
+        ) * 0.621371
+      : null
+
+  const temperatureValue = (
+    value?: number | null
+  ) =>
+    value != null &&
+    Number.isFinite(Number(value))
+      ? `${celsiusToFahrenheit(
+          Number(value)
+        ).toFixed(1)}°F`
+      : '—'
 
   const formatPublicTime = (
     value?: string | null
@@ -822,6 +851,38 @@ function PublicLoadTrackingPage({
       ? 'Not available'
       : date.toLocaleString()
   }
+
+  const valueOrDash = (
+    value?: string | number | null
+  ) =>
+    value == null ||
+    String(value).trim() === ''
+      ? '—'
+      : String(value)
+
+  const driverLicense =
+    [
+      driver?.licenseState,
+      driver?.licenseNumber
+    ]
+      .filter(Boolean)
+      .join(' ') || '—'
+
+  const truckNumber =
+    dispatch?.truckNumber ||
+    driver?.currentTruckNumber ||
+    dispatch?.asset?.deviceId ||
+    '—'
+
+  const trailerNumber =
+    dispatch?.trailerNumber ||
+    driver?.currentTrailerNumber ||
+    '—'
+
+  const trailerLicense =
+    dispatch?.trailerLicense ||
+    driver?.currentTrailerLicense ||
+    '—'
 
   if (loading) {
     return (
@@ -891,130 +952,263 @@ function PublicLoadTrackingPage({
         </div>
       </header>
 
-      <main className="public-track-main">
+      <main className="public-track-main public-track-main-complete">
         <section className="public-track-hero">
           <div>
             <span className="page-kicker">
               Load
             </span>
+
             <h1>
               {dispatch.loadNumber}
             </h1>
+
             <p>
               {
                 dispatch.asset?.name ||
                 dispatch.asset?.deviceId ||
-                'Maverick load'
+                truckNumber
               }
             </p>
           </div>
 
-          <div
-            className={
-              `public-track-status ${String(
-                dispatch.status
-              ).toLowerCase()}`
-            }
-          >
+          <div className="public-track-hero-actions">
             {
-              publicDispatchStatusLabel(
-                dispatch.status
+              share?.customerName && (
+                <span className="public-track-customer">
+                  {share.customerName}
+                </span>
               )
             }
+
+            <div
+              className={
+                `public-track-status ${String(
+                  dispatch.status
+                ).toLowerCase()}`
+              }
+            >
+              {
+                publicDispatchStatusLabel(
+                  dispatch.status
+                )
+              }
+            </div>
           </div>
         </section>
 
-        <section className="public-track-grid">
-          <article className="public-track-card">
+        <section className="public-track-grid public-track-summary-grid">
+          <article className="public-track-card public-track-stop-card pickup">
             <span>
               Pickup
             </span>
+
             <strong>
               {dispatch.pickupName}
             </strong>
+
             <p>
               {dispatch.pickupAddress}
             </p>
-            <small>
-              Scheduled {
-                formatPublicTime(
-                  dispatch.pickupScheduledAt
+
+            <div className="public-track-mini-details">
+              <small>
+                Appointment
+                <b>
+                  {
+                    formatPublicTime(
+                      dispatch.pickupScheduledAt
+                    )
+                  }
+                </b>
+              </small>
+
+              {
+                dispatch.pickupPhone && (
+                  <small>
+                    Phone
+                    <b>
+                      {dispatch.pickupPhone}
+                    </b>
+                  </small>
                 )
               }
-            </small>
+
+              {
+                dispatch.pickupReference && (
+                  <small>
+                    Reference
+                    <b>
+                      {dispatch.pickupReference}
+                    </b>
+                  </small>
+                )
+              }
+            </div>
           </article>
 
-          <article className="public-track-card">
+          <article className="public-track-card public-track-live-card">
             <span>
               Current
             </span>
+
             <strong>
-              {
-                dispatch.asset?.name ||
-                (assetTypeCode(dispatch.asset) === 'TRK'
-                  ? 'Assigned truck'
-                  : 'Assigned trailer')
-              }
+              {truckNumber}
             </strong>
-            <p>
-              {
-                assetTypeCode(dispatch.asset) === 'TRK'
-                  ? 'Phone GPS tracking'
-                  : temperatureF != null
-                    ? `${temperatureF}°F`
-                    : 'Temperature hidden'
-              }
-            </p>
-            <small>
-              {
-                telemetry?.movementStatus ||
-                'Latest telemetry'
+
+            <div className="public-track-current-status">
+              <i
+                className={
+                  telemetry?.locationIsCurrent
+                    ? 'live'
+                    : 'last-known'
+                }
+              />
+
+              <span>
+                {
+                  telemetry?.locationIsCurrent
+                    ? 'Live GPS'
+                    : hasLocation
+                      ? 'Last known GPS'
+                      : 'GPS unavailable'
+                }
+              </span>
+            </div>
+
+            <div className="public-track-live-metrics">
+              <div>
+                <span>
+                  Speed
+                </span>
+                <strong>
+                  {
+                    speedMph != null
+                      ? `${speedMph.toFixed(1)} mph`
+                      : '—'
+                  }
+                </strong>
+              </div>
+
+              <div>
+                <span>
+                  Accuracy
+                </span>
+                <strong>
+                  {
+                    telemetry?.accuracyMeters != null
+                      ? `${Number(
+                          telemetry.accuracyMeters
+                        ).toFixed(0)} m`
+                      : '—'
+                  }
+                </strong>
+              </div>
+
+              <div>
+                <span>
+                  Heading
+                </span>
+                <strong>
+                  {
+                    telemetry?.headingDegrees != null
+                      ? `${Number(
+                          telemetry.headingDegrees
+                        ).toFixed(0)}°`
+                      : '—'
+                  }
+                </strong>
+              </div>
+            </div>
+
+            <small className="public-track-location-time">
+              Location {
+                formatPublicTime(
+                  telemetry?.locationReceivedAt
+                )
               }
             </small>
           </article>
 
-          <article className="public-track-card">
+          <article className="public-track-card public-track-stop-card delivery">
             <span>
               Delivery
             </span>
+
             <strong>
               {dispatch.deliveryName}
             </strong>
+
             <p>
               {dispatch.deliveryAddress}
             </p>
-            <small>
-              Scheduled {
-                formatPublicTime(
-                  dispatch.deliveryScheduledAt
+
+            <div className="public-track-mini-details">
+              <small>
+                Appointment
+                <b>
+                  {
+                    formatPublicTime(
+                      dispatch.deliveryScheduledAt
+                    )
+                  }
+                </b>
+              </small>
+
+              {
+                dispatch.deliveryPhone && (
+                  <small>
+                    Phone
+                    <b>
+                      {dispatch.deliveryPhone}
+                    </b>
+                  </small>
                 )
               }
-            </small>
+
+              {
+                dispatch.deliveryReference && (
+                  <small>
+                    Reference
+                    <b>
+                      {dispatch.deliveryReference}
+                    </b>
+                  </small>
+                )
+              }
+            </div>
           </article>
         </section>
 
         {
-          hasLocation && (
-            <section className="public-track-map-card">
-              <MapContainer
-                center={[
-                  Number(
-                    telemetry.latitude
-                  ),
-                  Number(
-                    telemetry.longitude
-                  )
-                ]}
-                zoom={13}
-                className="public-track-map"
-              >
-                <TileLayer
-                  attribution="&copy; OpenStreetMap contributors"
-                  url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-                />
+          hasLocation ? (
+            <section className="public-track-map-card public-track-map-card-complete">
+              <div className="public-track-map-header">
+                <div>
+                  <span>
+                    Live Location
+                  </span>
+                  <strong>
+                    {
+                      telemetry?.locationIsCurrent
+                        ? 'Current truck position'
+                        : 'Last known truck position'
+                    }
+                  </strong>
+                </div>
 
-                <Marker
-                  position={[
+                <small>
+                  {
+                    formatPublicTime(
+                      telemetry?.locationReceivedAt
+                    )
+                  }
+                </small>
+              </div>
+
+              <div className="public-track-map-wrap">
+                <MapContainer
+                  center={[
                     Number(
                       telemetry.latitude
                     ),
@@ -1022,79 +1216,382 @@ function PublicLoadTrackingPage({
                       telemetry.longitude
                     )
                   ]}
-                  icon={
-                    assetTypeCode(
-                      dispatch.asset
-                    ) === 'TRK'
-                      ? createTruckIcon(
-                          String(
-                            telemetry.movementStatus ||
-                            ''
-                          ).toLowerCase() ===
-                            'moving'
-                            ? 'moving'
-                            : 'parked',
-                          true,
-                          true
-                        )
-                      : createTrailerIcon(
-                          String(
-                            telemetry.movementStatus ||
-                            ''
-                          ).toLowerCase() ===
-                            'moving'
-                            ? 'moving'
-                            : 'parked',
-                          true,
-                          true
-                        )
-                  }
-                />
-              </MapContainer>
+                  zoom={13}
+                  className="public-track-map"
+                >
+                  <ResponsiveMapSize />
+
+                  <TileLayer
+                    attribution="&copy; OpenStreetMap contributors"
+                    url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+                  />
+
+                  <Marker
+                    position={[
+                      Number(
+                        telemetry.latitude
+                      ),
+                      Number(
+                        telemetry.longitude
+                      )
+                    ]}
+                    icon={
+                      assetTypeCode(
+                        dispatch.asset
+                      ) === 'TRK'
+                        ? createTruckIcon(
+                            String(
+                              telemetry.movementStatus ||
+                              ''
+                            ).toLowerCase() ===
+                              'moving'
+                              ? 'moving'
+                              : 'parked',
+                            true,
+                            true
+                          )
+                        : createTrailerIcon(
+                            String(
+                              telemetry.movementStatus ||
+                              ''
+                            ).toLowerCase() ===
+                              'moving'
+                              ? 'moving'
+                              : 'parked',
+                            true,
+                            true
+                          )
+                    }
+                  >
+                    <Popup>
+                      <strong>
+                        {truckNumber}
+                      </strong>
+                      <br />
+                      {
+                        telemetry?.locationIsCurrent
+                          ? 'Current location'
+                          : 'Last known location'
+                      }
+                    </Popup>
+                  </Marker>
+                </MapContainer>
+              </div>
+            </section>
+          ) : (
+            <section className="public-track-map-card public-track-map-empty">
+              <strong>
+                Location not available yet
+              </strong>
+
+              <span>
+                MAVTRACK will show the map as soon as this truck reports a valid GPS position.
+              </span>
             </section>
           )
         }
 
-        <section className="public-track-card public-track-history-card">
-          <div className="public-track-card-heading">
-            <span>
-              Load Progress
-            </span>
-          </div>
+        <section className="public-track-detail-layout">
+          <div className="public-track-detail-column">
+            <article className="public-track-card public-track-info-card">
+              <div className="public-track-card-heading">
+                Load Information
+              </div>
 
-          <div className="public-track-timeline">
+              <dl className="public-track-data-grid">
+                <div>
+                  <dt>
+                    Load #
+                  </dt>
+                  <dd>
+                    {dispatch.loadNumber}
+                  </dd>
+                </div>
+
+                <div>
+                  <dt>
+                    Dispatcher
+                  </dt>
+                  <dd>
+                    {valueOrDash(
+                      dispatch.dispatcherName
+                    )}
+                  </dd>
+                </div>
+
+                <div>
+                  <dt>
+                    PO #
+                  </dt>
+                  <dd>
+                    {valueOrDash(
+                      dispatch.poNumber
+                    )}
+                  </dd>
+                </div>
+
+                <div>
+                  <dt>
+                    B/L #
+                  </dt>
+                  <dd>
+                    {valueOrDash(
+                      dispatch.bolNumber
+                    )}
+                  </dd>
+                </div>
+
+                <div>
+                  <dt>
+                    Reference
+                  </dt>
+                  <dd>
+                    {valueOrDash(
+                      dispatch.referenceNumber
+                    )}
+                  </dd>
+                </div>
+
+                <div>
+                  <dt>
+                    Commodity
+                  </dt>
+                  <dd>
+                    {valueOrDash(
+                      dispatch.commodity
+                    )}
+                  </dd>
+                </div>
+              </dl>
+            </article>
+
+            <article className="public-track-card public-track-info-card">
+              <div className="public-track-card-heading">
+                Driver & Equipment
+              </div>
+
+              <dl className="public-track-data-grid">
+                <div>
+                  <dt>
+                    Driver
+                  </dt>
+                  <dd>
+                    {valueOrDash(
+                      driver?.name
+                    )}
+                  </dd>
+                </div>
+
+                <div>
+                  <dt>
+                    Driver Phone
+                  </dt>
+                  <dd>
+                    {valueOrDash(
+                      driver?.phone
+                    )}
+                  </dd>
+                </div>
+
+                <div>
+                  <dt>
+                    Driver License
+                  </dt>
+                  <dd>
+                    {driverLicense}
+                  </dd>
+                </div>
+
+                <div>
+                  <dt>
+                    Truck #
+                  </dt>
+                  <dd>
+                    {truckNumber}
+                  </dd>
+                </div>
+
+                <div>
+                  <dt>
+                    Trailer #
+                  </dt>
+                  <dd>
+                    {trailerNumber}
+                  </dd>
+                </div>
+
+                <div>
+                  <dt>
+                    Trailer License
+                  </dt>
+                  <dd>
+                    {trailerLicense}
+                  </dd>
+                </div>
+              </dl>
+            </article>
+
+            <article className="public-track-card public-track-info-card">
+              <div className="public-track-card-heading">
+                Temperature
+              </div>
+
+              <div className="public-track-temperature-grid">
+                <div>
+                  <span>
+                    Current
+                  </span>
+                  <strong>
+                    {
+                      temperatureF != null
+                        ? `${temperatureF}°F`
+                        : '—'
+                    }
+                  </strong>
+                </div>
+
+                <div>
+                  <span>
+                    Set Point
+                  </span>
+                  <strong>
+                    {
+                      temperatureValue(
+                        dispatch.temperatureSetpointC
+                      )
+                    }
+                  </strong>
+                </div>
+
+                <div>
+                  <span>
+                    Minimum
+                  </span>
+                  <strong>
+                    {
+                      temperatureValue(
+                        dispatch.temperatureMinC
+                      )
+                    }
+                  </strong>
+                </div>
+
+                <div>
+                  <span>
+                    Maximum
+                  </span>
+                  <strong>
+                    {
+                      temperatureValue(
+                        dispatch.temperatureMaxC
+                      )
+                    }
+                  </strong>
+                </div>
+              </div>
+            </article>
+
             {
               (
-                dispatch.statusEvents ||
-                []
-              ).map(
-                (event: any) => (
-                  <div
-                    key={event.id}
-                    className="public-track-timeline-item"
-                  >
-                    <i />
-                    <div>
-                      <strong>
-                        {
-                          publicDispatchStatusLabel(
-                            event.status
-                          )
-                        }
-                      </strong>
-                      <span>
-                        {
-                          formatPublicTime(
-                            event.createdAt
-                          )
-                        }
-                      </span>
-                    </div>
+                dispatch.driverInstructions ||
+                dispatch.notes
+              ) && (
+                <article className="public-track-card public-track-info-card">
+                  <div className="public-track-card-heading">
+                    Instructions & Notes
                   </div>
-                )
+
+                  {
+                    dispatch.driverInstructions && (
+                      <div className="public-track-note-block">
+                        <span>
+                          Driver Instructions
+                        </span>
+                        <p>
+                          {
+                            dispatch.driverInstructions
+                          }
+                        </p>
+                      </div>
+                    )
+                  }
+
+                  {
+                    dispatch.notes && (
+                      <div className="public-track-note-block">
+                        <span>
+                          Load Notes
+                        </span>
+                        <p>
+                          {dispatch.notes}
+                        </p>
+                      </div>
+                    )
+                  }
+                </article>
               )
             }
           </div>
+
+          <article className="public-track-card public-track-history-card public-track-progress-panel">
+            <div className="public-track-card-heading">
+              Load Progress
+            </div>
+
+            <div className="public-track-timeline">
+              {
+                (
+                  dispatch.statusEvents ||
+                  []
+                ).map(
+                  (event: any) => (
+                    <div
+                      key={event.id}
+                      className="public-track-timeline-item"
+                    >
+                      <i />
+                      <div>
+                        <strong>
+                          {
+                            publicDispatchStatusLabel(
+                              event.status
+                            )
+                          }
+                        </strong>
+
+                        <span>
+                          {
+                            formatPublicTime(
+                              event.createdAt
+                            )
+                          }
+                        </span>
+
+                        {
+                          event.notes && (
+                            <small>
+                              {event.notes}
+                            </small>
+                          )
+                        }
+                      </div>
+                    </div>
+                  )
+                )
+              }
+
+              {
+                (
+                  dispatch.statusEvents ||
+                  []
+                ).length === 0 && (
+                  <div className="public-track-progress-empty">
+                    No status updates yet.
+                  </div>
+                )
+              }
+            </div>
+          </article>
         </section>
       </main>
     </div>
@@ -1287,6 +1784,7 @@ function App() {
     assetId: '',
     truckNumber: '',
     trailerNumber: '',
+    trailerLicense: '',
     carrierName: '',
     lessorName: '',
     pickupName: '',
@@ -1393,6 +1891,7 @@ function App() {
     assetId: '',
     truckNumber: '',
     trailerNumber: '',
+    trailerLicense: '',
     carrierName: '',
     lessorName: '',
     pickupName: '',
@@ -2439,6 +2938,7 @@ function App() {
       assetId: '',
       truckNumber: '',
       trailerNumber: '',
+      trailerLicense: '',
       carrierName: '',
       lessorName: '',
       pickupName: '',
@@ -2567,6 +3067,8 @@ function App() {
                   newDispatchForm.truckNumber,
                 trailerNumber:
                   newDispatchForm.trailerNumber,
+                trailerLicense:
+                  newDispatchForm.trailerLicense,
                 carrierName:
                   newDispatchForm.carrierName,
                 lessorName:
@@ -2718,6 +3220,8 @@ function App() {
         dispatch.truckNumber || '',
       trailerNumber:
         dispatch.trailerNumber || '',
+      trailerLicense:
+        dispatch.trailerLicense || '',
       carrierName:
         dispatch.carrierName || '',
       lessorName:
@@ -2940,6 +3444,8 @@ function App() {
                   editDispatchForm.truckNumber,
                 trailerNumber:
                   editDispatchForm.trailerNumber,
+                trailerLicense:
+                  editDispatchForm.trailerLicense,
                 carrierName:
                   editDispatchForm.carrierName,
                 lessorName:
@@ -3416,7 +3922,11 @@ function App() {
             trailerNumber:
               matchedDriver?.profile
                 ?.currentTrailerNumber ||
-              current.trailerNumber
+              current.trailerNumber,
+            trailerLicense:
+              matchedDriver?.profile
+                ?.currentTrailerLicense ||
+              current.trailerLicense
           }
         : {})
     })
@@ -9511,6 +10021,9 @@ function App() {
                                         Truck: {selectedNewTruckDriver.profile?.currentTruckNumber || '—'}
                                         {' · '}
                                         Trailer: {selectedNewTruckDriver.profile?.currentTrailerNumber || '—'}
+                                        {selectedNewTruckDriver.profile?.currentTrailerLicense
+                                          ? ` · License ${selectedNewTruckDriver.profile.currentTrailerLicense}`
+                                          : ''}
                                       </div>
                                     </div>
                                   )
@@ -9560,6 +10073,19 @@ function App() {
                                   }))
                                 }
                                 placeholder="TRL-205"
+                              />
+                            </label>
+                            <label>
+                              <span>Trailer License</span>
+                              <input
+                                value={newDispatchForm.trailerLicense}
+                                onChange={(event) =>
+                                  setNewDispatchForm((current) => ({
+                                    ...current,
+                                    trailerLicense: event.target.value
+                                  }))
+                                }
+                                placeholder="Trailer plate"
                               />
                             </label>
                             <label>
@@ -10085,6 +10611,9 @@ function App() {
                                         Truck: {selectedEditTruckDriver.profile?.currentTruckNumber || '—'}
                                         {' · '}
                                         Trailer: {selectedEditTruckDriver.profile?.currentTrailerNumber || '—'}
+                                        {selectedEditTruckDriver.profile?.currentTrailerLicense
+                                          ? ` · License ${selectedEditTruckDriver.profile.currentTrailerLicense}`
+                                          : ''}
                                       </div>
                                     </div>
                                   )
@@ -10134,6 +10663,19 @@ function App() {
                                   }))
                                 }
                                 placeholder="TRL-205"
+                              />
+                            </label>
+                            <label>
+                              <span>Trailer License</span>
+                              <input
+                                value={editDispatchForm.trailerLicense}
+                                onChange={(event) =>
+                                  setEditDispatchForm((current) => ({
+                                    ...current,
+                                    trailerLicense: event.target.value
+                                  }))
+                                }
+                                placeholder="Trailer plate"
                               />
                             </label>
                             <label>

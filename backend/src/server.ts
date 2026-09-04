@@ -3886,7 +3886,7 @@ app.post(
               ),
             customerEmail,
             allowLocation:
-              req.body?.allowLocation !== false,
+              true,
             allowTemperature:
               req.body?.allowTemperature !== false,
             allowEta:
@@ -4571,12 +4571,10 @@ app.get(
       // newest telemetry row has no GPS fix. Use the most recent
       // valid GPS point for the same asset as a location fallback.
       const latestLocation =
-        assetId &&
-        share.allowLocation
+        assetId
           ? await prisma.telemetry.findFirst({
               where: {
                 assetId,
-                isBackfill: false,
                 latitude: {
                   not: null
                 },
@@ -4604,6 +4602,21 @@ app.get(
           ? latestTelemetry
           : latestLocation
 
+      const telemetryAgeMs =
+        latestTelemetry?.receivedAt
+          ? Date.now() -
+            new Date(
+              latestTelemetry.receivedAt
+            ).getTime()
+          : Number.POSITIVE_INFINITY
+
+      const deviceStatus =
+        telemetryAgeMs < 2 * 60 * 1000
+          ? 'online'
+          : telemetryAgeMs < 10 * 60 * 1000
+            ? 'delayed'
+            : 'offline'
+
       const driver =
         share.dispatch.driver
 
@@ -4616,7 +4629,7 @@ app.get(
           customerName:
             share.customerName,
           allowLocation:
-            share.allowLocation,
+            true,
           allowTemperature:
             share.allowTemperature,
           allowEta:
@@ -4753,39 +4766,31 @@ app.get(
                 locationIsCurrent:
                   hasCurrentLocation,
 
+                deviceStatus,
+
                 temperature:
                   share.allowTemperature
                     ? latestTelemetry?.temperature ?? null
                     : null,
 
                 latitude:
-                  share.allowLocation
-                    ? locationSource?.latitude ?? null
-                    : null,
+                  locationSource?.latitude ?? null,
 
                 longitude:
-                  share.allowLocation
-                    ? locationSource?.longitude ?? null
-                    : null,
+                  locationSource?.longitude ?? null,
 
                 altitude:
-                  share.allowLocation
-                    ? locationSource?.altitude ?? null
-                    : null,
+                  locationSource?.altitude ?? null,
 
                 speedKph:
-                  share.allowLocation
-                    ? latestTelemetry?.speedKph ??
-                      locationSource?.speedKph ??
-                      null
-                    : null,
+                  latestTelemetry?.speedKph ??
+                  locationSource?.speedKph ??
+                  null,
 
                 movementStatus:
-                  share.allowLocation
-                    ? latestTelemetry?.movementStatus ??
-                      locationSource?.movementStatus ??
-                      null
-                    : null,
+                  latestTelemetry?.movementStatus ??
+                  locationSource?.movementStatus ??
+                  null,
 
                 source:
                   latestTelemetry?.source ??
@@ -4793,18 +4798,14 @@ app.get(
                   null,
 
                 accuracyMeters:
-                  share.allowLocation
-                    ? latestTelemetry?.accuracyMeters ??
-                      locationSource?.accuracyMeters ??
-                      null
-                    : null,
+                  latestTelemetry?.accuracyMeters ??
+                  locationSource?.accuracyMeters ??
+                  null,
 
                 headingDegrees:
-                  share.allowLocation
-                    ? latestTelemetry?.headingDegrees ??
-                      locationSource?.headingDegrees ??
-                      null
-                    : null
+                  latestTelemetry?.headingDegrees ??
+                  locationSource?.headingDegrees ??
+                  null
               }
             : null
       })

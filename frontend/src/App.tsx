@@ -1059,6 +1059,8 @@ function PublicLoadTrackingPage({
             <div className="public-track-current-status">
               <i
                 className={
+                  telemetry?.deviceStatus === 'online' &&
+                  hasLocation &&
                   telemetry?.locationIsCurrent
                     ? 'live'
                     : 'last-known'
@@ -1067,10 +1069,16 @@ function PublicLoadTrackingPage({
 
               <span>
                 {
+                  telemetry?.deviceStatus === 'online' &&
+                  hasLocation &&
                   telemetry?.locationIsCurrent
                     ? 'Live GPS'
                     : hasLocation
-                      ? 'Last known GPS'
+                      ? telemetry?.deviceStatus === 'delayed'
+                        ? 'Delayed · showing last known GPS'
+                        : telemetry?.deviceStatus === 'offline'
+                          ? 'Offline · showing last known GPS'
+                          : 'Last known GPS'
                       : 'GPS unavailable'
                 }
               </span>
@@ -1190,6 +1198,7 @@ function PublicLoadTrackingPage({
                   </span>
                   <strong>
                     {
+                      telemetry?.deviceStatus === 'online' &&
                       telemetry?.locationIsCurrent
                         ? 'Current truck position'
                         : 'Last known truck position'
@@ -1269,6 +1278,7 @@ function PublicLoadTrackingPage({
                       </strong>
                       <br />
                       {
+                        telemetry?.deviceStatus === 'online' &&
                         telemetry?.locationIsCurrent
                           ? 'Current location'
                           : 'Last known location'

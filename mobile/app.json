@@ -7,12 +7,14 @@
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "dark",
     "ios": {
-      "supportsTablet": true,
+      "supportsTablet": false,
       "bundleIdentifier": "com.mavtrack.driver",
       "infoPlist": {
         "UIBackgroundModes": [
           "location"
-        ]
+        ],
+        "NSLocationWhenInUseUsageDescription": "MavApp uses your location to send your truck position to MAVTRACK while tracking is active.",
+        "NSLocationAlwaysAndWhenInUseUsageDescription": "MavApp uses background location so MAVTRACK can continue receiving your truck position when the screen is locked or another app is open."
       }
     },
     "android": {
@@ -32,13 +34,14 @@
       [
         "expo-location",
         {
-          "locationWhenInUsePermission": "Allow MavApp to use your location while you are using the app.",
-          "locationAlwaysAndWhenInUsePermission": "Allow MavApp to use your location in the background so dispatch can track the assigned truck while a load is active.",
+          "locationWhenInUsePermission": "Allow MavApp to use your location while tracking is active.",
+          "locationAlwaysAndWhenInUsePermission": "Allow MavApp to use your location in the background so MAVTRACK can continue receiving truck GPS.",
           "isIosBackgroundLocationEnabled": true,
           "isAndroidBackgroundLocationEnabled": true,
           "isAndroidForegroundServiceEnabled": true
         }
-      ]
+      ],
+      "expo-secure-store"
     ]
   }
 }

@@ -90,6 +90,19 @@ type NotificationRecord = {
   createdAt: string
 }
 
+type CameraRecord = {
+  id: number
+  provider: string
+  model: string | null
+  externalId: string | null
+  name: string
+  active: boolean
+  cloudStatus: string | null
+  lastSeenAt: string | null
+  createdAt: string
+  updatedAt: string
+}
+
 type DriverRecord = {
   id: number
   email: string
@@ -4548,6 +4561,21 @@ function App() {
       selectedAsset
     )
 
+  const selectedCameras: CameraRecord[] =
+    Array.isArray(
+      selectedAsset?.cameras
+    )
+      ? selectedAsset.cameras
+          .filter(
+            (camera: CameraRecord) =>
+              camera?.active !== false
+          )
+      : []
+
+  const canManageCameras =
+    currentUser?.role === 'company_admin' ||
+    currentUser?.role === 'superadmin'
+
   const isSelectedTruck =
     selectedAssetType === 'TRK'
 
@@ -5037,6 +5065,156 @@ function App() {
 
     setIsLoggedIn(true)
   }
+
+  const handleAssignBlackVueCamera =
+    async () => {
+      if (!selectedAsset?.id) {
+        window.alert(
+          'Select an asset first.'
+        )
+        return
+      }
+
+      const token =
+        localStorage.getItem(
+          'maverick_token'
+        )
+
+      if (!token) {
+        handleLogout()
+        return
+      }
+
+      const name =
+        window.prompt(
+          'Camera name',
+          `${selectedAssetName} Camera`
+        )?.trim()
+
+      if (!name) {
+        return
+      }
+
+      const model =
+        window.prompt(
+          'BlackVue model',
+          'DR770X-2CH LTE'
+        )?.trim() || null
+
+      const externalId =
+        window.prompt(
+          'BlackVue Camera ID / PSN (optional for now)',
+          ''
+        )?.trim() || null
+
+      try {
+        const res =
+          await fetch(
+            `${API_BASE}/api/assets/${selectedAsset.id}/cameras`,
+            {
+              method: 'POST',
+              headers: {
+                'Content-Type':
+                  'application/json',
+                Authorization:
+                  `Bearer ${token}`
+              },
+              body: JSON.stringify({
+                provider: 'BLACKVUE',
+                model,
+                externalId,
+                name
+              })
+            }
+          )
+
+        const data =
+          await res.json()
+
+        if (res.status === 401) {
+          handleLogout()
+          return
+        }
+
+        if (!res.ok || !data.ok) {
+          window.alert(
+            data.message ||
+            'Unable to assign camera.'
+          )
+          return
+        }
+
+        await loadAssets()
+      } catch {
+        window.alert(
+          'Unable to connect to Maverick.'
+        )
+      }
+    }
+
+  const handleRemoveCamera =
+    async (
+      camera: CameraRecord
+    ) => {
+      if (
+        !window.confirm(
+          `Remove ${camera.name} from ${selectedAssetName}?`
+        )
+      ) {
+        return
+      }
+
+      const token =
+        localStorage.getItem(
+          'maverick_token'
+        )
+
+      if (!token) {
+        handleLogout()
+        return
+      }
+
+      try {
+        const res =
+          await fetch(
+            `${API_BASE}/api/cameras/${camera.id}`,
+            {
+              method: 'PATCH',
+              headers: {
+                'Content-Type':
+                  'application/json',
+                Authorization:
+                  `Bearer ${token}`
+              },
+              body: JSON.stringify({
+                active: false
+              })
+            }
+          )
+
+        const data =
+          await res.json()
+
+        if (res.status === 401) {
+          handleLogout()
+          return
+        }
+
+        if (!res.ok || !data.ok) {
+          window.alert(
+            data.message ||
+            'Unable to remove camera.'
+          )
+          return
+        }
+
+        await loadAssets()
+      } catch {
+        window.alert(
+          'Unable to connect to Maverick.'
+        )
+      }
+    }
 
   const handleRenameAsset =
     async () => {
@@ -10372,7 +10550,8 @@ function App() {
                         )
                       }
 
-                      <div className="modal-actions">
+
+              <div className="modal-actions">
                         <button
                           className="secondary-action"
                           onClick={() =>
@@ -12304,6 +12483,152 @@ function App() {
                   </dd>
                 </div>
               </dl>
+
+              <section className="asset-camera-section">
+                <div className="asset-camera-section-head">
+                  <div>
+                    <span className="page-kicker">
+                      Cameras
+                    </span>
+                    <h3>
+                      BlackVue
+                    </h3>
+                  </div>
+
+                  {
+                    canManageCameras && (
+                      <button
+                        className="camera-assign-button"
+                        type="button"
+                        onClick={
+                          handleAssignBlackVueCamera
+                        }
+                      >
+                        + Assign camera
+                      </button>
+                    )
+                  }
+                </div>
+
+                {
+                  selectedCameras.length > 0
+                    ? (
+                      <div className="asset-camera-grid">
+                        {
+                          selectedCameras.map(
+                            (camera) => (
+                              <article
+                                className="asset-camera-card"
+                                key={camera.id}
+                              >
+                                <div className="asset-camera-card-top">
+                                  <div className="asset-camera-icon">
+                                    CAM
+                                  </div>
+
+                                  <div className="asset-camera-title">
+                                    <strong>
+                                      {camera.name}
+                                    </strong>
+                                    <span>
+                                      {
+                                        camera.model ||
+                                        camera.provider
+                                      }
+                                    </span>
+                                  </div>
+
+                                  <span
+                                    className={`asset-camera-status ${
+                                      camera.cloudStatus === 'ONLINE'
+                                        ? 'online'
+                                        : 'pending'
+                                    }`}
+                                  >
+                                    {
+                                      camera.cloudStatus === 'ONLINE'
+                                        ? 'Online'
+                                        : 'API pending'
+                                    }
+                                  </span>
+                                </div>
+
+                                <div className="asset-camera-meta">
+                                  <span>
+                                    Provider
+                                    <strong>
+                                      {camera.provider}
+                                    </strong>
+                                  </span>
+
+                                  <span>
+                                    Camera ID
+                                    <strong>
+                                      {
+                                        camera.externalId ||
+                                        'Not set'
+                                      }
+                                    </strong>
+                                  </span>
+                                </div>
+
+                                <div className="asset-camera-actions">
+                                  <button
+                                    className="camera-live-button"
+                                    type="button"
+                                    disabled
+                                    title="BlackVue Cloud API access is required before Live View can be opened inside MAVTRACK."
+                                  >
+                                    Live View · API pending
+                                  </button>
+
+                                  <button
+                                    className="camera-playback-button"
+                                    type="button"
+                                    disabled
+                                    title="BlackVue Cloud API access is required before SD playback can be opened inside MAVTRACK."
+                                  >
+                                    SD Recordings
+                                  </button>
+
+                                  {
+                                    canManageCameras && (
+                                      <button
+                                        className="camera-remove-button"
+                                        type="button"
+                                        onClick={() =>
+                                          handleRemoveCamera(
+                                            camera
+                                          )
+                                        }
+                                      >
+                                        Remove
+                                      </button>
+                                    )
+                                  }
+                                </div>
+                              </article>
+                            )
+                          )
+                        }
+                      </div>
+                    )
+                    : (
+                      <div className="asset-camera-empty">
+                        <strong>
+                          No camera assigned
+                        </strong>
+                        <span>
+                          Assign the BlackVue DR770X-2CH LTE to this asset.
+                        </span>
+                      </div>
+                    )
+                }
+
+                <div className="asset-camera-note">
+                  Camera assignment is ready. Live View and remote SD playback will activate here after BlackVue Cloud API credentials are connected to the Maverick backend.
+                </div>
+              </section>
 
               <div className="modal-actions">
                 <button

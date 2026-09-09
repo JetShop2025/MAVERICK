@@ -92,12 +92,38 @@ model Asset {
   telemetry     Telemetry[]
   dispatches    Dispatch[]
   notifications NotificationEvent[]
+  cameras       Camera[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   @@index([companyId])
   @@index([companyId, assetType])
+}
+
+
+model Camera {
+  id         Int     @id @default(autoincrement())
+  provider   String  @default("BLACKVUE")
+  model      String?
+  externalId String?
+  name       String
+  active     Boolean @default(true)
+
+  // Cloud state is kept provider-agnostic. Once BlackVue API access
+  // is enabled, Maverick can update these fields automatically.
+  cloudStatus String?
+  lastSeenAt  DateTime?
+
+  assetId Int
+  asset   Asset @relation(fields: [assetId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([assetId])
+  @@index([provider])
+  @@unique([provider, externalId])
 }
 
 model Telemetry {

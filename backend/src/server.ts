@@ -2121,6 +2121,26 @@ app.get(
             temperatureMaxC: true,
             temperatureAlertsEnabled: true,
             temperatureAlertEmail: true,
+            cameras: {
+              where: {
+                active: true
+              },
+              orderBy: {
+                name: 'asc'
+              },
+              select: {
+                id: true,
+                provider: true,
+                model: true,
+                externalId: true,
+                name: true,
+                active: true,
+                cloudStatus: true,
+                lastSeenAt: true,
+                createdAt: true,
+                updatedAt: true
+              }
+            },
             createdAt: true,
             updatedAt: true
           }
@@ -2140,6 +2160,378 @@ app.get(
         ok: false,
         message:
           'Unable to load assets'
+      })
+    }
+  }
+)
+
+
+// =====================================================
+// ASSET CAMERAS
+// =====================================================
+
+app.get(
+  '/api/assets/:id/cameras',
+  requireAuth,
+  async (
+    req: AuthenticatedRequest,
+    res: Response
+  ) => {
+    try {
+      const companyId =
+        req.user?.companyId
+
+      if (!companyId) {
+        return res.status(401).json({
+          ok: false,
+          message: 'Invalid session'
+        })
+      }
+
+      const assetId =
+        Number(req.params.id)
+
+      if (!Number.isInteger(assetId)) {
+        return res.status(400).json({
+          ok: false,
+          message: 'Invalid asset ID'
+        })
+      }
+
+      const asset =
+        await prisma.asset.findFirst({
+          where: {
+            id: assetId,
+            companyId,
+            active: true
+          },
+          select: {
+            id: true,
+            name: true,
+            deviceId: true
+          }
+        })
+
+      if (!asset) {
+        return res.status(404).json({
+          ok: false,
+          message: 'Asset not found'
+        })
+      }
+
+      const cameras =
+        await prisma.camera.findMany({
+          where: {
+            assetId,
+            active: true
+          },
+          orderBy: {
+            name: 'asc'
+          }
+        })
+
+      return res.json({
+        ok: true,
+        asset,
+        cameras
+      })
+    } catch (error) {
+      console.error(
+        'Get asset cameras error:',
+        error
+      )
+
+      return res.status(500).json({
+        ok: false,
+        message:
+          'Unable to load asset cameras'
+      })
+    }
+  }
+)
+
+app.post(
+  '/api/assets/:id/cameras',
+  requireAuth,
+  async (
+    req: AuthenticatedRequest,
+    res: Response
+  ) => {
+    try {
+      const companyId =
+        req.user?.companyId
+
+      const role =
+        req.user?.role
+
+      if (!companyId) {
+        return res.status(401).json({
+          ok: false,
+          message: 'Invalid session'
+        })
+      }
+
+      if (
+        role !== 'company_admin' &&
+        role !== 'superadmin'
+      ) {
+        return res.status(403).json({
+          ok: false,
+          message:
+            'You do not have permission to assign cameras'
+        })
+      }
+
+      const assetId =
+        Number(req.params.id)
+
+      if (!Number.isInteger(assetId)) {
+        return res.status(400).json({
+          ok: false,
+          message: 'Invalid asset ID'
+        })
+      }
+
+      const asset =
+        await prisma.asset.findFirst({
+          where: {
+            id: assetId,
+            companyId,
+            active: true
+          }
+        })
+
+      if (!asset) {
+        return res.status(404).json({
+          ok: false,
+          message: 'Asset not found'
+        })
+      }
+
+      const provider =
+        typeof req.body?.provider === 'string'
+          ? req.body.provider
+              .trim()
+              .toUpperCase()
+          : 'BLACKVUE'
+
+      const model =
+        typeof req.body?.model === 'string' &&
+        req.body.model.trim()
+          ? req.body.model.trim()
+          : null
+
+      const externalId =
+        typeof req.body?.externalId === 'string' &&
+        req.body.externalId.trim()
+          ? req.body.externalId.trim()
+          : null
+
+      const name =
+        typeof req.body?.name === 'string'
+          ? req.body.name.trim()
+          : ''
+
+      if (
+        !name ||
+        name.length > 80
+      ) {
+        return res.status(400).json({
+          ok: false,
+          message:
+            'Camera name is required and must be 80 characters or fewer'
+        })
+      }
+
+      if (
+        provider.length < 2 ||
+        provider.length > 40
+      ) {
+        return res.status(400).json({
+          ok: false,
+          message: 'Invalid camera provider'
+        })
+      }
+
+      try {
+        const camera =
+          await prisma.camera.create({
+            data: {
+              assetId,
+              provider,
+              model,
+              externalId,
+              name,
+              cloudStatus: 'NOT_CONNECTED'
+            }
+          })
+
+        return res.status(201).json({
+          ok: true,
+          camera
+        })
+      } catch (error: any) {
+        if (error?.code === 'P2002') {
+          return res.status(409).json({
+            ok: false,
+            message:
+              'That camera is already assigned in Maverick'
+          })
+        }
+
+        throw error
+      }
+    } catch (error) {
+      console.error(
+        'Create asset camera error:',
+        error
+      )
+
+      return res.status(500).json({
+        ok: false,
+        message:
+          'Unable to assign camera'
+      })
+    }
+  }
+)
+
+app.patch(
+  '/api/cameras/:id',
+  requireAuth,
+  async (
+    req: AuthenticatedRequest,
+    res: Response
+  ) => {
+    try {
+      const companyId =
+        req.user?.companyId
+
+      const role =
+        req.user?.role
+
+      if (!companyId) {
+        return res.status(401).json({
+          ok: false,
+          message: 'Invalid session'
+        })
+      }
+
+      if (
+        role !== 'company_admin' &&
+        role !== 'superadmin'
+      ) {
+        return res.status(403).json({
+          ok: false,
+          message:
+            'You do not have permission to edit cameras'
+        })
+      }
+
+      const cameraId =
+        Number(req.params.id)
+
+      if (!Number.isInteger(cameraId)) {
+        return res.status(400).json({
+          ok: false,
+          message: 'Invalid camera ID'
+        })
+      }
+
+      const existing =
+        await prisma.camera.findFirst({
+          where: {
+            id: cameraId,
+            asset: {
+              companyId
+            }
+          }
+        })
+
+      if (!existing) {
+        return res.status(404).json({
+          ok: false,
+          message: 'Camera not found'
+        })
+      }
+
+      const data: {
+        name?: string
+        model?: string | null
+        externalId?: string | null
+        active?: boolean
+      } = {}
+
+      if (req.body?.name !== undefined) {
+        const value =
+          typeof req.body.name === 'string'
+            ? req.body.name.trim()
+            : ''
+
+        if (
+          !value ||
+          value.length > 80
+        ) {
+          return res.status(400).json({
+            ok: false,
+            message: 'Invalid camera name'
+          })
+        }
+
+        data.name = value
+      }
+
+      if (req.body?.model !== undefined) {
+        data.model =
+          typeof req.body.model === 'string' &&
+          req.body.model.trim()
+            ? req.body.model.trim()
+            : null
+      }
+
+      if (req.body?.externalId !== undefined) {
+        data.externalId =
+          typeof req.body.externalId === 'string' &&
+          req.body.externalId.trim()
+            ? req.body.externalId.trim()
+            : null
+      }
+
+      if (req.body?.active !== undefined) {
+        data.active =
+          Boolean(req.body.active)
+      }
+
+      const camera =
+        await prisma.camera.update({
+          where: {
+            id: cameraId
+          },
+          data
+        })
+
+      return res.json({
+        ok: true,
+        camera
+      })
+    } catch (error: any) {
+      if (error?.code === 'P2002') {
+        return res.status(409).json({
+          ok: false,
+          message:
+            'That camera is already assigned in Maverick'
+        })
+      }
+
+      console.error(
+        'Update camera error:',
+        error
+      )
+
+      return res.status(500).json({
+        ok: false,
+        message:
+          'Unable to update camera'
       })
     }
   }
@@ -2428,6 +2820,26 @@ app.patch(
             temperatureMaxC: true,
             temperatureAlertsEnabled: true,
             temperatureAlertEmail: true,
+            cameras: {
+              where: {
+                active: true
+              },
+              orderBy: {
+                name: 'asc'
+              },
+              select: {
+                id: true,
+                provider: true,
+                model: true,
+                externalId: true,
+                name: true,
+                active: true,
+                cloudStatus: true,
+                lastSeenAt: true,
+                createdAt: true,
+                updatedAt: true
+              }
+            },
             createdAt: true,
             updatedAt: true
           }

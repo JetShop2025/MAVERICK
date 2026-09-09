@@ -1,8 +1,9 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
   FlatList,
+  Image,
   KeyboardAvoidingView,
   Platform,
   Pressable,
@@ -17,6 +18,19 @@ import {
 import * as Location from "expo-location";
 import * as TaskManager from "expo-task-manager";
 import * as SecureStore from "expo-secure-store";
+
+
+(Text as any).defaultProps = {
+  ...((Text as any).defaultProps || {}),
+  allowFontScaling: false,
+  maxFontSizeMultiplier: 1,
+};
+
+(TextInput as any).defaultProps = {
+  ...((TextInput as any).defaultProps || {}),
+  allowFontScaling: false,
+  maxFontSizeMultiplier: 1,
+};
 
 const API_URL = "https://maverick-1z64.onrender.com";
 const MOBILE_TELEMETRY_KEY =
@@ -45,6 +59,7 @@ type DriverProfile = {
   profilePhotoUrl?: string | null;
   currentTruckNumber?: string | null;
   currentTrailerNumber?: string | null;
+  currentTrailerLicense?: string | null;
 };
 
 type DriverUser = {
@@ -111,6 +126,9 @@ type Dispatch = {
   miles?: number | null;
   carrierPay?: number | null;
   rateType?: string | null;
+  temperatureSetpointC?: number | null;
+  temperatureMinC?: number | null;
+  temperatureMaxC?: number | null;
   driverInstructions?: string | null;
   termsAndAgreement?: string | null;
   notes?: string | null;
@@ -267,6 +285,22 @@ function driverName(
   );
 }
 
+function fahrenheitFromCelsius(
+  value?: number | null
+) {
+  if (
+    value == null ||
+    !Number.isFinite(Number(value))
+  ) {
+    return "—";
+  }
+
+  return `${(
+    Number(value) * 9 / 5 + 32
+  ).toFixed(0)}°F`;
+}
+
+
 export default function App() {
   const [booting, setBooting] =
     useState(true);
@@ -298,6 +332,7 @@ export default function App() {
   const [assignments, setAssignments] =
     useState<Dispatch[]>([]);
 
+
   const [selectedLoad, setSelectedLoad] =
     useState<Dispatch | null>(null);
 
@@ -318,6 +353,18 @@ export default function App() {
 
   const [gps, setGps] =
     useState<GPSData | null>(null);
+
+  const [
+    trackingMode,
+    setTrackingMode
+  ] = useState<
+    "off" | "foreground" | "background"
+  >("off");
+
+  const foregroundWatchRef =
+    useRef<Location.LocationSubscription | null>(
+      null
+    );
 
   useEffect(() => {
     void restoreSession();
@@ -611,6 +658,7 @@ export default function App() {
       licenseState: string;
       currentTruckNumber: string;
       currentTrailerNumber: string;
+      currentTrailerLicense: string;
     }
   ) {
     const payload =
@@ -653,15 +701,17 @@ export default function App() {
           BACKGROUND_LOCATION_TASK
         );
 
-      setTracking(started);
-
       if (started) {
+        setTracking(true);
+        setTrackingMode("background");
         setTrackingStatus(
           "BACKGROUND TRACKING ACTIVE"
         );
       }
     } catch {
-      // Unsupported in some Expo Go contexts.
+      // Expo Go on a physical iPhone cannot restore
+      // native background tracking. START TRACKING
+      // will still use the foreground fallback.
     }
   }
 
@@ -728,11 +778,72 @@ export default function App() {
     driverProfile?.currentTruckNumber ||
     DEFAULT_TRACKING_DEVICE_ID;
 
+  async function applyLocationUpdate(
+    location: Location.LocationObject,
+    deviceId: string
+  ) {
+    setGps({
+      latitude:
+        location.coords.latitude,
+      longitude:
+        location.coords.longitude,
+      accuracy:
+        location.coords.accuracy,
+      speedMps:
+        location.coords.speed,
+      heading:
+        location.coords.heading,
+      timestamp: location.timestamp,
+    });
+
+    try {
+      const sent =
+        await postLocationToMavtrack(
+          location,
+          deviceId
+        );
+
+      setServerStatus(
+        sent ? "CONNECTED" : "SEND FAILED"
+      );
+    } catch {
+      setServerStatus("SEND FAILED");
+    }
+  }
+
+  async function beginForegroundTracking(
+    deviceId: string
+  ) {
+    foregroundWatchRef.current?.remove();
+    foregroundWatchRef.current = null;
+
+    foregroundWatchRef.current =
+      await Location.watchPositionAsync(
+        {
+          accuracy: Location.Accuracy.High,
+          distanceInterval: 5,
+          timeInterval: 10000,
+        },
+        (location) => {
+          void applyLocationUpdate(
+            location,
+            deviceId
+          );
+        }
+      );
+
+    setTracking(true);
+    setTrackingMode("foreground");
+    setTrackingStatus(
+      "FOREGROUND TRACKING ACTIVE"
+    );
+  }
+
   async function startTracking() {
     if (!trackingDeviceId) {
       Alert.alert(
         "No truck configured",
-        "MavApp does not have a TRK device configured for tracking."
+        "Add a Current Truck in Profile before starting tracking."
       );
       return;
     }
@@ -745,37 +856,28 @@ export default function App() {
       return;
     }
 
-    try {
-      setAppError("");
-      setTrackingStatus(
-        "REQUESTING LOCATION..."
-      );
+    setAppError("");
+    setTrackingStatus(
+      "REQUESTING LOCATION..."
+    );
+    setServerStatus("CONNECTING...");
 
+    try {
       const foreground =
         await Location.requestForegroundPermissionsAsync();
 
       if (
         foreground.status !== "granted"
       ) {
+        setTracking(false);
+        setTrackingMode("off");
         setTrackingStatus(
           "LOCATION DENIED"
         );
-        return;
-      }
 
-      const background =
-        await Location.requestBackgroundPermissionsAsync();
-
-      if (
-        background.status !== "granted"
-      ) {
         Alert.alert(
-          "Background location required",
-          "Choose Always Allow so MAVTRACK can keep receiving this truck's GPS while MavApp is in the background or the screen is locked."
-        );
-
-        setTrackingStatus(
-          "BACKGROUND LOCATION DENIED"
+          "Location permission required",
+          "Allow location access so MAVTRACK can receive this truck's GPS."
         );
         return;
       }
@@ -785,44 +887,8 @@ export default function App() {
         trackingDeviceId
       );
 
-      const alreadyStarted =
-        await Location.hasStartedLocationUpdatesAsync(
-          BACKGROUND_LOCATION_TASK
-        );
-
-      if (!alreadyStarted) {
-        await Location.startLocationUpdatesAsync(
-          BACKGROUND_LOCATION_TASK,
-          {
-            accuracy:
-              Location.Accuracy.High,
-            distanceInterval: 5,
-            timeInterval: 10000,
-            deferredUpdatesDistance: 5,
-            deferredUpdatesInterval: 10000,
-            pausesUpdatesAutomatically:
-              false,
-            activityType:
-              Location.ActivityType
-                .AutomotiveNavigation,
-            showsBackgroundLocationIndicator:
-              true,
-            foregroundService: {
-              notificationTitle:
-                "MavApp tracking active",
-              notificationBody:
-                `Tracking ${trackingDeviceId} for MAVTRACK dispatch.`,
-            },
-          }
-        );
-      }
-
-      setTracking(true);
-      setTrackingStatus(
-        "BACKGROUND TRACKING ACTIVE"
-      );
-      setServerStatus("CONNECTING...");
-
+      // Send the first point immediately so the TRK
+      // can become ONLINE in MAVTRACK without waiting.
       const current =
         await Location.getCurrentPositionAsync(
           {
@@ -831,31 +897,91 @@ export default function App() {
           }
         );
 
-      setGps({
-        latitude:
-          current.coords.latitude,
-        longitude:
-          current.coords.longitude,
-        accuracy:
-          current.coords.accuracy,
-        speedMps:
-          current.coords.speed,
-        heading:
-          current.coords.heading,
-        timestamp: current.timestamp,
-      });
-
-      const sent =
-        await postLocationToMavtrack(
-          current,
-          trackingDeviceId
-        );
-
-      setServerStatus(
-        sent ? "CONNECTED" : "SEND FAILED"
+      await applyLocationUpdate(
+        current,
+        trackingDeviceId
       );
+
+      // Always start foreground tracking first.
+      // This works in Expo Go and lets us test GPS now.
+      await beginForegroundTracking(
+        trackingDeviceId
+      );
+
+      // Upgrade to native background tracking when
+      // the installed build supports it. Expo Go on
+      // a physical iPhone can throw here; that is NOT
+      // treated as a GPS failure anymore.
+      try {
+        const background =
+          await Location.requestBackgroundPermissionsAsync();
+
+        if (
+          background.status !== "granted"
+        ) {
+          setTracking(true);
+          setTrackingMode("foreground");
+          setTrackingStatus(
+            "FOREGROUND TRACKING ACTIVE"
+          );
+          return;
+        }
+
+        const alreadyStarted =
+          await Location.hasStartedLocationUpdatesAsync(
+            BACKGROUND_LOCATION_TASK
+          );
+
+        if (!alreadyStarted) {
+          await Location.startLocationUpdatesAsync(
+            BACKGROUND_LOCATION_TASK,
+            {
+              accuracy:
+                Location.Accuracy.High,
+              distanceInterval: 5,
+              timeInterval: 10000,
+              deferredUpdatesDistance: 5,
+              deferredUpdatesInterval: 10000,
+              pausesUpdatesAutomatically:
+                false,
+              activityType:
+                Location.ActivityType
+                  .AutomotiveNavigation,
+              showsBackgroundLocationIndicator:
+                true,
+              foregroundService: {
+                notificationTitle:
+                  "MavApp tracking active",
+                notificationBody:
+                  `Tracking ${trackingDeviceId} for MAVTRACK dispatch.`,
+              },
+            }
+          );
+        }
+
+        foregroundWatchRef.current?.remove();
+        foregroundWatchRef.current = null;
+
+        setTracking(true);
+        setTrackingMode("background");
+        setTrackingStatus(
+          "BACKGROUND TRACKING ACTIVE"
+        );
+      } catch {
+        // Foreground tracking is already alive.
+        // Keep it running instead of showing GPS ERROR.
+        setTracking(true);
+        setTrackingMode("foreground");
+        setTrackingStatus(
+          "FOREGROUND TRACKING ACTIVE"
+        );
+      }
     } catch (err) {
+      foregroundWatchRef.current?.remove();
+      foregroundWatchRef.current = null;
+
       setTracking(false);
+      setTrackingMode("off");
       setTrackingStatus("GPS ERROR");
       setServerStatus("OFFLINE");
 
@@ -869,15 +995,22 @@ export default function App() {
 
   async function stopTracking() {
     try {
-      const started =
-        await Location.hasStartedLocationUpdatesAsync(
-          BACKGROUND_LOCATION_TASK
-        );
+      foregroundWatchRef.current?.remove();
+      foregroundWatchRef.current = null;
 
-      if (started) {
-        await Location.stopLocationUpdatesAsync(
-          BACKGROUND_LOCATION_TASK
-        );
+      try {
+        const started =
+          await Location.hasStartedLocationUpdatesAsync(
+            BACKGROUND_LOCATION_TASK
+          );
+
+        if (started) {
+          await Location.stopLocationUpdatesAsync(
+            BACKGROUND_LOCATION_TASK
+          );
+        }
+      } catch {
+        // Native background API may not exist in Expo Go.
       }
 
       await SecureStore.deleteItemAsync(
@@ -885,6 +1018,7 @@ export default function App() {
       );
 
       setTracking(false);
+      setTrackingMode("off");
       setTrackingStatus("GPS OFF");
       setServerStatus("NOT CONNECTED");
     } catch (err) {
@@ -925,7 +1059,7 @@ export default function App() {
       <SafeAreaView style={styles.loginScreen}>
         <StatusBar
           barStyle="light-content"
-          backgroundColor="#07111F"
+          backgroundColor="#06111F"
         />
 
         <KeyboardAvoidingView
@@ -934,59 +1068,98 @@ export default function App() {
               ? "padding"
               : undefined
           }
-          style={styles.loginKeyboard}
+          style={styles.loginKeyboardFinal}
         >
-          <View style={styles.loginTop}>
-            <View style={styles.brandMark}>
-              <Text style={styles.brandM}>
-                M
+          <ScrollView
+            contentContainerStyle={
+              styles.loginScrollFinal
+            }
+            keyboardShouldPersistTaps="handled"
+            showsVerticalScrollIndicator={false}
+          >
+            <View style={styles.loginVisualFinal}>
+              <Image
+                source={require("./assets/mavapp-login-truck.png")}
+                style={styles.loginTruckPhoto}
+                resizeMode="cover"
+              />
+
+              <View style={styles.loginPhotoShade} />
+
+              <View style={styles.brandWingRowCompact}>
+                <View style={styles.brandWingCompactLeft} />
+                <View style={styles.brandShieldCompact}>
+                  <Text style={styles.brandShieldCompactText}>
+                    M
+                  </Text>
+                </View>
+                <View style={styles.brandWingCompactRight} />
+              </View>
+
+              <Text style={styles.loginBrandFinal}>
+                MAVERICK
+              </Text>
+              <Text style={styles.loginAppNameFinal}>
+                MAVAPP
               </Text>
             </View>
-            <Text style={styles.loginBrand}>
-              MAVAPP
-            </Text>
-            <Text style={styles.loginSubtitle}>
-              DRIVER OPERATIONS
-            </Text>
-          </View>
 
-          <View style={styles.loginCard}>
-            <Text style={styles.loginTitle}>
-              Welcome back
+            <Text style={styles.loginTaglineFinal}>
+              Move smarter. Stay connected.
             </Text>
-            <Text style={styles.loginCopy}>
-              Sign in with your MAVTRACK
-              driver account.
+            <Text style={styles.loginDescriptionFinal}>
+              Real-time updates, dispatch info, and
+              everything you need on the road.
             </Text>
 
-            <Text style={styles.inputLabel}>
-              EMAIL
-            </Text>
-            <TextInput
-              value={email}
-              onChangeText={setEmail}
-              keyboardType="email-address"
-              autoCapitalize="none"
-              autoCorrect={false}
-              placeholder="driver@company.com"
-              placeholderTextColor="#53657B"
-              style={styles.input}
-            />
+            <View style={styles.loginFieldsFinal}>
+              <View style={styles.loginFieldRowFinal}>
+                <Text style={styles.loginFieldIconFinal}>
+                  ◯
+                </Text>
+                <TextInput
+                  value={email}
+                  onChangeText={setEmail}
+                  keyboardType="email-address"
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  placeholder="Driver email"
+                  placeholderTextColor="#7789A0"
+                  style={styles.loginFieldInputFinal}
+                />
+              </View>
 
-            <Text style={styles.inputLabel}>
-              PASSWORD
-            </Text>
-            <TextInput
-              value={password}
-              onChangeText={setPassword}
-              secureTextEntry
-              placeholder="••••••••"
-              placeholderTextColor="#53657B"
-              style={styles.input}
-            />
+              <View style={styles.loginDividerFinal} />
+
+              <View style={styles.loginFieldRowFinal}>
+                <Text style={styles.loginFieldIconFinal}>
+                  ▣
+                </Text>
+                <TextInput
+                  value={password}
+                  onChangeText={setPassword}
+                  secureTextEntry
+                  placeholder="Password"
+                  placeholderTextColor="#7789A0"
+                  style={styles.loginFieldInputFinal}
+                />
+              </View>
+            </View>
+
+            <View style={styles.loginMetaRow}>
+              <View style={styles.rememberRow}>
+                <View style={styles.rememberBox} />
+                <Text style={styles.rememberText}>
+                  Remember me
+                </Text>
+              </View>
+              <Text style={styles.forgotText}>
+                Forgot password?
+              </Text>
+            </View>
 
             {authError ? (
-              <Text style={styles.authError}>
+              <Text style={styles.authErrorFinal}>
                 {authError}
               </Text>
             ) : null}
@@ -995,9 +1168,8 @@ export default function App() {
               onPress={() => void login()}
               disabled={authLoading}
               style={({ pressed }) => [
-                styles.primaryButton,
-                pressed &&
-                  styles.buttonPressed,
+                styles.loginButtonFinal,
+                pressed && styles.buttonPressed,
                 authLoading &&
                   styles.buttonDisabled,
               ]}
@@ -1009,18 +1181,19 @@ export default function App() {
               ) : (
                 <Text
                   style={
-                    styles.primaryButtonText
+                    styles.loginButtonTextFinal
                   }
                 >
                   SIGN IN
                 </Text>
               )}
             </Pressable>
-          </View>
 
-          <Text style={styles.loginFooter}>
-            Powered by MAVTRACK
-          </Text>
+            <Text style={styles.loginFooterFinal}>
+              New driver? Contact your fleet
+              administrator.
+            </Text>
+          </ScrollView>
         </KeyboardAvoidingView>
       </SafeAreaView>
     );
@@ -1072,26 +1245,32 @@ export default function App() {
       />
 
       <View style={styles.appHeader}>
-        <View>
-          <Text style={styles.headerEyebrow}>
-            MAVAPP
-          </Text>
+        <Pressable style={styles.headerSideButton}>
+          <Text style={styles.headerMenuIcon}>☰</Text>
+        </Pressable>
+
+        <View style={styles.headerCenter}>
           <Text style={styles.headerTitle}>
             {tab === "home"
               ? "Home"
               : tab === "loads"
                 ? "Loads"
-                : "Profile"}
+                : "Profile & Equipment"}
           </Text>
         </View>
 
-        <View style={styles.avatar}>
-          <Text style={styles.avatarText}>
-            {driverName(user)
-              .slice(0, 1)
-              .toUpperCase()}
-          </Text>
-        </View>
+        <Pressable style={styles.headerSideButton}>
+          <Text style={styles.headerBellIcon}>♢</Text>
+          {pendingLoads.length > 0 ? (
+            <View style={styles.headerBadge}>
+              <Text style={styles.headerBadgeText}>
+                {pendingLoads.length > 9
+                  ? "9+"
+                  : pendingLoads.length}
+              </Text>
+            </View>
+          ) : null}
+        </Pressable>
       </View>
 
       {appError ? (
@@ -1109,7 +1288,9 @@ export default function App() {
           pendingCount={
             pendingLoads.length
           }
+          activeCount={activeLoads.length}
           tracking={tracking}
+          trackingMode={trackingMode}
           trackingStatus={trackingStatus}
           serverStatus={serverStatus}
           gps={gps}
@@ -1173,7 +1354,9 @@ function HomeScreen({
   user,
   activeLoad,
   pendingCount,
+  activeCount,
   tracking,
+  trackingMode,
   trackingStatus,
   serverStatus,
   gps,
@@ -1185,7 +1368,12 @@ function HomeScreen({
   user: DriverUser | null;
   activeLoad: Dispatch | null;
   pendingCount: number;
+  activeCount: number;
   tracking: boolean;
+  trackingMode:
+    | "off"
+    | "foreground"
+    | "background";
   trackingStatus: string;
   serverStatus: string;
   gps: GPSData | null;
@@ -1200,6 +1388,19 @@ function HomeScreen({
       ? gps.speedMps * 2.23694
       : 0;
 
+  const profile =
+    user?.profile || user?.driverProfile;
+
+  const currentTruck =
+    activeLoad?.asset?.deviceId ||
+    profile?.currentTruckNumber ||
+    DEFAULT_TRACKING_DEVICE_ID;
+
+  const currentTrailer =
+    activeLoad?.trailerNumber ||
+    profile?.currentTrailerNumber ||
+    "—";
+
   return (
     <ScrollView
       style={styles.content}
@@ -1208,198 +1409,171 @@ function HomeScreen({
       }
       showsVerticalScrollIndicator={false}
     >
-      <Text style={styles.greeting}>
-        Hi, {driverName(user).split(" ")[0]}
-      </Text>
-      <Text style={styles.greetingCopy}>
-        Go online before dispatch assigns a load.
-      </Text>
-
-      {pendingCount > 0 ? (
+      <View style={styles.kpiRow}>
+        <MiniKpi
+          label="ONLINE"
+          value={tracking ? "1" : "0"}
+          caption="Active"
+          tone="green"
+        />
         <Pressable
+          style={{ flex: 1 }}
           onPress={onOpenPending}
-          style={styles.assignmentBanner}
         >
-          <View
-            style={
-              styles.assignmentBannerIcon
-            }
-          >
-            <Text
-              style={
-                styles.assignmentBannerIconText
-              }
-            >
-              !
-            </Text>
-          </View>
-          <View style={{ flex: 1 }}>
-            <Text
-              style={
-                styles.assignmentBannerTitle
-              }
-            >
-              {pendingCount} new{" "}
-              {pendingCount === 1
-                ? "assignment"
-                : "assignments"}
-            </Text>
-            <Text
-              style={
-                styles.assignmentBannerCopy
-              }
-            >
-              Review and respond
-            </Text>
-          </View>
-          <Text
-            style={
-              styles.assignmentBannerArrow
-            }
-          >
-            ›
-          </Text>
+          <MiniKpi
+            label="PENDING"
+            value={String(pendingCount)}
+            caption="Loads"
+            tone="amber"
+          />
         </Pressable>
-      ) : null}
-
-      <View style={styles.sectionHeader}>
-        <Text style={styles.sectionEyebrow}>
-          ACTIVE LOAD
-        </Text>
+        <MiniKpi
+          label="ACTIVE"
+          value={String(activeCount)}
+          caption="Load"
+          tone="blue"
+        />
       </View>
+
+      <Text style={styles.sectionTitlePlain}>
+        Current Load
+      </Text>
 
       {activeLoad ? (
         <Pressable
           onPress={() =>
             onOpenLoad(activeLoad)
           }
-          style={styles.activeLoadCard}
+          style={styles.minimalLoadCard}
         >
-          <View style={styles.loadTopRow}>
-            <View>
-              <Text
-                style={styles.loadNumberLabel}
-              >
-                TRIP / LOAD
-              </Text>
-              <Text
-                style={styles.loadNumber}
-              >
-                {activeLoad.loadNumber}
+          <View style={styles.minimalLoadTop}>
+            <View style={styles.loadIconBox}>
+              <Text style={styles.loadIconText}>
+                ◈
               </Text>
             </View>
 
-            <StatusChip
-              text={statusLabel(
-                activeLoad.status
-              )}
-              tone="blue"
-            />
+            <View style={{ flex: 1 }}>
+              <View style={styles.loadTitleRow}>
+                <Text style={styles.minimalLoadNumber}>
+                  {activeLoad.loadNumber}
+                </Text>
+                <View style={styles.onlinePill}>
+                  <View style={styles.onlinePillDot} />
+                  <Text style={styles.onlinePillText}>
+                    {tracking ? "ONLINE" : "READY"}
+                  </Text>
+                </View>
+              </View>
+              <Text style={styles.minimalRouteLine}>
+                {activeLoad.pickupName}
+                {"  →  "}
+                {activeLoad.deliveryName}
+              </Text>
+            </View>
           </View>
 
-          <RoutePreview load={activeLoad} />
+          <View style={styles.minimalScheduleRow}>
+            <View style={styles.scheduleCell}>
+              <Text style={styles.scheduleLabel}>
+                PICKUP
+              </Text>
+              <Text style={styles.scheduleValue}>
+                {formatDateTime(
+                  activeLoad.pickupScheduledAt
+                )}
+              </Text>
+            </View>
 
-          <View style={styles.equipmentRow}>
-            <InfoMini
-              label="TRUCK"
-              value={
-                activeLoad.truckNumber ||
-                activeLoad.asset?.deviceId ||
-                "—"
-              }
-            />
-            <InfoMini
-              label="TRAILER"
-              value={
-                activeLoad.trailerNumber ||
-                "—"
-              }
-            />
-            <InfoMini
-              label="PO"
-              value={
-                activeLoad.poNumber || "—"
-              }
-            />
+            <View style={styles.scheduleCell}>
+              <Text style={styles.scheduleLabel}>
+                DELIVERY
+              </Text>
+              <Text style={styles.scheduleValue}>
+                {formatDateTime(
+                  activeLoad.deliveryScheduledAt
+                )}
+              </Text>
+            </View>
+          </View>
+
+          <View style={styles.minimalLoadFooter}>
+            <Text style={styles.loadStatusLabel}>
+              Load Status
+            </Text>
+            <Text style={styles.loadStatusValue}>
+              ◫ {statusLabel(activeLoad.status)}
+            </Text>
+            <Text style={styles.updatedText}>
+              {serverStatus === "CONNECTED"
+                ? "Live"
+                : "Waiting for GPS"}
+            </Text>
           </View>
         </Pressable>
       ) : (
-        <View style={styles.emptyCard}>
-          <Text style={styles.emptyIcon}>
-            ✓
+        <View style={styles.minimalEmptyLoad}>
+          <Text style={styles.minimalEmptyTitle}>
+            No current load
           </Text>
-          <Text style={styles.emptyTitle}>
-            No active load
-          </Text>
-          <Text style={styles.emptyCopy}>
-            Accepted assignments will
-            appear here.
+          <Text style={styles.minimalEmptyCopy}>
+            Accepted assignments will appear here.
           </Text>
         </View>
       )}
 
-      <View style={styles.sectionHeader}>
-        <Text style={styles.sectionEyebrow}>
-          LIVE TRACKING
-        </Text>
-      </View>
+      <Text style={styles.sectionTitlePlain}>
+        Current Truck
+      </Text>
 
-      <View style={styles.trackingCard}>
-        <View style={styles.trackingTop}>
-          <View style={styles.trackingStatusLeft}>
-            <View
-              style={[
-                styles.liveDot,
-                tracking
-                  ? styles.liveDotOn
-                  : styles.liveDotOff,
-              ]}
-            />
-            <View>
-              <Text
-                style={
-                  styles.trackingStatusTitle
-                }
-              >
-                {tracking
-                  ? "Tracking active"
-                  : "Tracking stopped"}
-              </Text>
-              <Text
-                style={
-                  styles.trackingStatusCopy
-                }
-              >
-                {trackingStatus}
-              </Text>
-            </View>
+      <View style={styles.currentTruckCardPro}>
+        <View style={styles.currentTruckTopPro}>
+          <View style={styles.truckBadge}>
+            <Text style={styles.truckBadgeText}>
+              TRK
+            </Text>
           </View>
 
-          <Text
-            style={[
-              styles.serverBadge,
-              serverStatus === "CONNECTED"
-                ? styles.serverBadgeOn
-                : styles.serverBadgeOff,
-            ]}
-          >
-            {serverStatus}
-          </Text>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.currentTruckTitle}>
+              {currentTruck}
+            </Text>
+            <Text style={styles.currentTruckSub}>
+              {currentTrailer !== "—"
+                ? `Trailer ${currentTrailer}`
+                : "Phone GPS tracking"}
+            </Text>
+          </View>
+
+          <View style={styles.truckOnlineWrap}>
+            <View
+              style={[
+                styles.onlinePillDot,
+                !tracking && {
+                  backgroundColor: COLORS.muted,
+                },
+              ]}
+            />
+            <Text
+              style={[
+                styles.truckOnlineText,
+                !tracking && {
+                  color: COLORS.muted,
+                },
+              ]}
+            >
+              {tracking ? "ONLINE" : "OFFLINE"}
+            </Text>
+          </View>
         </View>
 
-        <View style={styles.trackingDeviceRow}>
-          <Text style={styles.trackingDeviceLabel}>
-            TRACKED TRUCK
-          </Text>
-          <Text style={styles.trackingDeviceValue}>
-            {activeLoad?.asset?.deviceId ||
-              user?.profile?.currentTruckNumber ||
-              user?.driverProfile?.currentTruckNumber ||
-              DEFAULT_TRACKING_DEVICE_ID}
-          </Text>
-        </View>
+        <View style={styles.currentTruckDivider} />
 
-        <View style={styles.trackingMetrics}>
+        <View style={styles.currentTruckMetricsPro}>
+          <Metric
+            label="TYPE"
+            value="TRK"
+          />
           <Metric
             label="SPEED"
             value={`${speedMph.toFixed(0)} mph`}
@@ -1412,43 +1586,85 @@ function HomeScreen({
                 : "—"
             }
           />
-          <Metric
-            label="HEADING"
-            value={
-              gps?.heading != null &&
-              gps.heading >= 0
-                ? `${gps.heading.toFixed(0)}°`
-                : "—"
-            }
-          />
         </View>
+      </View>
 
-        <Pressable
-          onPress={
+      <Pressable
+        onPress={
+          tracking
+            ? onStopTracking
+            : onStartTracking
+        }
+        style={({ pressed }) => [
+          tracking
+            ? styles.stopTrackingButtonPro
+            : styles.startTrackingButtonPro,
+          pressed && styles.buttonPressed,
+        ]}
+      >
+        <Text style={styles.trackingTargetIcon}>
+          ◎
+        </Text>
+        <Text style={styles.trackingButtonTextPro}>
+          {tracking
+            ? "STOP TRACKING"
+            : "START TRACKING"}
+        </Text>
+      </Pressable>
+
+      <View style={styles.trackingFinePrint}>
+        <View
+          style={[
+            styles.liveDot,
             tracking
-              ? onStopTracking
-              : onStartTracking
-          }
-          style={({ pressed }) => [
-            tracking
-              ? styles.stopTrackingButton
-              : styles.startTrackingButton,
-            pressed &&
-              styles.buttonPressed,
+              ? styles.liveDotOn
+              : styles.liveDotOff,
           ]}
-        >
-          <Text
-            style={
-              styles.trackingButtonText
-            }
-          >
-            {tracking
-              ? "STOP TRACKING"
-              : "START TRACKING"}
-          </Text>
-        </Pressable>
+        />
+        <Text style={styles.trackingFinePrintText}>
+          {trackingStatus}
+          {serverStatus
+            ? ` · ${serverStatus}`
+            : ""}
+        </Text>
       </View>
     </ScrollView>
+  );
+}
+
+function MiniKpi({
+  label,
+  value,
+  caption,
+  tone,
+}: {
+  label: string;
+  value: string;
+  caption: string;
+  tone: "green" | "amber" | "blue";
+}) {
+  const dotStyle =
+    tone === "green"
+      ? styles.kpiDotGreen
+      : tone === "amber"
+        ? styles.kpiDotAmber
+        : styles.kpiDotBlue;
+
+  return (
+    <View style={styles.kpiCard}>
+      <View style={styles.kpiLabelRow}>
+        <View style={[styles.kpiDot, dotStyle]} />
+        <Text style={styles.kpiLabel}>
+          {label}
+        </Text>
+      </View>
+      <Text style={styles.kpiValue}>
+        {value}
+      </Text>
+      <Text style={styles.kpiCaption}>
+        {caption}
+      </Text>
+    </View>
   );
 }
 
@@ -1692,37 +1908,36 @@ function LoadDetailScreen({
                 load.referenceNumber || "—"
               }
             />
-            <DetailItem
-              label="Commodity"
-              value={load.commodity || "—"}
-            />
-            <DetailItem
-              label="Units"
-              value={
-                load.units != null
-                  ? String(load.units)
-                  : "—"
-              }
-            />
-            <DetailItem
-              label="Weight"
-              value={
-                load.weightLbs != null
-                  ? `${Number(
-                      load.weightLbs
-                    ).toLocaleString()} lb`
-                  : "—"
-              }
-            />
-            <DetailItem
-              label="Miles"
-              value={
-                load.miles != null
-                  ? String(load.miles)
-                  : "—"
-              }
-            />
           </DetailGrid>
+        </View>
+
+        <View style={styles.detailCard}>
+          <DetailSectionTitle
+            title="TEMPERATURE"
+          />
+          <View style={styles.temperatureRow}>
+            <TemperatureMetric
+              label="SET POINT"
+              value={fahrenheitFromCelsius(
+                load.temperatureSetpointC
+              )}
+              tone="blue"
+            />
+            <TemperatureMetric
+              label="MINIMUM"
+              value={fahrenheitFromCelsius(
+                load.temperatureMinC
+              )}
+              tone="blue"
+            />
+            <TemperatureMetric
+              label="MAXIMUM"
+              value={fahrenheitFromCelsius(
+                load.temperatureMaxC
+              )}
+              tone="red"
+            />
+          </View>
         </View>
 
         <View style={styles.detailCard}>
@@ -1855,6 +2070,7 @@ function ProfileScreen({
     licenseState: string;
     currentTruckNumber: string;
     currentTrailerNumber: string;
+    currentTrailerLicense: string;
   }) => Promise<void>;
   onLogout: () => void;
 }) {
@@ -1863,8 +2079,12 @@ function ProfileScreen({
     user?.driverProfile ||
     null;
 
-  const [editing, setEditing] =
+  const [profileEditing, setProfileEditing] =
     useState(false);
+
+  const [equipmentEditing, setEquipmentEditing] =
+    useState(false);
+
   const [saving, setSaving] =
     useState(false);
 
@@ -1876,10 +2096,10 @@ function ProfileScreen({
       profile?.licenseNumber || "",
     licenseState:
       profile?.licenseState || "",
-    currentTruckNumber:
-      profile?.currentTruckNumber || "",
     currentTrailerNumber:
       profile?.currentTrailerNumber || "",
+    currentTrailerLicense:
+      profile?.currentTrailerLicense || "",
   });
 
   useEffect(() => {
@@ -1891,10 +2111,10 @@ function ProfileScreen({
         profile?.licenseNumber || "",
       licenseState:
         profile?.licenseState || "",
-      currentTruckNumber:
-        profile?.currentTruckNumber || "",
       currentTrailerNumber:
         profile?.currentTrailerNumber || "",
+      currentTrailerLicense:
+        profile?.currentTrailerLicense || "",
     });
   }, [
     profile?.firstName,
@@ -1902,11 +2122,16 @@ function ProfileScreen({
     profile?.phone,
     profile?.licenseNumber,
     profile?.licenseState,
-    profile?.currentTruckNumber,
     profile?.currentTrailerNumber,
+    profile?.currentTrailerLicense,
   ]);
 
-  async function save() {
+  const fixedTruckDeviceId =
+    activeLoad?.asset?.deviceId ||
+    profile?.currentTruckNumber ||
+    DEFAULT_TRACKING_DEVICE_ID;
+
+  async function saveAll() {
     if (
       !form.firstName.trim() ||
       !form.lastName.trim()
@@ -1920,6 +2145,7 @@ function ProfileScreen({
 
     try {
       setSaving(true);
+
       await onSave({
         firstName: form.firstName.trim(),
         lastName: form.lastName.trim(),
@@ -1929,14 +2155,19 @@ function ProfileScreen({
         licenseState:
           form.licenseState.trim(),
         currentTruckNumber:
-          form.currentTruckNumber.trim(),
+          fixedTruckDeviceId,
         currentTrailerNumber:
           form.currentTrailerNumber.trim(),
+        currentTrailerLicense:
+          form.currentTrailerLicense.trim(),
       });
-      setEditing(false);
+
+      setProfileEditing(false);
+      setEquipmentEditing(false);
+
       Alert.alert(
         "Profile updated",
-        "Your driver information has been saved."
+        "Driver and equipment information has been saved."
       );
     } catch (err) {
       Alert.alert(
@@ -1950,13 +2181,16 @@ function ProfileScreen({
     }
   }
 
-  const currentTruck =
-    activeLoad?.asset?.deviceId ||
-    activeLoad?.truckNumber ||
-    profile?.currentTruckNumber ||
-    "—";
+  const truckDeviceId =
+    fixedTruckDeviceId;
 
-  const currentTrailer =
+  const truckLabel =
+    activeLoad?.truckNumber ||
+    (truckDeviceId === "TRK-TEST-001"
+      ? "TRK 01"
+      : truckDeviceId);
+
+  const trailerNumber =
     activeLoad?.trailerNumber ||
     profile?.currentTrailerNumber ||
     "—";
@@ -1965,273 +2199,360 @@ function ProfileScreen({
     <ScrollView
       style={styles.content}
       contentContainerStyle={
-        styles.profileContent
+        styles.profileContentPro
       }
       showsVerticalScrollIndicator={false}
     >
-      <View style={styles.profileHero}>
-        <View
-          style={styles.profileAvatarLarge}
+      <View style={styles.profileSectionHeader}>
+        <Text style={styles.profileSectionTitle}>
+          Driver Profile
+        </Text>
+
+        <Pressable
+          onPress={() =>
+            setProfileEditing(
+              (value) => !value
+            )
+          }
         >
-          <Text
-            style={
-              styles.profileAvatarText
-            }
-          >
-            {driverName(user)
-              .slice(0, 1)
-              .toUpperCase()}
+          <Text style={styles.profileEditText}>
+            {profileEditing
+              ? "Cancel"
+              : "Edit"}
           </Text>
-        </View>
-        <Text style={styles.profileName}>
-          {driverName(user)}
-        </Text>
-        <Text style={styles.profileEmail}>
-          {user?.email || "—"}
-        </Text>
-        <StatusChip
-          text="DRIVER"
-          tone="blue"
-        />
+        </Pressable>
       </View>
 
-      <View style={styles.detailCard}>
-        <View
-          style={{
-            flexDirection: "row",
-            alignItems: "center",
-            justifyContent: "space-between",
-            marginBottom: 16,
-          }}
-        >
-          <DetailSectionTitle
-            title="DRIVER PROFILE"
-          />
-          <Pressable
-            onPress={() =>
-              setEditing((value) => !value)
+      {profileEditing ? (
+        <View style={styles.profileEditCardCompact}>
+          <View style={styles.editTwoColRow}>
+            <View style={styles.editHalf}>
+              <Text style={styles.inputLabel}>
+                FIRST NAME
+              </Text>
+              <TextInput
+                value={form.firstName}
+                onChangeText={(value) =>
+                  setForm((current) => ({
+                    ...current,
+                    firstName: value,
+                  }))
+                }
+                style={styles.inputCompact}
+              />
+            </View>
+
+            <View style={styles.editHalf}>
+              <Text style={styles.inputLabel}>
+                LAST NAME
+              </Text>
+              <TextInput
+                value={form.lastName}
+                onChangeText={(value) =>
+                  setForm((current) => ({
+                    ...current,
+                    lastName: value,
+                  }))
+                }
+                style={styles.inputCompact}
+              />
+            </View>
+          </View>
+
+          <Text style={styles.inputLabel}>
+            PHONE
+          </Text>
+          <TextInput
+            value={form.phone}
+            onChangeText={(value) =>
+              setForm((current) => ({
+                ...current,
+                phone: value,
+              }))
             }
-            style={styles.backButton}
+            keyboardType="phone-pad"
+            style={styles.inputCompact}
+          />
+
+          <View style={styles.editTwoColRow}>
+            <View style={styles.editHalf}>
+              <Text style={styles.inputLabel}>
+                DRIVER LICENSE
+              </Text>
+              <TextInput
+                value={form.licenseNumber}
+                onChangeText={(value) =>
+                  setForm((current) => ({
+                    ...current,
+                    licenseNumber: value,
+                  }))
+                }
+                autoCapitalize="characters"
+                style={styles.inputCompact}
+              />
+            </View>
+
+            <View style={styles.editHalf}>
+              <Text style={styles.inputLabel}>
+                STATE
+              </Text>
+              <TextInput
+                value={form.licenseState}
+                onChangeText={(value) =>
+                  setForm((current) => ({
+                    ...current,
+                    licenseState: value,
+                  }))
+                }
+                autoCapitalize="characters"
+                style={styles.inputCompact}
+              />
+            </View>
+          </View>
+
+          <Pressable
+            onPress={() => void saveAll()}
+            disabled={saving}
+            style={[
+              styles.saveProfileButton,
+              saving && styles.buttonDisabled,
+            ]}
           >
-            <Text
-              style={{
-                color: COLORS.blueLight,
-                fontSize: 11,
-                fontWeight: "900",
-              }}
-            >
-              {editing ? "CANCEL" : "EDIT"}
-            </Text>
+            {saving ? (
+              <ActivityIndicator color="#FFFFFF" />
+            ) : (
+              <Text style={styles.saveProfileButtonText}>
+                SAVE PROFILE
+              </Text>
+            )}
           </Pressable>
         </View>
+      ) : (
+        <View style={styles.profileRowsCard}>
+          <ProfileRow
+            icon="⌕"
+            label="Phone"
+            value={profile?.phone || "—"}
+          />
+          <View style={styles.profileRowDivider} />
+          <ProfileRow
+            icon="▣"
+            label="License"
+            value={[
+              profile?.licenseState,
+              profile?.licenseNumber,
+            ]
+              .filter(Boolean)
+              .join(" ") || "—"}
+          />
+        </View>
+      )}
 
-        {editing ? (
-          <>
-            <Text style={styles.inputLabel}>
-              FIRST NAME
-            </Text>
-            <TextInput
-              value={form.firstName}
-              onChangeText={(value) =>
-                setForm((current) => ({
-                  ...current,
-                  firstName: value,
-                }))
-              }
-              style={styles.input}
-            />
+      <View style={styles.profileSectionHeader}>
+        <Text style={styles.profileSectionTitle}>
+          Equipment
+        </Text>
 
-            <Text style={styles.inputLabel}>
-              LAST NAME
-            </Text>
-            <TextInput
-              value={form.lastName}
-              onChangeText={(value) =>
-                setForm((current) => ({
-                  ...current,
-                  lastName: value,
-                }))
-              }
-              style={styles.input}
-            />
-
-            <Text style={styles.inputLabel}>
-              PHONE NUMBER
-            </Text>
-            <TextInput
-              value={form.phone}
-              onChangeText={(value) =>
-                setForm((current) => ({
-                  ...current,
-                  phone: value,
-                }))
-              }
-              keyboardType="phone-pad"
-              style={styles.input}
-            />
-
-            <Text style={styles.inputLabel}>
-              LICENSE NUMBER
-            </Text>
-            <TextInput
-              value={form.licenseNumber}
-              onChangeText={(value) =>
-                setForm((current) => ({
-                  ...current,
-                  licenseNumber: value,
-                }))
-              }
-              autoCapitalize="characters"
-              style={styles.input}
-            />
-
-            <Text style={styles.inputLabel}>
-              LICENSE STATE
-            </Text>
-            <TextInput
-              value={form.licenseState}
-              onChangeText={(value) =>
-                setForm((current) => ({
-                  ...current,
-                  licenseState: value,
-                }))
-              }
-              autoCapitalize="characters"
-              style={styles.input}
-            />
-
-            <Text style={styles.inputLabel}>
-              CURRENT TRUCK / TRK ASSET
-            </Text>
-            <TextInput
-              value={form.currentTruckNumber}
-              onChangeText={(value) =>
-                setForm((current) => ({
-                  ...current,
-                  currentTruckNumber: value,
-                }))
-              }
-              autoCapitalize="characters"
-              placeholder="TRK-TEST-001"
-              placeholderTextColor="#53657B"
-              style={styles.input}
-            />
-
-            <Text style={styles.inputLabel}>
-              CURRENT TRAILER
-            </Text>
-            <TextInput
-              value={
-                form.currentTrailerNumber
-              }
-              onChangeText={(value) =>
-                setForm((current) => ({
-                  ...current,
-                  currentTrailerNumber:
-                    value,
-                }))
-              }
-              autoCapitalize="characters"
-              placeholder="TRL-205"
-              placeholderTextColor="#53657B"
-              style={styles.input}
-            />
-
-            <Pressable
-              onPress={() => void save()}
-              disabled={saving}
-              style={[
-                styles.primaryButton,
-                { marginTop: 18 },
-                saving &&
-                  styles.buttonDisabled,
-              ]}
-            >
-              {saving ? (
-                <ActivityIndicator
-                  color="#FFFFFF"
-                />
-              ) : (
-                <Text
-                  style={
-                    styles.primaryButtonText
-                  }
-                >
-                  SAVE CHANGES
-                </Text>
-              )}
-            </Pressable>
-          </>
-        ) : (
-          <DetailGrid>
-            <DetailItem
-              label="Phone"
-              value={profile?.phone || "—"}
-            />
-            <DetailItem
-              label="License"
-              value={
-                profile?.licenseNumber || "—"
-              }
-            />
-            <DetailItem
-              label="State"
-              value={
-                profile?.licenseState || "—"
-              }
-            />
-            <DetailItem
-              label="Account"
-              value={
-                user?.active === false
-                  ? "Inactive"
-                  : "Active"
-              }
-            />
-          </DetailGrid>
-        )}
+        <Pressable
+          onPress={() =>
+            setEquipmentEditing(
+              (value) => !value
+            )
+          }
+        >
+          <Text style={styles.profileEditText}>
+            {equipmentEditing
+              ? "Cancel"
+              : "Edit"}
+          </Text>
+        </Pressable>
       </View>
 
-      <View style={styles.detailCard}>
-        <DetailSectionTitle
-          title="CURRENT EQUIPMENT"
-        />
-        <DetailGrid>
-          <DetailItem
+      {equipmentEditing ? (
+        <View style={styles.profileEditCardCompact}>
+          <Text style={styles.inputLabel}>
+            TRUCK
+          </Text>
+
+          <View style={styles.readOnlyEquipmentRow}>
+            <View style={styles.assetChoiceBadge}>
+              <Text style={styles.assetChoiceBadgeText}>
+                TRK
+              </Text>
+            </View>
+
+            <View style={{ flex: 1 }}>
+              <Text style={styles.assetChoiceName}>
+                {truckLabel}
+              </Text>
+              <Text style={styles.assetChoiceDevice}>
+                {truckDeviceId}
+              </Text>
+            </View>
+
+            <Text style={styles.fixedEquipmentText}>
+              FIXED
+            </Text>
+          </View>
+
+          <Text style={styles.inputLabel}>
+            TRAILER NUMBER
+          </Text>
+          <TextInput
+            value={form.currentTrailerNumber}
+            onChangeText={(value) =>
+              setForm((current) => ({
+                ...current,
+                currentTrailerNumber: value,
+              }))
+            }
+            autoCapitalize="characters"
+            placeholder="2-01TRL"
+            placeholderTextColor="#53657B"
+            style={styles.inputCompact}
+          />
+
+          <Text style={styles.inputLabel}>
+            TRAILER LICENSE
+          </Text>
+          <TextInput
+            value={form.currentTrailerLicense}
+            onChangeText={(value) =>
+              setForm((current) => ({
+                ...current,
+                currentTrailerLicense: value,
+              }))
+            }
+            autoCapitalize="characters"
+            placeholder="Trailer plate / license"
+            placeholderTextColor="#53657B"
+            style={styles.inputCompact}
+          />
+
+          <Pressable
+            onPress={() => void saveAll()}
+            disabled={saving}
+            style={[
+              styles.saveProfileButton,
+              saving && styles.buttonDisabled,
+            ]}
+          >
+            {saving ? (
+              <ActivityIndicator color="#FFFFFF" />
+            ) : (
+              <Text style={styles.saveProfileButtonText}>
+                SAVE EQUIPMENT
+              </Text>
+            )}
+          </Pressable>
+        </View>
+      ) : (
+        <View style={styles.profileRowsCard}>
+          <ProfileRow
+            icon="▰"
             label="Truck"
-            value={currentTruck}
+            value={truckLabel}
+            subvalue={truckDeviceId}
           />
-          <DetailItem
+
+          <View style={styles.profileRowDivider} />
+
+          <ProfileRow
+            icon="▭"
             label="Trailer"
-            value={currentTrailer}
-          />
-          <DetailItem
-            label="Load"
-            value={
-              activeLoad?.loadNumber ||
-              "No active load"
+            value={trailerNumber}
+            subvalue={
+              profile?.currentTrailerLicense
+                ? `License ${profile.currentTrailerLicense}`
+                : "No trailer license saved"
             }
           />
-          <DetailItem
-            label="Tracking"
-            value={
-              profile?.currentTruckNumber
-                ? "Ready"
-                : "Truck not set"
-            }
-          />
-        </DetailGrid>
+        </View>
+      )}
+
+      <View style={styles.assignmentProfileCard}>
+        <Text style={styles.assignmentProfileTitle}>
+          Current Assignment
+        </Text>
+
+        {activeLoad ? (
+          <View style={styles.assignmentLoadRow}>
+            <View style={styles.loadIconBoxSmall}>
+              <Text style={styles.loadIconText}>
+                ◈
+              </Text>
+            </View>
+
+            <View style={{ flex: 1 }}>
+              <Text style={styles.assignmentLoadNumber}>
+                {activeLoad.loadNumber}
+              </Text>
+              <Text style={styles.assignmentRouteText}>
+                {activeLoad.pickupName}
+                {"  →  "}
+                {activeLoad.deliveryName}
+              </Text>
+            </View>
+
+            <View style={styles.onlinePill}>
+              <View style={styles.onlinePillDot} />
+              <Text style={styles.onlinePillText}>
+                ACTIVE
+              </Text>
+            </View>
+          </View>
+        ) : (
+          <Text style={styles.noAssignmentText}>
+            No active assignment.
+          </Text>
+        )}
       </View>
 
       <Pressable
         onPress={onLogout}
-        style={styles.logoutButton}
+        style={styles.logoutButtonPro}
       >
-        <Text style={styles.logoutText}>
+        <Text style={styles.logoutTextPro}>
           SIGN OUT
         </Text>
       </Pressable>
     </ScrollView>
+  );
+}
+
+function ProfileRow({
+  icon,
+  label,
+  value,
+  subvalue,
+}: {
+  icon: string;
+  label: string;
+  value: string;
+  subvalue?: string;
+}) {
+  return (
+    <View style={styles.profileRow}>
+      <Text style={styles.profileRowIcon}>
+        {icon}
+      </Text>
+      <View style={{ flex: 1 }}>
+        <Text style={styles.profileRowLabel}>
+          {label}
+        </Text>
+        {subvalue ? (
+          <Text style={styles.profileRowSubvalue}>
+            {subvalue}
+          </Text>
+        ) : null}
+      </View>
+      <Text style={styles.profileRowValue}>
+        {value}
+      </Text>
+      <Text style={styles.profileRowChevron}>
+        ›
+      </Text>
+    </View>
   );
 }
 
@@ -2245,7 +2566,7 @@ function BottomTabs({
   onChange: (tab: TabName) => void;
 }) {
   return (
-    <View style={styles.bottomTabs}>
+    <View style={styles.bottomTabsPro}>
       <TabButton
         label="Home"
         icon="⌂"
@@ -2254,14 +2575,36 @@ function BottomTabs({
       />
       <TabButton
         label="Loads"
-        icon="▤"
+        icon="▣"
         badge={pendingCount}
         active={tab === "loads"}
         onPress={() => onChange("loads")}
       />
       <TabButton
+        label="Map"
+        icon="◇"
+        active={false}
+        onPress={() =>
+          Alert.alert(
+            "Map",
+            "Driver map view will be connected next."
+          )
+        }
+      />
+      <TabButton
+        label="Alerts"
+        icon="♢"
+        active={false}
+        onPress={() =>
+          Alert.alert(
+            "Alerts",
+            "Driver alerts will be connected next."
+          )
+        }
+      />
+      <TabButton
         label="Profile"
-        icon="●"
+        icon="◉"
         active={tab === "profile"}
         onPress={() =>
           onChange("profile")
@@ -2287,31 +2630,33 @@ function TabButton({
   return (
     <Pressable
       onPress={onPress}
-      style={styles.tabButton}
+      style={styles.tabButtonPro}
     >
       <View style={styles.tabIconWrap}>
         <Text
           style={[
-            styles.tabIcon,
-            active && styles.tabIconActive,
+            styles.tabIconPro,
+            active &&
+              styles.tabIconActivePro,
           ]}
         >
           {icon}
         </Text>
+
         {badge ? (
           <View style={styles.tabBadge}>
-            <Text
-              style={styles.tabBadgeText}
-            >
+            <Text style={styles.tabBadgeText}>
               {badge > 9 ? "9+" : badge}
             </Text>
           </View>
         ) : null}
       </View>
+
       <Text
         style={[
-          styles.tabLabel,
-          active && styles.tabLabelActive,
+          styles.tabLabelPro,
+          active &&
+            styles.tabLabelActivePro,
         ]}
       >
         {label}
@@ -2539,6 +2884,33 @@ function Metric({
   );
 }
 
+function TemperatureMetric({
+  label,
+  value,
+  tone,
+}: {
+  label: string;
+  value: string;
+  tone: "blue" | "red";
+}) {
+  return (
+    <View style={styles.temperatureMetric}>
+      <Text style={styles.temperatureLabel}>
+        {label}
+      </Text>
+      <Text
+        style={[
+          styles.temperatureValue,
+          tone === "red" &&
+            styles.temperatureValueRed,
+        ]}
+      >
+        {value}
+      </Text>
+    </View>
+  );
+}
+
 function DetailSectionTitle({
   title,
 }: {
@@ -2586,23 +2958,31 @@ function DetailItem({
 }
 
 const COLORS = {
-  bg: "#07111F",
-  surface: "#0E1A2B",
-  surface2: "#132238",
-  border: "#1D2C42",
-  text: "#F7FAFC",
-  muted: "#8191A7",
-  blue: "#2F6FEB",
-  blueLight: "#60A5FA",
-  green: "#22C55E",
-  amber: "#F59E0B",
-  red: "#EF4444",
+  bg: "#06111F",
+  bgSoft: "#081628",
+  surface: "#0C1B2D",
+  surface2: "#10243A",
+  surface3: "#132A44",
+  border: "#1E3550",
+  borderSoft: "#162A42",
+  text: "#F4F8FE",
+  muted: "#8193AA",
+  blue: "#2F78FF",
+  blueStrong: "#1265FF",
+  blueLight: "#5EA2FF",
+  green: "#44D17A",
+  amber: "#FFAA45",
+  red: "#F0525E",
 };
 
 const styles = StyleSheet.create({
   app: {
     flex: 1,
     backgroundColor: COLORS.bg,
+  },
+
+  content: {
+    flex: 1,
   },
 
   bootScreen: {
@@ -2614,31 +2994,33 @@ const styles = StyleSheet.create({
 
   bootBrand: {
     color: COLORS.text,
-    marginTop: 16,
-    fontSize: 23,
+    marginTop: 18,
+    fontSize: 24,
     fontWeight: "900",
     letterSpacing: 5,
   },
 
   brandMark: {
-    width: 58,
-    height: 58,
-    borderRadius: 17,
+    width: 76,
+    height: 76,
+    borderRadius: 38,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: COLORS.blue,
+    borderWidth: 1,
+    borderColor: "#37516F",
+    backgroundColor: "#0C1C30",
     shadowColor: COLORS.blue,
-    shadowOpacity: 0.3,
-    shadowRadius: 18,
+    shadowOpacity: 0.22,
+    shadowRadius: 24,
     shadowOffset: {
       width: 0,
-      height: 8,
+      height: 10,
     },
   },
 
   brandM: {
     color: "#FFFFFF",
-    fontSize: 30,
+    fontSize: 34,
     fontWeight: "900",
     fontStyle: "italic",
   },
@@ -2650,7 +3032,7 @@ const styles = StyleSheet.create({
 
   loginKeyboard: {
     flex: 1,
-    paddingHorizontal: 22,
+    paddingHorizontal: 24,
     justifyContent: "center",
   },
 
@@ -2662,31 +3044,31 @@ const styles = StyleSheet.create({
   loginBrand: {
     marginTop: 18,
     color: COLORS.text,
-    fontSize: 28,
+    fontSize: 31,
     fontWeight: "900",
-    letterSpacing: 5,
+    letterSpacing: 4.5,
   },
 
   loginSubtitle: {
-    marginTop: 5,
-    color: COLORS.muted,
-    fontSize: 10,
-    fontWeight: "800",
+    marginTop: 6,
+    color: COLORS.blueLight,
+    fontSize: 12,
+    fontWeight: "900",
     letterSpacing: 3,
   },
 
   loginCard: {
-    padding: 22,
+    padding: 20,
     borderWidth: 1,
     borderColor: COLORS.border,
-    borderRadius: 22,
-    backgroundColor: COLORS.surface,
+    borderRadius: 18,
+    backgroundColor: "rgba(12,27,45,0.96)",
   },
 
   loginTitle: {
     color: COLORS.text,
-    fontSize: 24,
-    fontWeight: "800",
+    fontSize: 22,
+    fontWeight: "900",
   },
 
   loginCopy: {
@@ -2701,43 +3083,50 @@ const styles = StyleSheet.create({
     marginBottom: 7,
     color: COLORS.muted,
     fontSize: 10,
-    fontWeight: "800",
-    letterSpacing: 1.2,
+    fontWeight: "900",
+    letterSpacing: 1.1,
   },
 
   input: {
     height: 50,
     marginBottom: 16,
-    paddingHorizontal: 14,
+    paddingHorizontal: 15,
     borderWidth: 1,
     borderColor: COLORS.border,
     borderRadius: 12,
-    backgroundColor: "#0A1525",
+    backgroundColor: "#0A1728",
     color: COLORS.text,
     fontSize: 15,
   },
 
   authError: {
     marginBottom: 14,
-    color: "#FCA5A5",
+    color: "#FF9CA4",
     fontSize: 12,
     lineHeight: 18,
   },
 
   primaryButton: {
-    height: 52,
+    height: 54,
     marginTop: 4,
     alignItems: "center",
     justifyContent: "center",
-    borderRadius: 13,
-    backgroundColor: COLORS.blue,
+    borderRadius: 27,
+    backgroundColor: COLORS.blueStrong,
+    shadowColor: COLORS.blue,
+    shadowOpacity: 0.22,
+    shadowRadius: 18,
+    shadowOffset: {
+      width: 0,
+      height: 8,
+    },
   },
 
   primaryButtonText: {
     color: "#FFFFFF",
     fontSize: 13,
     fontWeight: "900",
-    letterSpacing: 1,
+    letterSpacing: 1.2,
   },
 
   buttonPressed: {
@@ -2752,304 +3141,358 @@ const styles = StyleSheet.create({
   loginFooter: {
     marginTop: 22,
     textAlign: "center",
-    color: "#46566B",
+    color: "#586A80",
     fontSize: 10,
     fontWeight: "700",
-    letterSpacing: 1,
   },
 
   appHeader: {
-    height: 76,
-    paddingHorizontal: 20,
+    minHeight: 56,
+    paddingHorizontal: 14,
     flexDirection: "row",
     alignItems: "center",
-    justifyContent: "space-between",
     borderBottomWidth: 1,
-    borderBottomColor: COLORS.border,
+    borderBottomColor: COLORS.borderSoft,
+    backgroundColor: "#071524",
   },
 
-  headerEyebrow: {
-    color: COLORS.blueLight,
-    fontSize: 9,
-    fontWeight: "900",
-    letterSpacing: 1.8,
+  headerSideButton: {
+    width: 42,
+    height: 42,
+    alignItems: "center",
+    justifyContent: "center",
+    position: "relative",
+  },
+
+  headerCenter: {
+    flex: 1,
+    alignItems: "center",
   },
 
   headerTitle: {
-    marginTop: 3,
     color: COLORS.text,
-    fontSize: 21,
-    fontWeight: "800",
+    fontSize: 15,
+    fontWeight: "900",
   },
 
-  avatar: {
-    width: 38,
-    height: 38,
-    borderRadius: 19,
+  headerMenuIcon: {
+    color: "#DDE8F6",
+    fontSize: 16,
+    fontWeight: "700",
+  },
+
+  headerBellIcon: {
+    color: "#DDE8F6",
+    fontSize: 18,
+  },
+
+  headerBadge: {
+    position: "absolute",
+    top: 3,
+    right: 1,
+    minWidth: 17,
+    height: 17,
+    paddingHorizontal: 4,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: COLORS.surface2,
-    borderWidth: 1,
-    borderColor: "#2A3B54",
+    borderRadius: 9,
+    backgroundColor: COLORS.red,
   },
 
-  avatarText: {
-    color: COLORS.text,
-    fontSize: 14,
+  headerBadgeText: {
+    color: "#FFFFFF",
+    fontSize: 8,
     fontWeight: "900",
   },
 
   inlineError: {
-    marginHorizontal: 18,
+    marginHorizontal: 16,
     marginTop: 10,
-    padding: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
     borderRadius: 10,
-    backgroundColor: "#36181D",
+    backgroundColor: "#35161B",
   },
 
   inlineErrorText: {
-    color: "#FCA5A5",
-    fontSize: 12,
-  },
-
-  content: {
-    flex: 1,
-  },
-
-  contentContainer: {
-    padding: 18,
-    paddingBottom: 28,
-  },
-
-  greeting: {
-    color: COLORS.text,
-    fontSize: 26,
-    fontWeight: "800",
-  },
-
-  greetingCopy: {
-    marginTop: 4,
-    marginBottom: 18,
-    color: COLORS.muted,
-    fontSize: 13,
-  },
-
-  assignmentBanner: {
-    minHeight: 70,
-    marginBottom: 20,
-    padding: 13,
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 12,
-    borderWidth: 1,
-    borderColor: "#5A4618",
-    borderRadius: 14,
-    backgroundColor: "#251D0D",
-  },
-
-  assignmentBannerIcon: {
-    width: 40,
-    height: 40,
-    alignItems: "center",
-    justifyContent: "center",
-    borderRadius: 12,
-    backgroundColor: "#4B390E",
-  },
-
-  assignmentBannerIconText: {
-    color: "#FBBF24",
-    fontSize: 20,
-    fontWeight: "900",
-  },
-
-  assignmentBannerTitle: {
-    color: "#F8E6B4",
-    fontSize: 14,
-    fontWeight: "800",
-  },
-
-  assignmentBannerCopy: {
-    marginTop: 2,
-    color: "#C7A85A",
-    fontSize: 11,
-  },
-
-  assignmentBannerArrow: {
-    color: "#FBBF24",
-    fontSize: 28,
-  },
-
-  sectionHeader: {
-    marginTop: 4,
-    marginBottom: 9,
-  },
-
-  sectionEyebrow: {
-    color: COLORS.muted,
-    fontSize: 10,
-    fontWeight: "800",
-    letterSpacing: 1.3,
-  },
-
-  activeLoadCard: {
-    marginBottom: 20,
-    padding: 17,
-    borderWidth: 1,
-    borderColor: "#27415F",
-    borderRadius: 18,
-    backgroundColor: COLORS.surface,
-  },
-
-  loadTopRow: {
-    flexDirection: "row",
-    alignItems: "flex-start",
-    justifyContent: "space-between",
-    gap: 12,
-  },
-
-  loadNumberLabel: {
-    color: COLORS.muted,
-    fontSize: 9,
-    fontWeight: "800",
-    letterSpacing: 1.2,
-  },
-
-  loadNumber: {
-    marginTop: 3,
-    color: COLORS.text,
-    fontSize: 23,
-    fontWeight: "900",
-  },
-
-  statusChip: {
-    paddingHorizontal: 8,
-    paddingVertical: 5,
-    borderRadius: 999,
-    borderWidth: 1,
-  },
-
-  statusChipText: {
-    backgroundColor: "transparent",
-    fontSize: 9,
-    fontWeight: "900",
-    letterSpacing: 0.4,
-  },
-
-  statusBlue: {
-    color: "#93C5FD",
-    borderColor: "#2A5D9D",
-    backgroundColor: "#10284A",
-  },
-
-  statusGreen: {
-    color: "#86EFAC",
-    borderColor: "#256B40",
-    backgroundColor: "#0E2A1B",
-  },
-
-  statusAmber: {
-    color: "#FCD34D",
-    borderColor: "#6F5617",
-    backgroundColor: "#2C220B",
-  },
-
-  statusRed: {
-    color: "#FCA5A5",
-    borderColor: "#7F2D35",
-    backgroundColor: "#321418",
-  },
-
-  routePreview: {
-    marginTop: 18,
-    flexDirection: "row",
-  },
-
-  routeRail: {
-    width: 18,
-    alignItems: "center",
-  },
-
-  routeDotBlue: {
-    width: 9,
-    height: 9,
-    borderRadius: 5,
-    backgroundColor: COLORS.blueLight,
-  },
-
-  routeLine: {
-    width: 1,
-    flex: 1,
-    minHeight: 62,
-    marginVertical: 3,
-    backgroundColor: "#33465F",
-  },
-
-  routeDotGreen: {
-    width: 9,
-    height: 9,
-    borderRadius: 5,
-    backgroundColor: COLORS.green,
-  },
-
-  routeContent: {
-    flex: 1,
-    paddingLeft: 10,
-  },
-
-  routeStop: {
-    minWidth: 0,
-  },
-
-  routeStopHeading: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    gap: 8,
-  },
-
-  routeStopLabel: {
-    color: COLORS.muted,
-    fontSize: 9,
-    fontWeight: "800",
-    letterSpacing: 1,
-  },
-
-  routeStopTime: {
-    color: "#9FB0C5",
-    fontSize: 10,
-    fontWeight: "700",
-  },
-
-  routeStopName: {
-    marginTop: 3,
-    color: COLORS.text,
-    fontSize: 14,
-    fontWeight: "800",
-  },
-
-  routeStopAddress: {
-    marginTop: 2,
-    color: COLORS.muted,
+    color: "#FFB2B8",
     fontSize: 11,
     lineHeight: 16,
   },
 
-  routeStopReference: {
-    marginTop: 3,
-    color: COLORS.blueLight,
+  contentContainer: {
+    padding: 14,
+    paddingBottom: 14,
+    maxWidth: 460,
+    width: "100%",
+    alignSelf: "center",
+  },
+
+  kpiRow: {
+    flexDirection: "row",
+    gap: 8,
+    marginBottom: 16,
+  },
+
+  kpiCard: {
+    flex: 1,
+    minHeight: 88,
+    padding: 10,
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    borderRadius: 13,
+    backgroundColor: COLORS.surface,
+  },
+
+  kpiLabelRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+  },
+
+  kpiDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+  },
+
+  kpiDotGreen: {
+    backgroundColor: COLORS.green,
+  },
+
+  kpiDotAmber: {
+    backgroundColor: COLORS.amber,
+  },
+
+  kpiDotBlue: {
+    backgroundColor: COLORS.blueLight,
+  },
+
+  kpiLabel: {
+    color: COLORS.muted,
     fontSize: 9,
-    fontWeight: "800",
+    fontWeight: "900",
+    letterSpacing: 0.5,
   },
 
-  routeSpacer: {
-    height: 20,
+  kpiValue: {
+    marginTop: 5,
+    color: COLORS.text,
+    fontSize: 23,
+    lineHeight: 26,
+    fontWeight: "900",
   },
 
-  equipmentRow: {
+  kpiCaption: {
+    marginTop: 1,
+    color: "#D0D9E6",
+    fontSize: 9,
+    fontWeight: "700",
+  },
+
+  sectionTitlePlain: {
+    marginBottom: 8,
+    color: COLORS.text,
+    fontSize: 15,
+    fontWeight: "900",
+  },
+
+  minimalLoadCard: {
+    marginBottom: 20,
+    padding: 15,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    borderRadius: 15,
+    backgroundColor: COLORS.surface,
+  },
+
+  minimalLoadTop: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+  },
+
+  loadIconBox: {
+    width: 48,
+    height: 48,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: 13,
+    backgroundColor: COLORS.blueStrong,
+  },
+
+  loadIconBoxSmall: {
+    width: 42,
+    height: 42,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: 11,
+    backgroundColor: COLORS.blueStrong,
+  },
+
+  loadIconText: {
+    color: "#FFFFFF",
+    fontSize: 21,
+    fontWeight: "900",
+  },
+
+  loadTitleRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+
+  minimalLoadNumber: {
+    flexShrink: 1,
+    color: COLORS.text,
+    fontSize: 17,
+    fontWeight: "900",
+  },
+
+  onlinePill: {
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
+    borderRadius: 999,
+    backgroundColor: "#0C2D20",
+  },
+
+  onlinePillDot: {
+    width: 7,
+    height: 7,
+    borderRadius: 4,
+    backgroundColor: COLORS.green,
+  },
+
+  onlinePillText: {
+    color: "#6FE29A",
+    fontSize: 8,
+    fontWeight: "900",
+    letterSpacing: 0.5,
+  },
+
+  minimalRouteLine: {
+    marginTop: 4,
+    color: "#CDD8E6",
+    fontSize: 11,
+    fontWeight: "700",
+  },
+
+  minimalScheduleRow: {
     marginTop: 16,
     paddingTop: 14,
     flexDirection: "row",
     borderTopWidth: 1,
-    borderTopColor: COLORS.border,
+    borderTopColor: COLORS.borderSoft,
+  },
+
+  scheduleCell: {
+    flex: 1,
+  },
+
+  scheduleLabel: {
+    color: COLORS.muted,
+    fontSize: 8,
+    fontWeight: "900",
+    letterSpacing: 0.6,
+  },
+
+  scheduleValue: {
+    marginTop: 5,
+    color: COLORS.text,
+    fontSize: 11,
+    fontWeight: "800",
+  },
+
+  minimalLoadFooter: {
+    marginTop: 14,
+    paddingTop: 12,
+    flexDirection: "row",
+    alignItems: "center",
+    borderTopWidth: 1,
+    borderTopColor: COLORS.borderSoft,
+  },
+
+  loadStatusLabel: {
+    color: COLORS.muted,
+    fontSize: 8,
+    fontWeight: "900",
+    letterSpacing: 0.5,
+  },
+
+  loadStatusValue: {
+    marginLeft: 8,
+    color: COLORS.blueLight,
+    fontSize: 11,
+    fontWeight: "900",
+  },
+
+  updatedText: {
+    marginLeft: "auto",
+    color: COLORS.muted,
+    fontSize: 9,
+    fontWeight: "700",
+  },
+
+  minimalEmptyLoad: {
+    minHeight: 82,
+    marginBottom: 16,
+    padding: 14,
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    borderRadius: 15,
+    backgroundColor: COLORS.surface,
+  },
+
+  minimalEmptyTitle: {
+    color: COLORS.text,
+    fontSize: 13,
+    fontWeight: "900",
+  },
+
+  minimalEmptyCopy: {
+    marginTop: 3,
+    color: COLORS.muted,
+    fontSize: 9,
+  },
+
+
+  emptyCard: {
+    minHeight: 145,
+    marginBottom: 18,
+    padding: 20,
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    borderRadius: 15,
+    backgroundColor: COLORS.surface,
+  },
+
+  emptyIcon: {
+    color: COLORS.green,
+    fontSize: 26,
+    fontWeight: "900",
+  },
+
+  emptyTitle: {
+    marginTop: 8,
+    color: COLORS.text,
+    fontSize: 15,
+    fontWeight: "900",
+  },
+
+  emptyCopy: {
+    marginTop: 4,
+    color: COLORS.muted,
+    textAlign: "center",
+    fontSize: 11,
   },
 
   infoMini: {
@@ -3060,75 +3503,182 @@ const styles = StyleSheet.create({
   infoMiniLabel: {
     color: COLORS.muted,
     fontSize: 8,
-    fontWeight: "800",
-    letterSpacing: 0.8,
+    fontWeight: "900",
+    letterSpacing: 0.7,
   },
 
   infoMiniValue: {
     marginTop: 3,
     color: COLORS.text,
     fontSize: 12,
-    fontWeight: "800",
-  },
-
-  emptyCard: {
-    minHeight: 150,
-    marginBottom: 20,
-    padding: 22,
-    alignItems: "center",
-    justifyContent: "center",
-    borderWidth: 1,
-    borderColor: COLORS.border,
-    borderRadius: 18,
-    backgroundColor: COLORS.surface,
-  },
-
-  emptyIcon: {
-    color: COLORS.green,
-    fontSize: 28,
     fontWeight: "900",
   },
 
-  emptyTitle: {
-    marginTop: 8,
-    color: COLORS.text,
-    fontSize: 16,
-    fontWeight: "800",
-  },
-
-  emptyCopy: {
-    marginTop: 5,
-    color: COLORS.muted,
-    textAlign: "center",
-    fontSize: 12,
-  },
-
-  trackingCard: {
-    padding: 17,
+  currentTruckCardPro: {
+    marginBottom: 0,
+    padding: 13,
     borderWidth: 1,
     borderColor: COLORS.border,
-    borderRadius: 18,
+    borderRadius: 14,
     backgroundColor: COLORS.surface,
   },
 
-  trackingTop: {
+  currentTruckTopPro: {
     flexDirection: "row",
     alignItems: "center",
-    justifyContent: "space-between",
     gap: 10,
   },
 
-  trackingStatusLeft: {
-    flex: 1,
+  currentTruckDivider: {
+    height: 1,
+    marginTop: 12,
+    backgroundColor: COLORS.borderSoft,
+  },
+
+  currentTruckMetricsPro: {
+    paddingTop: 11,
+    flexDirection: "row",
+  },
+
+  currentTruckCard: {
+    padding: 15,
     flexDirection: "row",
     alignItems: "center",
+    gap: 12,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    borderRadius: 15,
+    backgroundColor: COLORS.surface,
+  },
+
+  truckBadge: {
+    width: 45,
+    height: 45,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: 11,
+    backgroundColor: COLORS.blueStrong,
+  },
+
+  truckBadgeText: {
+    color: "#FFFFFF",
+    fontSize: 12,
+    fontWeight: "900",
+  },
+
+  currentTruckTitle: {
+    color: COLORS.text,
+    fontSize: 15,
+    fontWeight: "900",
+  },
+
+  currentTruckSub: {
+    marginTop: 2,
+    color: COLORS.muted,
+    fontSize: 10,
+  },
+
+  truckOnlineWrap: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
+  },
+
+  truckOnlineText: {
+    color: "#6FE29A",
+    fontSize: 9,
+    fontWeight: "900",
+  },
+
+  truckMetricsRow: {
+    marginTop: 8,
+    paddingVertical: 12,
+    flexDirection: "row",
+    borderWidth: 1,
+    borderColor: COLORS.borderSoft,
+    borderRadius: 12,
+    backgroundColor: "#0A1728",
+  },
+
+  metric: {
+    flex: 1,
+    alignItems: "center",
+  },
+
+  metricValue: {
+    color: COLORS.text,
+    fontSize: 13,
+    fontWeight: "900",
+  },
+
+  metricLabel: {
+    marginTop: 3,
+    color: COLORS.muted,
+    fontSize: 8,
+    fontWeight: "900",
+    letterSpacing: 0.6,
+  },
+
+  startTrackingButtonPro: {
+    height: 52,
+    marginTop: 14,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
     gap: 10,
+    borderRadius: 28,
+    backgroundColor: COLORS.blueStrong,
+    shadowColor: COLORS.blue,
+    shadowOpacity: 0.22,
+    shadowRadius: 16,
+    shadowOffset: {
+      width: 0,
+      height: 8,
+    },
+  },
+
+  stopTrackingButtonPro: {
+    height: 52,
+    marginTop: 14,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 10,
+    borderRadius: 28,
+    backgroundColor: COLORS.blueStrong,
+  },
+
+  trackingTargetIcon: {
+    color: "#FFFFFF",
+    fontSize: 20,
+    fontWeight: "900",
+  },
+
+  trackingButtonTextPro: {
+    color: "#FFFFFF",
+    fontSize: 13,
+    fontWeight: "900",
+    letterSpacing: 0.7,
+  },
+
+  trackingFinePrint: {
+    marginTop: 7,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 7,
+  },
+
+  trackingFinePrintText: {
+    color: COLORS.muted,
+    fontSize: 9,
+    fontWeight: "700",
   },
 
   liveDot: {
-    width: 10,
-    height: 10,
-    borderRadius: 5,
+    width: 8,
+    height: 8,
+    borderRadius: 4,
   },
 
   liveDotOn: {
@@ -3139,124 +3689,17 @@ const styles = StyleSheet.create({
     backgroundColor: "#526176",
   },
 
-  trackingStatusTitle: {
-    color: COLORS.text,
-    fontSize: 13,
-    fontWeight: "800",
-  },
-
-  trackingStatusCopy: {
-    marginTop: 2,
-    color: COLORS.muted,
-    fontSize: 9,
-  },
-
-  serverBadge: {
-    paddingHorizontal: 7,
-    paddingVertical: 4,
-    overflow: "hidden",
-    borderRadius: 999,
-    fontSize: 8,
-    fontWeight: "900",
-  },
-
-  serverBadgeOn: {
-    color: "#86EFAC",
-    backgroundColor: "#11321F",
-  },
-
-  serverBadgeOff: {
-    color: "#FCD34D",
-    backgroundColor: "#35290B",
-  },
-
-  trackingDeviceRow: {
-    marginTop: 16,
-    paddingTop: 14,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    borderTopWidth: 1,
-    borderTopColor: COLORS.border,
-  },
-
-  trackingDeviceLabel: {
-    color: COLORS.muted,
-    fontSize: 8,
-    fontWeight: "800",
-    letterSpacing: 0.8,
-  },
-
-  trackingDeviceValue: {
-    color: COLORS.text,
-    fontSize: 12,
-    fontWeight: "900",
-  },
-
-  trackingMetrics: {
-    marginTop: 18,
-    paddingVertical: 14,
-    flexDirection: "row",
-    borderTopWidth: 1,
-    borderBottomWidth: 1,
-    borderColor: COLORS.border,
-  },
-
-  metric: {
-    flex: 1,
-    alignItems: "center",
-  },
-
-  metricValue: {
-    color: COLORS.text,
-    fontSize: 16,
-    fontWeight: "900",
-  },
-
-  metricLabel: {
-    marginTop: 3,
-    color: COLORS.muted,
-    fontSize: 8,
-    fontWeight: "800",
-    letterSpacing: 0.8,
-  },
-
-  startTrackingButton: {
-    height: 46,
-    marginTop: 14,
-    alignItems: "center",
-    justifyContent: "center",
-    borderRadius: 11,
-    backgroundColor: COLORS.blue,
-  },
-
-  stopTrackingButton: {
-    height: 46,
-    marginTop: 14,
-    alignItems: "center",
-    justifyContent: "center",
-    borderRadius: 11,
-    backgroundColor: "#8F242D",
-  },
-
-  trackingButtonText: {
-    color: "#FFFFFF",
-    fontSize: 11,
-    fontWeight: "900",
-    letterSpacing: 0.8,
-  },
-
-  bottomTabs: {
-    height: 72,
+  bottomTabsPro: {
+    height: 62,
     paddingBottom:
       Platform.OS === "ios" ? 5 : 0,
     flexDirection: "row",
     borderTopWidth: 1,
-    borderTopColor: COLORS.border,
-    backgroundColor: "#0A1524",
+    borderTopColor: COLORS.borderSoft,
+    backgroundColor: "#071524",
   },
 
-  tabButton: {
+  tabButtonPro: {
     flex: 1,
     alignItems: "center",
     justifyContent: "center",
@@ -3266,24 +3709,24 @@ const styles = StyleSheet.create({
     position: "relative",
   },
 
-  tabIcon: {
-    color: "#63738A",
-    fontSize: 19,
-    fontWeight: "800",
+  tabIconPro: {
+    color: "#6D7D93",
+    fontSize: 16,
+    fontWeight: "900",
   },
 
-  tabIconActive: {
+  tabIconActivePro: {
     color: COLORS.blueLight,
   },
 
-  tabLabel: {
-    marginTop: 3,
-    color: "#63738A",
-    fontSize: 9,
+  tabLabelPro: {
+    marginTop: 2,
+    color: "#6D7D93",
+    fontSize: 8,
     fontWeight: "700",
   },
 
-  tabLabelActive: {
+  tabLabelActivePro: {
     color: COLORS.blueLight,
   },
 
@@ -3315,8 +3758,8 @@ const styles = StyleSheet.create({
     marginBottom: 6,
     padding: 4,
     flexDirection: "row",
-    borderRadius: 12,
-    backgroundColor: "#0D1929",
+    borderRadius: 13,
+    backgroundColor: "#0B192A",
   },
 
   segmentButton: {
@@ -3327,11 +3770,11 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     gap: 6,
-    borderRadius: 9,
+    borderRadius: 10,
   },
 
   segmentButtonActive: {
-    backgroundColor: COLORS.surface2,
+    backgroundColor: COLORS.surface3,
   },
 
   segmentText: {
@@ -3355,7 +3798,7 @@ const styles = StyleSheet.create({
   },
 
   segmentCountActive: {
-    backgroundColor: COLORS.blue,
+    backgroundColor: COLORS.blueStrong,
   },
 
   segmentCountText: {
@@ -3379,14 +3822,28 @@ const styles = StyleSheet.create({
     padding: 16,
     borderWidth: 1,
     borderColor: COLORS.border,
-    borderRadius: 16,
+    borderRadius: 15,
     backgroundColor: COLORS.surface,
+  },
+
+  loadTopRow: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    justifyContent: "space-between",
+    gap: 10,
+  },
+
+  loadNumberLabel: {
+    color: COLORS.muted,
+    fontSize: 8,
+    fontWeight: "900",
+    letterSpacing: 0.7,
   },
 
   loadListNumber: {
     marginTop: 3,
     color: COLORS.text,
-    fontSize: 19,
+    fontSize: 18,
     fontWeight: "900",
   },
 
@@ -3396,7 +3853,7 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     justifyContent: "space-between",
     borderTopWidth: 1,
-    borderTopColor: COLORS.border,
+    borderTopColor: COLORS.borderSoft,
   },
 
   loadListFooterText: {
@@ -3411,14 +3868,112 @@ const styles = StyleSheet.create({
     fontWeight: "800",
   },
 
+  routePreview: {
+    marginTop: 14,
+    flexDirection: "row",
+  },
+
+  routeRail: {
+    width: 18,
+    alignItems: "center",
+  },
+
+  routeDotBlue: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: COLORS.green,
+  },
+
+  routeDotGreen: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: COLORS.red,
+  },
+
+  routeLine: {
+    width: 1,
+    flex: 1,
+    marginVertical: 3,
+    backgroundColor: "#29445F",
+  },
+
+  routeContent: {
+    flex: 1,
+  },
+
+  routeStop: {
+    flex: 1,
+  },
+
+  routeStopHeading: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    gap: 10,
+  },
+
+  routeStopLabel: {
+    color: COLORS.blueLight,
+    fontSize: 8,
+    fontWeight: "900",
+    letterSpacing: 0.7,
+  },
+
+  routeStopTime: {
+    color: COLORS.muted,
+    fontSize: 8,
+    fontWeight: "700",
+  },
+
+  routeStopName: {
+    marginTop: 3,
+    color: COLORS.text,
+    fontSize: 14,
+    fontWeight: "900",
+  },
+
+  routeStopAddress: {
+    marginTop: 2,
+    color: COLORS.muted,
+    fontSize: 11,
+    lineHeight: 16,
+  },
+
+  routeStopReference: {
+    marginTop: 3,
+    color: COLORS.blueLight,
+    fontSize: 9,
+    fontWeight: "800",
+  },
+
+  routeSpacer: {
+    height: 20,
+  },
+
   detailHeader: {
-    minHeight: 76,
+    minHeight: 70,
     paddingHorizontal: 16,
     flexDirection: "row",
     alignItems: "center",
     gap: 12,
     borderBottomWidth: 1,
-    borderBottomColor: COLORS.border,
+    borderBottomColor: COLORS.borderSoft,
+    backgroundColor: "#071524",
+  },
+
+  headerEyebrow: {
+    color: COLORS.blueLight,
+    fontSize: 8,
+    fontWeight: "900",
+    letterSpacing: 1,
+  },
+
+  detailTitle: {
+    marginTop: 2,
+    color: COLORS.text,
+    fontSize: 18,
+    fontWeight: "900",
   },
 
   backButton: {
@@ -3437,13 +3992,6 @@ const styles = StyleSheet.create({
     fontWeight: "400",
   },
 
-  detailTitle: {
-    marginTop: 2,
-    color: COLORS.text,
-    fontSize: 18,
-    fontWeight: "900",
-  },
-
   detailContent: {
     padding: 16,
     paddingBottom: 34,
@@ -3454,7 +4002,7 @@ const styles = StyleSheet.create({
     padding: 16,
     borderWidth: 1,
     borderColor: COLORS.border,
-    borderRadius: 16,
+    borderRadius: 15,
     backgroundColor: COLORS.surface,
   },
 
@@ -3463,7 +4011,7 @@ const styles = StyleSheet.create({
     color: COLORS.muted,
     fontSize: 9,
     fontWeight: "900",
-    letterSpacing: 1.2,
+    letterSpacing: 1.1,
   },
 
   detailGrid: {
@@ -3491,6 +4039,40 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: "800",
     lineHeight: 16,
+  },
+
+  temperatureRow: {
+    flexDirection: "row",
+    borderWidth: 1,
+    borderColor: COLORS.borderSoft,
+    borderRadius: 12,
+    overflow: "hidden",
+  },
+
+  temperatureMetric: {
+    flex: 1,
+    paddingVertical: 14,
+    alignItems: "center",
+    borderRightWidth: 1,
+    borderRightColor: COLORS.borderSoft,
+  },
+
+  temperatureLabel: {
+    color: COLORS.muted,
+    fontSize: 8,
+    fontWeight: "900",
+    letterSpacing: 0.6,
+  },
+
+  temperatureValue: {
+    marginTop: 4,
+    color: COLORS.blueLight,
+    fontSize: 18,
+    fontWeight: "900",
+  },
+
+  temperatureValueRed: {
+    color: "#FF6A74",
   },
 
   instructionsText: {
@@ -3535,13 +4117,13 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     borderWidth: 1,
-    borderColor: "#6D3036",
+    borderColor: "#7C333B",
     borderRadius: 13,
-    backgroundColor: "#281317",
+    backgroundColor: "#2A1418",
   },
 
   declineButtonText: {
-    color: "#FCA5A5",
+    color: "#FF9EA6",
     fontSize: 11,
     fontWeight: "900",
   },
@@ -3552,7 +4134,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     borderRadius: 13,
-    backgroundColor: COLORS.blue,
+    backgroundColor: COLORS.blueStrong,
   },
 
   acceptButtonText: {
@@ -3562,62 +4144,709 @@ const styles = StyleSheet.create({
     letterSpacing: 0.5,
   },
 
-  profileContent: {
-    padding: 18,
-    paddingBottom: 34,
+  profileContentPro: {
+    padding: 14,
+    paddingBottom: 24,
+    maxWidth: 460,
+    width: "100%",
+    alignSelf: "center",
   },
 
-  profileHero: {
-    paddingVertical: 24,
-    alignItems: "center",
-  },
-
-  profileAvatarLarge: {
-    width: 82,
-    height: 82,
-    alignItems: "center",
-    justifyContent: "center",
-    borderWidth: 1,
-    borderColor: "#36506D",
-    borderRadius: 41,
-    backgroundColor: COLORS.surface2,
-  },
-
-  profileAvatarText: {
-    color: COLORS.text,
-    fontSize: 30,
-    fontWeight: "900",
-  },
-
-  profileName: {
-    marginTop: 14,
-    color: COLORS.text,
-    fontSize: 21,
-    fontWeight: "900",
-  },
-
-  profileEmail: {
-    marginTop: 4,
+  profileSectionHeader: {
+    marginTop: 6,
     marginBottom: 10,
-    color: COLORS.muted,
-    fontSize: 12,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
   },
 
-  logoutButton: {
-    height: 48,
-    marginTop: 10,
+  profileSectionTitle: {
+    color: COLORS.text,
+    fontSize: 14,
+    fontWeight: "900",
+  },
+
+  profileEditText: {
+    color: COLORS.blueLight,
+    fontSize: 12,
+    fontWeight: "800",
+  },
+
+  profileRowsCard: {
+    marginBottom: 20,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    borderRadius: 15,
+    backgroundColor: COLORS.surface,
+    overflow: "hidden",
+  },
+
+  profileRow: {
+    minHeight: 70,
+    paddingHorizontal: 14,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+  },
+
+  profileRowDivider: {
+    height: 1,
+    marginLeft: 48,
+    backgroundColor: COLORS.borderSoft,
+  },
+
+  profileRowIcon: {
+    width: 24,
+    color: "#DCE8F8",
+    fontSize: 18,
+    textAlign: "center",
+  },
+
+  profileRowLabel: {
+    color: COLORS.muted,
+    fontSize: 10,
+    fontWeight: "700",
+  },
+
+  profileRowSubvalue: {
+    marginTop: 3,
+    color: COLORS.muted,
+    fontSize: 8,
+  },
+
+  profileRowValue: {
+    color: COLORS.text,
+    fontSize: 13,
+    fontWeight: "900",
+  },
+
+  profileRowChevron: {
+    color: "#8296AE",
+    fontSize: 21,
+  },
+
+  profileEditCardCompact: {
+    marginBottom: 18,
+    padding: 14,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    borderRadius: 14,
+    backgroundColor: COLORS.surface,
+  },
+
+  editTwoColRow: {
+    flexDirection: "row",
+    gap: 10,
+  },
+
+  editHalf: {
+    flex: 1,
+  },
+
+  inputCompact: {
+    height: 43,
+    marginBottom: 12,
+    paddingHorizontal: 12,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    borderRadius: 10,
+    backgroundColor: "#0A1728",
+    color: COLORS.text,
+    fontSize: 13,
+  },
+
+  equipmentPickerTitle: {
+    marginTop: 4,
+    marginBottom: 7,
+    color: COLORS.muted,
+    fontSize: 9,
+    fontWeight: "900",
+    letterSpacing: 0.9,
+  },
+
+  assetChoiceWrap: {
+    marginBottom: 12,
+    gap: 7,
+  },
+
+  assetChoice: {
+    minHeight: 58,
+    padding: 10,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    borderWidth: 1,
+    borderColor: COLORS.borderSoft,
+    borderRadius: 11,
+    backgroundColor: "#0A1728",
+  },
+
+  assetChoiceSelected: {
+    borderColor: COLORS.blue,
+    backgroundColor: "#0D2038",
+  },
+
+  assetChoiceBadge: {
+    width: 38,
+    height: 38,
     alignItems: "center",
     justifyContent: "center",
-    borderWidth: 1,
-    borderColor: "#613039",
-    borderRadius: 12,
-    backgroundColor: "#241317",
+    borderRadius: 10,
+    backgroundColor: COLORS.blueStrong,
   },
 
-  logoutText: {
-    color: "#FCA5A5",
-    fontSize: 11,
+  assetChoiceTrailerBadge: {
+    backgroundColor: "#21476A",
+  },
+
+  assetChoiceBadgeText: {
+    color: "#FFFFFF",
+    fontSize: 10,
+    fontWeight: "900",
+  },
+
+  assetChoiceName: {
+    color: COLORS.text,
+    fontSize: 12,
+    fontWeight: "900",
+  },
+
+  assetChoiceDevice: {
+    marginTop: 2,
+    color: COLORS.muted,
+    fontSize: 9,
+  },
+
+  assetChoiceCheck: {
+    color: COLORS.blueLight,
+    fontSize: 18,
+    fontWeight: "900",
+  },
+
+  readOnlyEquipmentRow: {
+    minHeight: 58,
+    marginBottom: 14,
+    padding: 10,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    borderWidth: 1,
+    borderColor: COLORS.borderSoft,
+    borderRadius: 11,
+    backgroundColor: "#0A1728",
+  },
+
+  fixedEquipmentText: {
+    color: COLORS.green,
+    fontSize: 9,
     fontWeight: "900",
     letterSpacing: 0.7,
+  },
+
+  profileEditCard: {
+    marginBottom: 20,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    borderRadius: 15,
+    backgroundColor: COLORS.surface,
+  },
+
+  saveProfileButton: {
+    height: 50,
+    marginTop: 8,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: 12,
+    backgroundColor: COLORS.blueStrong,
+  },
+
+  saveProfileButtonText: {
+    color: "#FFFFFF",
+    fontSize: 11,
+    fontWeight: "900",
+    letterSpacing: 0.8,
+  },
+
+  assignmentProfileCard: {
+    marginTop: 2,
+    marginBottom: 16,
+    padding: 14,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    borderRadius: 15,
+    backgroundColor: COLORS.surface,
+  },
+
+  assignmentProfileTitle: {
+    marginBottom: 12,
+    color: COLORS.text,
+    fontSize: 14,
+    fontWeight: "900",
+  },
+
+  assignmentLoadRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+  },
+
+  assignmentLoadNumber: {
+    color: COLORS.text,
+    fontSize: 15,
+    fontWeight: "900",
+  },
+
+  assignmentRouteText: {
+    marginTop: 3,
+    color: COLORS.muted,
+    fontSize: 10,
+  },
+
+  assignmentScheduleRow: {
+    marginTop: 14,
+    paddingTop: 12,
+    flexDirection: "row",
+    justifyContent: "space-between",
+    borderTopWidth: 1,
+    borderTopColor: COLORS.borderSoft,
+  },
+
+  assignmentScheduleText: {
+    marginTop: 4,
+    color: COLORS.text,
+    fontSize: 10,
+    fontWeight: "800",
+  },
+
+  assignmentStatusRow: {
+    marginTop: 12,
+    flexDirection: "row",
+    alignItems: "center",
+  },
+
+  noAssignmentText: {
+    color: COLORS.muted,
+    fontSize: 11,
+  },
+
+  logoutButtonPro: {
+    height: 48,
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 1,
+    borderColor: "#6D3036",
+    borderRadius: 12,
+    backgroundColor: "#221318",
+  },
+
+  logoutTextPro: {
+    color: "#FF9EA6",
+    fontSize: 11,
+    fontWeight: "900",
+    letterSpacing: 0.8,
+  },
+
+  loginKeyboardFinal: {
+    flex: 1,
+  },
+
+  loginScrollFinal: {
+    flexGrow: 1,
+    paddingHorizontal: 28,
+    paddingTop: 8,
+    paddingBottom: 24,
+    justifyContent: "center",
+    maxWidth: 460,
+    width: "100%",
+    alignSelf: "center",
+  },
+
+  loginVisualFinal: {
+    height: 310,
+    alignItems: "center",
+    justifyContent: "flex-start",
+    overflow: "hidden",
+    borderRadius: 24,
+    backgroundColor: "#08172A",
+  },
+
+  loginGlowFinal: {
+    position: "absolute",
+    top: -95,
+    width: 350,
+    height: 350,
+    borderRadius: 175,
+    backgroundColor: "#173A62",
+    opacity: 0.30,
+  },
+
+  loginTruckFinal: {
+    position: "absolute",
+    left: 40,
+    right: 40,
+    bottom: 4,
+    height: 94,
+    opacity: 0.20,
+  },
+
+  trailerShapeFinal: {
+    position: "absolute",
+    left: 36,
+    right: 72,
+    bottom: 31,
+    height: 62,
+    borderRadius: 8,
+    backgroundColor: "#27415D",
+  },
+
+  cabShapeFinal: {
+    position: "absolute",
+    right: 20,
+    bottom: 31,
+    width: 78,
+    height: 80,
+    borderTopLeftRadius: 22,
+    borderTopRightRadius: 8,
+    borderBottomRightRadius: 8,
+    backgroundColor: "#355873",
+  },
+
+  windowShapeFinal: {
+    position: "absolute",
+    top: 13,
+    left: 15,
+    width: 36,
+    height: 22,
+    borderRadius: 5,
+    backgroundColor: "#102840",
+  },
+
+  wheelShapeOneFinal: {
+    position: "absolute",
+    left: 78,
+    bottom: 16,
+    width: 29,
+    height: 29,
+    borderRadius: 15,
+    backgroundColor: "#050C14",
+    borderWidth: 5,
+    borderColor: "#405873",
+  },
+
+  wheelShapeTwoFinal: {
+    position: "absolute",
+    right: 43,
+    bottom: 16,
+    width: 29,
+    height: 29,
+    borderRadius: 15,
+    backgroundColor: "#050C14",
+    borderWidth: 5,
+    borderColor: "#405873",
+  },
+
+  roadShapeFinal: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    bottom: 10,
+    height: 2,
+    backgroundColor: "#3A5572",
+  },
+
+  logoWingsFinal: {
+    marginTop: 47,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+  },
+
+  logoWingLeftFinal: {
+    width: 47,
+    height: 11,
+    borderRadius: 6,
+    backgroundColor: "#F2F7FF",
+    transform: [{ rotate: "16deg" }],
+  },
+
+  logoWingRightFinal: {
+    width: 47,
+    height: 11,
+    borderRadius: 6,
+    backgroundColor: "#F2F7FF",
+    transform: [{ rotate: "-16deg" }],
+  },
+
+  logoShieldFinal: {
+    width: 62,
+    height: 62,
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 2,
+    borderColor: "#F2F7FF",
+    borderRadius: 18,
+    backgroundColor: "#102A47",
+  },
+
+  logoShieldTextFinal: {
+    color: "#FFFFFF",
+    fontSize: 27,
+    fontWeight: "900",
+    fontStyle: "italic",
+  },
+
+  loginBrandFinal: {
+    position: "absolute",
+    top: 112,
+    color: "#FFFFFF",
+    fontSize: 27,
+    fontWeight: "900",
+    letterSpacing: 4.1,
+  },
+
+  loginAppNameFinal: {
+    position: "absolute",
+    top: 149,
+    color: COLORS.blueLight,
+    fontSize: 14,
+    fontWeight: "900",
+    letterSpacing: 2,
+  },
+
+  loginLogoImage: {
+    width: 78,
+    height: 78,
+    marginTop: 26,
+    borderRadius: 18,
+  },
+
+  loginMetaRow: {
+    marginTop: 10,
+    paddingHorizontal: 4,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+
+  rememberRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 7,
+  },
+
+  rememberBox: {
+    width: 14,
+    height: 14,
+    borderRadius: 3,
+    borderWidth: 1,
+    borderColor: "#6D8097",
+  },
+
+  rememberText: {
+    color: COLORS.muted,
+    fontSize: 9,
+    fontWeight: "700",
+  },
+
+  forgotText: {
+    color: COLORS.blueLight,
+    fontSize: 9,
+    fontWeight: "700",
+  },
+
+  loginTruckPhoto: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    bottom: 0,
+    width: "100%",
+    height: "100%",
+  },
+
+  loginPhotoShade: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    top: 0,
+    bottom: 0,
+    backgroundColor: "rgba(5,16,30,0.38)",
+  },
+
+  brandWingRowCompact: {
+    position: "absolute",
+    top: 38,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+  },
+
+  brandWingCompactLeft: {
+    width: 45,
+    height: 10,
+    borderRadius: 5,
+    backgroundColor: "#F3F8FF",
+    transform: [{ rotate: "17deg" }],
+  },
+
+  brandWingCompactRight: {
+    width: 45,
+    height: 10,
+    borderRadius: 5,
+    backgroundColor: "#F3F8FF",
+    transform: [{ rotate: "-17deg" }],
+  },
+
+  brandShieldCompact: {
+    width: 56,
+    height: 56,
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 2,
+    borderColor: "#F3F8FF",
+    borderRadius: 17,
+    backgroundColor: "rgba(13,39,66,0.88)",
+  },
+
+  brandShieldCompactText: {
+    color: "#FFFFFF",
+    fontSize: 24,
+    fontWeight: "900",
+    fontStyle: "italic",
+  },
+
+  loginTaglineFinal: {
+    marginTop: 18,
+    color: COLORS.text,
+    textAlign: "center",
+    fontSize: 16,
+    fontWeight: "900",
+  },
+
+  loginDescriptionFinal: {
+    marginTop: 6,
+    paddingHorizontal: 16,
+    color: COLORS.muted,
+    textAlign: "center",
+    fontSize: 10,
+    lineHeight: 15,
+  },
+
+  loginFieldsFinal: {
+    marginTop: 16,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    borderRadius: 14,
+    overflow: "hidden",
+    backgroundColor: "#0B1A2C",
+  },
+
+  loginFieldRowFinal: {
+    height: 54,
+    paddingHorizontal: 14,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 9,
+  },
+
+  loginFieldIconFinal: {
+    width: 22,
+    color: "#C7D4E5",
+    fontSize: 16,
+    textAlign: "center",
+  },
+
+  loginFieldInputFinal: {
+    flex: 1,
+    height: "100%",
+    color: COLORS.text,
+    fontSize: 14,
+  },
+
+  loginDividerFinal: {
+    height: 1,
+    marginLeft: 46,
+    backgroundColor: COLORS.borderSoft,
+  },
+
+  authErrorFinal: {
+    marginTop: 10,
+    color: "#FF9EA6",
+    fontSize: 11,
+    textAlign: "center",
+  },
+
+  loginButtonFinal: {
+    height: 50,
+    marginTop: 14,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: 27,
+    backgroundColor: COLORS.blueStrong,
+  },
+
+  loginButtonTextFinal: {
+    color: "#FFFFFF",
+    fontSize: 13,
+    fontWeight: "900",
+    letterSpacing: 1.2,
+  },
+
+  loginFooterFinal: {
+    marginTop: 18,
+    color: COLORS.muted,
+    fontSize: 10,
+    textAlign: "center",
+  },
+
+  foregroundModeNotice: {
+    marginTop: 8,
+    paddingHorizontal: 2,
+  },
+
+  foregroundModeTitle: {
+    color: COLORS.green,
+    fontSize: 8,
+    fontWeight: "900",
+    letterSpacing: 0.7,
+  },
+
+  foregroundModeCopy: {
+    marginTop: 2,
+    color: COLORS.muted,
+    fontSize: 8,
+    lineHeight: 12,
+  },
+
+  statusChip: {
+    paddingHorizontal: 8,
+    paddingVertical: 5,
+    overflow: "hidden",
+    borderRadius: 999,
+  },
+
+  statusChipText: {
+    fontSize: 8,
+    fontWeight: "900",
+  },
+
+  statusBlue: {
+    color: "#8CC1FF",
+    backgroundColor: "#102D52",
+  },
+
+  statusGreen: {
+    color: "#78E39B",
+    backgroundColor: "#0E2D20",
+  },
+
+  statusAmber: {
+    color: "#FFC870",
+    backgroundColor: "#35280B",
+  },
+
+  statusRed: {
+    color: "#FFA1A8",
+    backgroundColor: "#35161B",
   },
 });

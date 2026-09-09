@@ -58,6 +58,7 @@ type DriverProfile = {
   licenseState?: string | null;
   profilePhotoUrl?: string | null;
   currentTruckNumber?: string | null;
+  physicalTruckNumber?: string | null;
   currentTrailerNumber?: string | null;
   currentTrailerLicense?: string | null;
 };
@@ -115,6 +116,7 @@ type Dispatch = {
   commodity?: string | null;
   referenceNumber?: string | null;
   dispatcherName?: string | null;
+  dispatcherPhone?: string | null;
   poNumber?: string | null;
   bolNumber?: string | null;
   carrierName?: string | null;
@@ -365,6 +367,17 @@ export default function App() {
     useRef<Location.LocationSubscription | null>(
       null
     );
+
+  const lastLocationRef =
+    useRef<Location.LocationObject | null>(null);
+
+  const heartbeatRef =
+    useRef<ReturnType<typeof setInterval> | null>(
+      null
+    );
+
+  const [menuOpen, setMenuOpen] =
+    useState(false);
 
   useEffect(() => {
     void restoreSession();
@@ -657,6 +670,7 @@ export default function App() {
       licenseNumber: string;
       licenseState: string;
       currentTruckNumber: string;
+      physicalTruckNumber: string;
       currentTrailerNumber: string;
       currentTrailerLicense: string;
     }
@@ -778,10 +792,50 @@ export default function App() {
     driverProfile?.currentTruckNumber ||
     DEFAULT_TRACKING_DEVICE_ID;
 
+  useEffect(() => {
+    if (!tracking || !trackingDeviceId) {
+      if (heartbeatRef.current) {
+        clearInterval(heartbeatRef.current);
+        heartbeatRef.current = null;
+      }
+      return;
+    }
+
+    heartbeatRef.current =
+      setInterval(() => {
+        const last =
+          lastLocationRef.current;
+
+        if (!last) return;
+
+        void postLocationToMavtrack(
+          last,
+          trackingDeviceId
+        )
+          .then((sent) =>
+            setServerStatus(
+              sent ? "CONNECTED" : "SEND FAILED"
+            )
+          )
+          .catch(() =>
+            setServerStatus("SEND FAILED")
+          );
+      }, 60000);
+
+    return () => {
+      if (heartbeatRef.current) {
+        clearInterval(heartbeatRef.current);
+        heartbeatRef.current = null;
+      }
+    };
+  }, [tracking, trackingDeviceId]);
+
   async function applyLocationUpdate(
     location: Location.LocationObject,
     deviceId: string
   ) {
+    lastLocationRef.current = location;
+
     setGps({
       latitude:
         location.coords.latitude,
@@ -1145,19 +1199,6 @@ export default function App() {
                 />
               </View>
             </View>
-
-            <View style={styles.loginMetaRow}>
-              <View style={styles.rememberRow}>
-                <View style={styles.rememberBox} />
-                <Text style={styles.rememberText}>
-                  Remember me
-                </Text>
-              </View>
-              <Text style={styles.forgotText}>
-                Forgot password?
-              </Text>
-            </View>
-
             {authError ? (
               <Text style={styles.authErrorFinal}>
                 {authError}
@@ -1245,7 +1286,12 @@ export default function App() {
       />
 
       <View style={styles.appHeader}>
-        <Pressable style={styles.headerSideButton}>
+        <Pressable
+          style={styles.headerSideButton}
+          onPress={() =>
+            setMenuOpen((value) => !value)
+          }
+        >
           <Text style={styles.headerMenuIcon}>☰</Text>
         </Pressable>
 
@@ -1259,7 +1305,14 @@ export default function App() {
           </Text>
         </View>
 
-        <Pressable style={styles.headerSideButton}>
+        <Pressable
+          style={styles.headerSideButton}
+          onPress={() => {
+            setLoadFilter("pending");
+            setTab("loads");
+            setMenuOpen(false);
+          }}
+        >
           <Text style={styles.headerBellIcon}>♢</Text>
           {pendingLoads.length > 0 ? (
             <View style={styles.headerBadge}>
@@ -1272,6 +1325,23 @@ export default function App() {
           ) : null}
         </Pressable>
       </View>
+
+      {menuOpen ? (
+        <View style={styles.quickMenu}>
+          <Pressable onPress={() => { setTab("home"); setMenuOpen(false); }}>
+            <Text style={styles.quickMenuItem}>Home</Text>
+          </Pressable>
+          <Pressable onPress={() => { setTab("loads"); setMenuOpen(false); }}>
+            <Text style={styles.quickMenuItem}>Loads</Text>
+          </Pressable>
+          <Pressable onPress={() => { setTab("profile"); setMenuOpen(false); }}>
+            <Text style={styles.quickMenuItem}>Profile & Equipment</Text>
+          </Pressable>
+          <Pressable onPress={() => { setMenuOpen(false); void logout(); }}>
+            <Text style={[styles.quickMenuItem, styles.quickMenuDanger]}>Sign Out</Text>
+          </Pressable>
+        </View>
+      ) : null}
 
       {appError ? (
         <View style={styles.inlineError}>
@@ -1392,9 +1462,9 @@ function HomeScreen({
     user?.profile || user?.driverProfile;
 
   const currentTruck =
-    activeLoad?.asset?.deviceId ||
-    profile?.currentTruckNumber ||
-    DEFAULT_TRACKING_DEVICE_ID;
+    activeLoad?.truckNumber ||
+    profile?.physicalTruckNumber ||
+    "—";
 
   const currentTrailer =
     activeLoad?.trailerNumber ||
@@ -1895,6 +1965,10 @@ function LoadDetailScreen({
               }
             />
             <DetailItem
+              label="Dispatcher Phone"
+              value={load.dispatcherPhone || "—"}
+            />
+            <DetailItem
               label="PO #"
               value={load.poNumber || "—"}
             />
@@ -1973,21 +2047,6 @@ function LoadDetailScreen({
             />
           </DetailGrid>
         </View>
-
-        {load.driverInstructions ? (
-          <View style={styles.detailCard}>
-            <DetailSectionTitle
-              title="DRIVER INSTRUCTIONS"
-            />
-            <Text
-              style={
-                styles.instructionsText
-              }
-            >
-              {load.driverInstructions}
-            </Text>
-          </View>
-        ) : null}
 
         <View style={styles.detailCard}>
           <DetailSectionTitle
@@ -2069,6 +2128,7 @@ function ProfileScreen({
     licenseNumber: string;
     licenseState: string;
     currentTruckNumber: string;
+    physicalTruckNumber: string;
     currentTrailerNumber: string;
     currentTrailerLicense: string;
   }) => Promise<void>;
@@ -2096,6 +2156,8 @@ function ProfileScreen({
       profile?.licenseNumber || "",
     licenseState:
       profile?.licenseState || "",
+    physicalTruckNumber:
+      profile?.physicalTruckNumber || "",
     currentTrailerNumber:
       profile?.currentTrailerNumber || "",
     currentTrailerLicense:
@@ -2111,6 +2173,8 @@ function ProfileScreen({
         profile?.licenseNumber || "",
       licenseState:
         profile?.licenseState || "",
+      physicalTruckNumber:
+        profile?.physicalTruckNumber || "",
       currentTrailerNumber:
         profile?.currentTrailerNumber || "",
       currentTrailerLicense:
@@ -2122,6 +2186,7 @@ function ProfileScreen({
     profile?.phone,
     profile?.licenseNumber,
     profile?.licenseState,
+    profile?.physicalTruckNumber,
     profile?.currentTrailerNumber,
     profile?.currentTrailerLicense,
   ]);
@@ -2156,6 +2221,8 @@ function ProfileScreen({
           form.licenseState.trim(),
         currentTruckNumber:
           fixedTruckDeviceId,
+        physicalTruckNumber:
+          form.physicalTruckNumber.trim(),
         currentTrailerNumber:
           form.currentTrailerNumber.trim(),
         currentTrailerLicense:
@@ -2186,9 +2253,8 @@ function ProfileScreen({
 
   const truckLabel =
     activeLoad?.truckNumber ||
-    (truckDeviceId === "TRK-TEST-001"
-      ? "TRK 01"
-      : truckDeviceId);
+    profile?.physicalTruckNumber ||
+    "—";
 
   const trailerNumber =
     activeLoad?.trailerNumber ||
@@ -2394,6 +2460,23 @@ function ProfileScreen({
               FIXED
             </Text>
           </View>
+
+          <Text style={styles.inputLabel}>
+            TRUCK NUMBER
+          </Text>
+          <TextInput
+            value={form.physicalTruckNumber}
+            onChangeText={(value) =>
+              setForm((current) => ({
+                ...current,
+                physicalTruckNumber: value,
+              }))
+            }
+            autoCapitalize="characters"
+            placeholder="2-01TRK"
+            placeholderTextColor="#53657B"
+            style={styles.inputCompact}
+          />
 
           <Text style={styles.inputLabel}>
             TRAILER NUMBER
@@ -3154,6 +3237,36 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: COLORS.borderSoft,
     backgroundColor: "#071524",
+  },
+
+  quickMenu: {
+    position: "absolute",
+    top: 58,
+    left: 12,
+    right: 12,
+    zIndex: 50,
+    padding: 10,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: "#23364D",
+    backgroundColor: "#0C1828",
+    shadowColor: "#000000",
+    shadowOpacity: 0.35,
+    shadowRadius: 14,
+    elevation: 12,
+  },
+  quickMenuItem: {
+    paddingVertical: 12,
+    paddingHorizontal: 12,
+    color: "#EAF2FB",
+    fontSize: 14,
+    fontWeight: "700",
+    borderBottomWidth: 1,
+    borderBottomColor: "#17283B",
+  },
+  quickMenuDanger: {
+    color: "#F87171",
+    borderBottomWidth: 0,
   },
 
   headerSideButton: {

@@ -58,6 +58,7 @@ model DriverProfile {
   licenseState         String?
   profilePhotoUrl      String?
   currentTruckNumber    String?
+  physicalTruckNumber   String?
   currentTrailerNumber  String?
   currentTrailerLicense String?
 
@@ -221,7 +222,8 @@ model Dispatch {
   commodity       String?
   referenceNumber String?
 
-  dispatcherName String?
+  dispatcherName  String?
+  dispatcherPhone String?
   poNumber       String?
   bolNumber      String?
   carrierName    String?

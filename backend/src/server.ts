@@ -1375,6 +1375,7 @@ app.patch(
         'licenseState',
         'profilePhotoUrl',
         'currentTruckNumber',
+        'physicalTruckNumber',
         'currentTrailerNumber',
         'currentTrailerLicense'
       ] as const
@@ -1496,6 +1497,8 @@ app.patch(
                     profileData.profilePhotoUrl ?? null,
                   currentTruckNumber:
                     profileData.currentTruckNumber ?? null,
+                  physicalTruckNumber:
+                    profileData.physicalTruckNumber ?? null,
                   currentTrailerNumber:
                     profileData.currentTrailerNumber ?? null,
                   currentTrailerLicense:
@@ -1722,6 +1725,10 @@ app.patch(
                   currentTruckNumber:
                     profileData.currentTruckNumber ??
                     existing.driverProfile?.currentTruckNumber ??
+                    null,
+                  physicalTruckNumber:
+                    profileData.physicalTruckNumber ??
+                    existing.driverProfile?.physicalTruckNumber ??
                     null,
                   currentTrailerNumber:
                     profileData.currentTrailerNumber ?? null,
@@ -3493,6 +3500,10 @@ app.post(
               optionalString(
                 req.body?.dispatcherName
               ),
+            dispatcherPhone:
+              optionalString(
+                req.body?.dispatcherPhone
+              ),
             poNumber:
               optionalString(
                 req.body?.poNumber
@@ -3871,6 +3882,7 @@ app.patch(
         'commodity',
         'referenceNumber',
         'dispatcherName',
+        'dispatcherPhone',
         'poNumber',
         'bolNumber',
         'carrierName',
@@ -5059,6 +5071,8 @@ app.get(
 
           dispatcherName:
             share.dispatch.dispatcherName,
+          dispatcherPhone:
+            share.dispatch.dispatcherPhone,
 
           pickupName:
             share.dispatch.pickupName,
@@ -5150,6 +5164,8 @@ app.get(
                     profile?.licenseState ?? null,
                   currentTruckNumber:
                     profile?.currentTruckNumber ?? null,
+                  physicalTruckNumber:
+                    profile?.physicalTruckNumber ?? null,
                   currentTrailerNumber:
                     profile?.currentTrailerNumber ?? null,
                   currentTrailerLicense:

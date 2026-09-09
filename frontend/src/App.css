@@ -8548,214 +8548,61 @@ button:disabled {
 
 
 /* =====================================================
-   ASSET CAMERAS / BLACKVUE
+   DISPATCH — AUTO DRIVER FROM TRACKED ASSET
    ===================================================== */
 
-.asset-camera-section {
-  margin-top: 18px;
-  padding: 16px;
-  border: 1px solid rgba(148, 163, 184, 0.14);
-  border-radius: 12px;
-  background: rgba(15, 23, 42, 0.62);
-}
-
-.asset-camera-section-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 14px;
-  margin-bottom: 12px;
-}
-
-.asset-camera-section-head h3 {
-  margin: 3px 0 0;
-  font-size: 0.98rem;
-}
-
-.camera-assign-button {
-  min-height: 34px;
-  padding: 0 12px;
-  border: 1px solid rgba(96, 165, 250, 0.35);
-  border-radius: 8px;
-  background: rgba(37, 99, 235, 0.16);
-  color: #bfdbfe;
-  font-size: 0.72rem;
-  font-weight: 800;
-}
-
-.camera-assign-button:hover {
-  background: rgba(37, 99, 235, 0.28);
-}
-
-.asset-camera-grid {
+.dispatch-driver-compact {
+  margin-top: 6px;
+  padding: 7px 8px;
   display: grid;
-  gap: 10px;
-}
-
-.asset-camera-card {
-  padding: 13px;
-  border: 1px solid rgba(148, 163, 184, 0.13);
-  border-radius: 10px;
-  background: #101b2c;
-}
-
-.asset-camera-card-top {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 10px;
-}
-
-.asset-camera-icon {
-  width: 38px;
-  height: 38px;
-  display: grid;
-  place-items: center;
-  border-radius: 9px;
-  background: #1e293b;
-  color: #93c5fd;
-  font-size: 0.62rem;
-  font-weight: 900;
-  letter-spacing: 0.08em;
-}
-
-.asset-camera-title {
-  min-width: 0;
-  display: grid;
-  gap: 2px;
-}
-
-.asset-camera-title strong,
-.asset-camera-title span {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.asset-camera-title strong {
-  font-size: 0.8rem;
-}
-
-.asset-camera-title span {
-  color: #8da0b8;
-  font-size: 0.68rem;
-}
-
-.asset-camera-status {
-  padding: 5px 8px;
-  border-radius: 999px;
-  font-size: 0.62rem;
-  font-weight: 850;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-}
-
-.asset-camera-status.online {
-  background: rgba(34, 197, 94, 0.13);
-  color: #86efac;
-}
-
-.asset-camera-status.pending {
-  background: rgba(245, 158, 11, 0.12);
-  color: #fcd34d;
-}
-
-.asset-camera-meta {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 8px;
-  margin-top: 11px;
-}
-
-.asset-camera-meta span {
-  min-width: 0;
-  display: grid;
-  gap: 3px;
-  color: #728299;
-  font-size: 0.62rem;
-}
-
-.asset-camera-meta strong {
-  overflow: hidden;
-  color: #dbe7f5;
-  font-size: 0.7rem;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.asset-camera-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  margin-top: 12px;
-}
-
-.camera-live-button,
-.camera-playback-button,
-.camera-remove-button {
-  min-height: 32px;
-  padding: 0 10px;
+  grid-template-columns:
+    repeat(2, minmax(0, 1fr));
+  gap: 3px 8px;
+  border:
+    1px solid
+    rgba(96, 165, 250, 0.18);
   border-radius: 7px;
+  background:
+    rgba(8, 17, 31, 0.58);
+  color: #aebed0;
+  font-size: 0.61rem;
+  line-height: 1.25;
+}
+
+.dispatch-driver-compact-name {
+  grid-column: 1 / -1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #f8fafc;
   font-size: 0.68rem;
-  font-weight: 800;
+  font-weight: 850;
 }
 
-.camera-live-button,
-.camera-playback-button {
-  border: 1px solid rgba(148, 163, 184, 0.16);
-  background: #182438;
-  color: #aebed1;
+.dispatch-driver-compact span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.camera-live-button:disabled,
-.camera-playback-button:disabled {
-  cursor: not-allowed;
-  opacity: 0.62;
+.dispatch-form-group-grid {
+  align-items: start;
 }
 
-.camera-remove-button {
-  margin-left: auto;
-  border: 1px solid rgba(248, 113, 113, 0.24);
-  background: rgba(127, 29, 29, 0.12);
-  color: #fca5a5;
-}
-
-.asset-camera-empty {
-  min-height: 86px;
-  display: grid;
-  place-content: center;
-  gap: 4px;
-  border: 1px dashed rgba(148, 163, 184, 0.18);
-  border-radius: 9px;
-  text-align: center;
-}
-
-.asset-camera-empty strong {
-  font-size: 0.76rem;
-}
-
-.asset-camera-empty span,
-.asset-camera-note {
-  color: #8393a9;
-  font-size: 0.66rem;
-  line-height: 1.45;
-}
-
-.asset-camera-note {
-  margin-top: 10px;
-}
-
-@media (max-width: 720px) {
-  .asset-camera-section-head {
-    align-items: flex-start;
-    flex-direction: column;
-  }
-
-  .asset-camera-meta {
+@media (max-width: 760px) {
+  .dispatch-driver-compact {
     grid-template-columns: 1fr;
   }
 
-  .camera-remove-button {
-    margin-left: 0;
+  .dispatch-driver-compact-name {
+    grid-column: auto;
   }
+}
+
+.dispatch-notes-only {
+  grid-template-columns: 1fr !important;
+}
+.dispatch-notes-only label {
+  grid-column: 1 / -1;
 }

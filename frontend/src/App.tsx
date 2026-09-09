@@ -90,19 +90,6 @@ type NotificationRecord = {
   createdAt: string
 }
 
-type CameraRecord = {
-  id: number
-  provider: string
-  model: string | null
-  externalId: string | null
-  name: string
-  active: boolean
-  cloudStatus: string | null
-  lastSeenAt: string | null
-  createdAt: string
-  updatedAt: string
-}
-
 type DriverRecord = {
   id: number
   email: string
@@ -117,6 +104,7 @@ type DriverRecord = {
     licenseState?: string | null
     profilePhotoUrl?: string | null
     currentTruckNumber?: string | null
+    physicalTruckNumber?: string | null
     currentTrailerNumber?: string | null
     currentTrailerLicense?: string | null
   } | null
@@ -136,6 +124,7 @@ type DispatchRecord = {
   referenceNumber: string | null
 
   dispatcherName?: string | null
+  dispatcherPhone?: string | null
   poNumber?: string | null
   bolNumber?: string | null
   carrierName?: string | null
@@ -1341,6 +1330,16 @@ function PublicLoadTrackingPage({
                     )}
                   </dd>
                 </div>
+                <div>
+                  <dt>
+                    Dispatcher Phone
+                  </dt>
+                  <dd>
+                    {valueOrDash(
+                      dispatch.dispatcherPhone
+                    )}
+                  </dd>
+                </div>
 
                 <div>
                   <dt>
@@ -1800,6 +1799,7 @@ function App() {
   ] = useState({
     loadNumber: '',
     dispatcherName: '',
+    dispatcherPhone: '',
     poNumber: '',
     bolNumber: '',
     referenceNumber: '',
@@ -1907,6 +1907,7 @@ function App() {
   ] = useState({
     loadNumber: '',
     dispatcherName: '',
+    dispatcherPhone: '',
     poNumber: '',
     bolNumber: '',
     referenceNumber: '',
@@ -2954,6 +2955,7 @@ function App() {
     setNewDispatchForm({
       loadNumber: '',
       dispatcherName: '',
+    dispatcherPhone: '',
       poNumber: '',
       bolNumber: '',
       referenceNumber: '',
@@ -3078,6 +3080,8 @@ function App() {
                   newDispatchForm.referenceNumber,
                 dispatcherName:
                   newDispatchForm.dispatcherName,
+                dispatcherPhone:
+                  newDispatchForm.dispatcherPhone,
                 poNumber:
                   newDispatchForm.poNumber,
                 bolNumber:
@@ -3223,6 +3227,8 @@ function App() {
         dispatch.loadNumber || '',
       dispatcherName:
         dispatch.dispatcherName || '',
+      dispatcherPhone:
+        dispatch.dispatcherPhone || '',
       poNumber:
         dispatch.poNumber || '',
       bolNumber:
@@ -3455,6 +3461,8 @@ function App() {
                   editDispatchForm.referenceNumber,
                 dispatcherName:
                   editDispatchForm.dispatcherName,
+                dispatcherPhone:
+                  editDispatchForm.dispatcherPhone,
                 poNumber:
                   editDispatchForm.poNumber,
                 bolNumber:
@@ -3867,7 +3875,10 @@ function App() {
 
   const availableAssets =
     unassignedAssets.filter(
-      isAssetAssignableToDispatch
+      (asset) =>
+        isAssetAssignableToDispatch(asset) ||
+        String(asset.id) ===
+          newDispatchForm.assetId
     )
 
   const editableAssets =
@@ -4561,21 +4572,6 @@ function App() {
       selectedAsset
     )
 
-  const selectedCameras: CameraRecord[] =
-    Array.isArray(
-      selectedAsset?.cameras
-    )
-      ? selectedAsset.cameras
-          .filter(
-            (camera: CameraRecord) =>
-              camera?.active !== false
-          )
-      : []
-
-  const canManageCameras =
-    currentUser?.role === 'company_admin' ||
-    currentUser?.role === 'superadmin'
-
   const isSelectedTruck =
     selectedAssetType === 'TRK'
 
@@ -5065,156 +5061,6 @@ function App() {
 
     setIsLoggedIn(true)
   }
-
-  const handleAssignBlackVueCamera =
-    async () => {
-      if (!selectedAsset?.id) {
-        window.alert(
-          'Select an asset first.'
-        )
-        return
-      }
-
-      const token =
-        localStorage.getItem(
-          'maverick_token'
-        )
-
-      if (!token) {
-        handleLogout()
-        return
-      }
-
-      const name =
-        window.prompt(
-          'Camera name',
-          `${selectedAssetName} Camera`
-        )?.trim()
-
-      if (!name) {
-        return
-      }
-
-      const model =
-        window.prompt(
-          'BlackVue model',
-          'DR770X-2CH LTE'
-        )?.trim() || null
-
-      const externalId =
-        window.prompt(
-          'BlackVue Camera ID / PSN (optional for now)',
-          ''
-        )?.trim() || null
-
-      try {
-        const res =
-          await fetch(
-            `${API_BASE}/api/assets/${selectedAsset.id}/cameras`,
-            {
-              method: 'POST',
-              headers: {
-                'Content-Type':
-                  'application/json',
-                Authorization:
-                  `Bearer ${token}`
-              },
-              body: JSON.stringify({
-                provider: 'BLACKVUE',
-                model,
-                externalId,
-                name
-              })
-            }
-          )
-
-        const data =
-          await res.json()
-
-        if (res.status === 401) {
-          handleLogout()
-          return
-        }
-
-        if (!res.ok || !data.ok) {
-          window.alert(
-            data.message ||
-            'Unable to assign camera.'
-          )
-          return
-        }
-
-        await loadAssets()
-      } catch {
-        window.alert(
-          'Unable to connect to Maverick.'
-        )
-      }
-    }
-
-  const handleRemoveCamera =
-    async (
-      camera: CameraRecord
-    ) => {
-      if (
-        !window.confirm(
-          `Remove ${camera.name} from ${selectedAssetName}?`
-        )
-      ) {
-        return
-      }
-
-      const token =
-        localStorage.getItem(
-          'maverick_token'
-        )
-
-      if (!token) {
-        handleLogout()
-        return
-      }
-
-      try {
-        const res =
-          await fetch(
-            `${API_BASE}/api/cameras/${camera.id}`,
-            {
-              method: 'PATCH',
-              headers: {
-                'Content-Type':
-                  'application/json',
-                Authorization:
-                  `Bearer ${token}`
-              },
-              body: JSON.stringify({
-                active: false
-              })
-            }
-          )
-
-        const data =
-          await res.json()
-
-        if (res.status === 401) {
-          handleLogout()
-          return
-        }
-
-        if (!res.ok || !data.ok) {
-          window.alert(
-            data.message ||
-            'Unable to remove camera.'
-          )
-          return
-        }
-
-        await loadAssets()
-      } catch {
-        window.alert(
-          'Unable to connect to Maverick.'
-        )
-      }
-    }
 
   const handleRenameAsset =
     async () => {
@@ -10079,6 +9925,19 @@ function App() {
                               />
                             </label>
                             <label>
+                              <span>Dispatcher Phone</span>
+                              <input
+                                value={newDispatchForm.dispatcherPhone}
+                                onChange={(event) =>
+                                  setNewDispatchForm((current) => ({
+                                    ...current,
+                                    dispatcherPhone: event.target.value
+                                  }))
+                                }
+                                placeholder="(831) 000-0000"
+                              />
+                            </label>
+                            <label>
                               <span>Reference #</span>
                               <input
                                 value={newDispatchForm.referenceNumber}
@@ -10117,30 +9976,6 @@ function App() {
                                 placeholder="126543"
                               />
                             </label>
-                            <label>
-                              <span>Driver</span>
-                              <select
-                                value={newDispatchForm.driverId}
-                                onChange={(event) =>
-                                  setNewDispatchForm((current) => ({
-                                    ...current,
-                                    driverId: event.target.value
-                                  }))
-                                }
-                              >
-                                <option value="">Unassigned driver</option>
-                                {drivers.map((driver) => (
-                                  <option key={driver.id} value={driver.id}>
-                                    {
-                                      driver.profile?.firstName ||
-                                      driver.profile?.lastName
-                                        ? `${driver.profile?.firstName || ''} ${driver.profile?.lastName || ''}`.trim()
-                                        : driver.name || driver.email
-                                    }
-                                  </option>
-                                ))}
-                              </select>
-                            </label>
                           </div>
                         </section>
                         <section className="dispatch-form-group">
@@ -10160,32 +9995,45 @@ function App() {
                                 }
                               >
                                 <option value="">Unassigned asset</option>
-                                {availableAssets.map((asset) => (
-                                  <option key={asset.id} value={asset.id}>
-                                    {asset.name || asset.deviceId} ({asset.deviceId})
-                                    {assetTypeCode(asset) === 'TRK'
-                                      ? ' · ONLINE'
-                                      : ''}
-                                  </option>
-                                ))}
+                                {availableAssets.map((asset) => {
+                                  const item =
+                                    fleetTelemetry[
+                                      asset.deviceId
+                                    ]
+
+                                  const assetStatus =
+                                    assetTypeCode(asset) === 'TRK'
+                                      ? getDeviceStatusForTelemetry(
+                                          item
+                                        )
+                                      : null
+
+                                  const isCurrent =
+                                    String(asset.id) ===
+                                    newDispatchForm.assetId
+
+                                  return (
+                                    <option
+                                      key={asset.id}
+                                      value={asset.id}
+                                    >
+                                      {asset.name || asset.deviceId} ({asset.deviceId})
+                                      {assetTypeCode(asset) === 'TRK'
+                                        ? ` · ${String(
+                                            assetStatus ||
+                                            'offline'
+                                          ).toUpperCase()}${isCurrent ? ' · SELECTED' : ''}`
+                                        : ''}
+                                    </option>
+                                  )
+                                })}
                               </select>
 
                               {
                                 selectedNewTruckDriver
                                   ? (
-                                    <div
-                                      style={{
-                                        marginTop: 8,
-                                        padding: '10px 12px',
-                                        border: '1px solid #29384e',
-                                        borderRadius: 8,
-                                        background: '#0d1726',
-                                        color: '#cbd5e1',
-                                        fontSize: 12,
-                                        lineHeight: 1.5
-                                      }}
-                                    >
-                                      <strong style={{ color: '#f8fafc' }}>
+                                    <div className="dispatch-driver-compact">
+                                      <strong className="dispatch-driver-compact-name">
                                         {
                                           selectedNewTruckDriver.profile?.firstName ||
                                           selectedNewTruckDriver.profile?.lastName
@@ -10193,10 +10041,10 @@ function App() {
                                             : selectedNewTruckDriver.name || selectedNewTruckDriver.email
                                         }
                                       </strong>
-                                      <div>
+                                      <span>
                                         Phone: {selectedNewTruckDriver.profile?.phone || '—'}
-                                      </div>
-                                      <div>
+                                      </span>
+                                      <span>
                                         License: {
                                           selectedNewTruckDriver.profile?.licenseNumber || '—'
                                         }{
@@ -10204,15 +10052,16 @@ function App() {
                                             ? ` · ${selectedNewTruckDriver.profile.licenseState}`
                                             : ''
                                         }
-                                      </div>
-                                      <div>
-                                        Truck: {selectedNewTruckDriver.profile?.currentTruckNumber || '—'}
-                                        {' · '}
+                                      </span>
+                                      <span>
+                                        Truck: {selectedNewTruckDriver.profile?.physicalTruckNumber || '—'}
+                                      </span>
+                                      <span>
                                         Trailer: {selectedNewTruckDriver.profile?.currentTrailerNumber || '—'}
                                         {selectedNewTruckDriver.profile?.currentTrailerLicense
-                                          ? ` · License ${selectedNewTruckDriver.profile.currentTrailerLicense}`
+                                          ? ` · ${selectedNewTruckDriver.profile.currentTrailerLicense}`
                                           : ''}
-                                      </div>
+                                      </span>
                                     </div>
                                   )
                                   : newDispatchForm.assetId &&
@@ -10496,35 +10345,9 @@ function App() {
                         </section>
                         <section className="dispatch-form-group dispatch-form-group-wide">
                           <div className="dispatch-form-section-title">
-                            INSTRUCTIONS
+                            INTERNAL NOTES
                           </div>
-                          <div className="dispatch-form-group-grid">
-                            <label>
-                              <span>Driver Instructions</span>
-                              <textarea
-                                value={newDispatchForm.driverInstructions}
-                                onChange={(event) =>
-                                  setNewDispatchForm((current) => ({
-                                    ...current,
-                                    driverInstructions: event.target.value
-                                  }))
-                                }
-                                placeholder="Check-in name, seal/load lock instructions, appointment notes..."
-                              />
-                            </label>
-                            <label>
-                              <span>Terms / Agreement</span>
-                              <textarea
-                                value={newDispatchForm.termsAndAgreement}
-                                onChange={(event) =>
-                                  setNewDispatchForm((current) => ({
-                                    ...current,
-                                    termsAndAgreement: event.target.value
-                                  }))
-                                }
-                                placeholder="Carrier terms, temperature responsibility, appointment requirements..."
-                              />
-                            </label>
+                          <div className="dispatch-form-group-grid dispatch-notes-only">
                             <label>
                               <span>Internal Notes</span>
                               <textarea
@@ -10550,8 +10373,7 @@ function App() {
                         )
                       }
 
-
-              <div className="modal-actions">
+                      <div className="modal-actions">
                         <button
                           className="secondary-action"
                           onClick={() =>
@@ -10653,6 +10475,19 @@ function App() {
                               />
                             </label>
                             <label>
+                              <span>Dispatcher Phone</span>
+                              <input
+                                value={editDispatchForm.dispatcherPhone}
+                                onChange={(event) =>
+                                  setEditDispatchForm((current) => ({
+                                    ...current,
+                                    dispatcherPhone: event.target.value
+                                  }))
+                                }
+                                placeholder="(831) 000-0000"
+                              />
+                            </label>
+                            <label>
                               <span>Reference #</span>
                               <input
                                 value={editDispatchForm.referenceNumber}
@@ -10691,30 +10526,6 @@ function App() {
                                 placeholder="126543"
                               />
                             </label>
-                            <label>
-                              <span>Driver</span>
-                              <select
-                                value={editDispatchForm.driverId}
-                                onChange={(event) =>
-                                  setEditDispatchForm((current) => ({
-                                    ...current,
-                                    driverId: event.target.value
-                                  }))
-                                }
-                              >
-                                <option value="">Unassigned driver</option>
-                                {drivers.map((driver) => (
-                                  <option key={driver.id} value={driver.id}>
-                                    {
-                                      driver.profile?.firstName ||
-                                      driver.profile?.lastName
-                                        ? `${driver.profile?.firstName || ''} ${driver.profile?.lastName || ''}`.trim()
-                                        : driver.name || driver.email
-                                    }
-                                  </option>
-                                ))}
-                              </select>
-                            </label>
                           </div>
                         </section>
                         <section className="dispatch-form-group">
@@ -10739,9 +10550,17 @@ function App() {
                                     String(asset.id) ===
                                     editDispatchForm.assetId
 
-                                  const online =
-                                    assetTypeCode(asset) !== 'TRK' ||
-                                    isAssetAssignableToDispatch(asset)
+                                  const item =
+                                    fleetTelemetry[
+                                      asset.deviceId
+                                    ]
+
+                                  const assetStatus =
+                                    assetTypeCode(asset) === 'TRK'
+                                      ? getDeviceStatusForTelemetry(
+                                          item
+                                        )
+                                      : null
 
                                   return (
                                     <option
@@ -10750,11 +10569,10 @@ function App() {
                                     >
                                       {asset.name || asset.deviceId} ({asset.deviceId})
                                       {assetTypeCode(asset) === 'TRK'
-                                        ? online
-                                          ? ' · ONLINE'
-                                          : isCurrent
-                                            ? ' · OFFLINE · CURRENT'
-                                            : ''
+                                        ? ` · ${String(
+                                            assetStatus ||
+                                            'offline'
+                                          ).toUpperCase()}${isCurrent ? ' · CURRENT' : ''}`
                                         : ''}
                                     </option>
                                   )
@@ -10764,19 +10582,8 @@ function App() {
                               {
                                 selectedEditTruckDriver
                                   ? (
-                                    <div
-                                      style={{
-                                        marginTop: 8,
-                                        padding: '10px 12px',
-                                        border: '1px solid #29384e',
-                                        borderRadius: 8,
-                                        background: '#0d1726',
-                                        color: '#cbd5e1',
-                                        fontSize: 12,
-                                        lineHeight: 1.5
-                                      }}
-                                    >
-                                      <strong style={{ color: '#f8fafc' }}>
+                                    <div className="dispatch-driver-compact">
+                                      <strong className="dispatch-driver-compact-name">
                                         {
                                           selectedEditTruckDriver.profile?.firstName ||
                                           selectedEditTruckDriver.profile?.lastName
@@ -10784,10 +10591,10 @@ function App() {
                                             : selectedEditTruckDriver.name || selectedEditTruckDriver.email
                                         }
                                       </strong>
-                                      <div>
+                                      <span>
                                         Phone: {selectedEditTruckDriver.profile?.phone || '—'}
-                                      </div>
-                                      <div>
+                                      </span>
+                                      <span>
                                         License: {
                                           selectedEditTruckDriver.profile?.licenseNumber || '—'
                                         }{
@@ -10795,15 +10602,16 @@ function App() {
                                             ? ` · ${selectedEditTruckDriver.profile.licenseState}`
                                             : ''
                                         }
-                                      </div>
-                                      <div>
-                                        Truck: {selectedEditTruckDriver.profile?.currentTruckNumber || '—'}
-                                        {' · '}
+                                      </span>
+                                      <span>
+                                        Truck: {selectedEditTruckDriver.profile?.physicalTruckNumber || '—'}
+                                      </span>
+                                      <span>
                                         Trailer: {selectedEditTruckDriver.profile?.currentTrailerNumber || '—'}
                                         {selectedEditTruckDriver.profile?.currentTrailerLicense
-                                          ? ` · License ${selectedEditTruckDriver.profile.currentTrailerLicense}`
+                                          ? ` · ${selectedEditTruckDriver.profile.currentTrailerLicense}`
                                           : ''}
-                                      </div>
+                                      </span>
                                     </div>
                                   )
                                   : editDispatchForm.assetId &&
@@ -11087,35 +10895,9 @@ function App() {
                         </section>
                         <section className="dispatch-form-group dispatch-form-group-wide">
                           <div className="dispatch-form-section-title">
-                            INSTRUCTIONS
+                            INTERNAL NOTES
                           </div>
-                          <div className="dispatch-form-group-grid">
-                            <label>
-                              <span>Driver Instructions</span>
-                              <textarea
-                                value={editDispatchForm.driverInstructions}
-                                onChange={(event) =>
-                                  setEditDispatchForm((current) => ({
-                                    ...current,
-                                    driverInstructions: event.target.value
-                                  }))
-                                }
-                                placeholder="Check-in name, seal/load lock instructions, appointment notes..."
-                              />
-                            </label>
-                            <label>
-                              <span>Terms / Agreement</span>
-                              <textarea
-                                value={editDispatchForm.termsAndAgreement}
-                                onChange={(event) =>
-                                  setEditDispatchForm((current) => ({
-                                    ...current,
-                                    termsAndAgreement: event.target.value
-                                  }))
-                                }
-                                placeholder="Carrier terms, temperature responsibility, appointment requirements..."
-                              />
-                            </label>
+                          <div className="dispatch-form-group-grid dispatch-notes-only">
                             <label>
                               <span>Internal Notes</span>
                               <textarea
@@ -12483,152 +12265,6 @@ function App() {
                   </dd>
                 </div>
               </dl>
-
-              <section className="asset-camera-section">
-                <div className="asset-camera-section-head">
-                  <div>
-                    <span className="page-kicker">
-                      Cameras
-                    </span>
-                    <h3>
-                      BlackVue
-                    </h3>
-                  </div>
-
-                  {
-                    canManageCameras && (
-                      <button
-                        className="camera-assign-button"
-                        type="button"
-                        onClick={
-                          handleAssignBlackVueCamera
-                        }
-                      >
-                        + Assign camera
-                      </button>
-                    )
-                  }
-                </div>
-
-                {
-                  selectedCameras.length > 0
-                    ? (
-                      <div className="asset-camera-grid">
-                        {
-                          selectedCameras.map(
-                            (camera) => (
-                              <article
-                                className="asset-camera-card"
-                                key={camera.id}
-                              >
-                                <div className="asset-camera-card-top">
-                                  <div className="asset-camera-icon">
-                                    CAM
-                                  </div>
-
-                                  <div className="asset-camera-title">
-                                    <strong>
-                                      {camera.name}
-                                    </strong>
-                                    <span>
-                                      {
-                                        camera.model ||
-                                        camera.provider
-                                      }
-                                    </span>
-                                  </div>
-
-                                  <span
-                                    className={`asset-camera-status ${
-                                      camera.cloudStatus === 'ONLINE'
-                                        ? 'online'
-                                        : 'pending'
-                                    }`}
-                                  >
-                                    {
-                                      camera.cloudStatus === 'ONLINE'
-                                        ? 'Online'
-                                        : 'API pending'
-                                    }
-                                  </span>
-                                </div>
-
-                                <div className="asset-camera-meta">
-                                  <span>
-                                    Provider
-                                    <strong>
-                                      {camera.provider}
-                                    </strong>
-                                  </span>
-
-                                  <span>
-                                    Camera ID
-                                    <strong>
-                                      {
-                                        camera.externalId ||
-                                        'Not set'
-                                      }
-                                    </strong>
-                                  </span>
-                                </div>
-
-                                <div className="asset-camera-actions">
-                                  <button
-                                    className="camera-live-button"
-                                    type="button"
-                                    disabled
-                                    title="BlackVue Cloud API access is required before Live View can be opened inside MAVTRACK."
-                                  >
-                                    Live View · API pending
-                                  </button>
-
-                                  <button
-                                    className="camera-playback-button"
-                                    type="button"
-                                    disabled
-                                    title="BlackVue Cloud API access is required before SD playback can be opened inside MAVTRACK."
-                                  >
-                                    SD Recordings
-                                  </button>
-
-                                  {
-                                    canManageCameras && (
-                                      <button
-                                        className="camera-remove-button"
-                                        type="button"
-                                        onClick={() =>
-                                          handleRemoveCamera(
-                                            camera
-                                          )
-                                        }
-                                      >
-                                        Remove
-                                      </button>
-                                    )
-                                  }
-                                </div>
-                              </article>
-                            )
-                          )
-                        }
-                      </div>
-                    )
-                    : (
-                      <div className="asset-camera-empty">
-                        <strong>
-                          No camera assigned
-                        </strong>
-                        <span>
-                          Assign the BlackVue DR770X-2CH LTE to this asset.
-                        </span>
-                      </div>
-                    )
-                }
-
-                <div className="asset-camera-note">
-                  Camera assignment is ready. Live View and remote SD playback will activate here after BlackVue Cloud API credentials are connected to the Maverick backend.
-                </div>
-              </section>
 
               <div className="modal-actions">
                 <button

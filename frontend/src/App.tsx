@@ -4266,6 +4266,35 @@ function App() {
       dispatch.id
     )
 
+    const sortedStops =
+      [...(
+        dispatch.stops || []
+      )].sort(
+        (a, b) =>
+          a.sequence -
+          b.sequence
+      )
+
+    const primaryPickupStop =
+      sortedStops.find(
+        (stop) =>
+          stop.type === 'PICKUP' &&
+          Number(stop.pairNumber || 1) === 1
+      ) ||
+      sortedStops.find(
+        (stop) => stop.type === 'PICKUP'
+      )
+
+    const primaryDropStop =
+      sortedStops.find(
+        (stop) =>
+          stop.type === 'DROP' &&
+          Number(stop.pairNumber || 1) === 1
+      ) ||
+      sortedStops.find(
+        (stop) => stop.type === 'DROP'
+      )
+
     setEditDispatchForm({
       loadNumber:
         dispatch.loadNumber || '',
@@ -4283,6 +4312,8 @@ function App() {
         dispatch.driverId != null
           ? String(dispatch.driverId)
           : '',
+      manualDriverName:
+        dispatch.manualDriverName || '',
       assetId:
         dispatch.asset?.id != null
           ? String(
@@ -4299,24 +4330,36 @@ function App() {
         dispatch.carrierName || '',
       lessorName:
         dispatch.lessorName || '',
+      pickupCustomerCode:
+        primaryPickupStop?.customerCode || '',
       pickupName:
         dispatch.pickupName || '',
       pickupAddress:
         dispatch.pickupAddress || '',
       pickupPhone:
         dispatch.pickupPhone || '',
+      pickupLatitude:
+        primaryPickupStop?.latitude ?? null,
+      pickupLongitude:
+        primaryPickupStop?.longitude ?? null,
       pickupReference:
         dispatch.pickupReference || '',
       pickupScheduledAt:
         toDateTimeLocalValue(
           dispatch.pickupScheduledAt
         ),
+      deliveryCustomerCode:
+        primaryDropStop?.customerCode || '',
       deliveryName:
         dispatch.deliveryName || '',
       deliveryAddress:
         dispatch.deliveryAddress || '',
       deliveryPhone:
         dispatch.deliveryPhone || '',
+      deliveryLatitude:
+        primaryDropStop?.latitude ?? null,
+      deliveryLongitude:
+        primaryDropStop?.longitude ?? null,
       deliveryReference:
         dispatch.deliveryReference || '',
       deliveryScheduledAt:
@@ -4375,15 +4418,6 @@ function App() {
         dispatch.notes || ''
     })
 
-    const sortedStops =
-      [...(
-        dispatch.stops || []
-      )].sort(
-        (a, b) =>
-          a.sequence -
-          b.sequence
-      )
-
     const pairTypeCounts: Record<
       'PICKUP' | 'DROP',
       number
@@ -4412,6 +4446,7 @@ function App() {
             name: stop.name || '',
             address: stop.address || '',
             phone: formatDispatchPhone(stop.phone || ''),
+            customerCode: stop.customerCode || '',
             latitude: stop.latitude ?? null,
             longitude: stop.longitude ?? null,
             reference: stop.reference || '',

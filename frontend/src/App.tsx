@@ -59,8 +59,61 @@ type DispatchStatus =
 type DispatchStatusEvent = {
   id: number
   status: DispatchStatus
+  eventType?: string | null
+  title?: string | null
   notes: string | null
   createdAt: string
+}
+
+type DispatchStopRecord = {
+  id?: number
+  sequence: number
+  pairNumber: number
+  type: 'PICKUP' | 'DROP'
+  status: 'PENDING' | 'EN_ROUTE' | 'ARRIVED' | 'COMPLETED'
+  customerCode?: string | null
+  name: string
+  address: string
+  phone?: string | null
+  latitude?: number | null
+  longitude?: number | null
+  reference?: string | null
+  notes?: string | null
+  scheduledAt?: string | null
+  arrivedAt?: string | null
+  completedAt?: string | null
+}
+
+type DispatchDocumentRecord = {
+  id: number
+  dispatchId: number
+  originalName: string
+  mimeType: string
+  sizeBytes: number
+  category: string
+  uploadedByRole: string
+  uploadedByName?: string | null
+  customerVisible: boolean
+  isSignature: boolean
+  signedBy?: string | null
+  signedAt?: string | null
+  description?: string | null
+  createdAt: string
+  fileUrl?: string
+}
+
+type ExtraDispatchStop = {
+  key: string
+  pairNumber: number
+  type: 'PICKUP' | 'DROP'
+  customerCode: string
+  name: string
+  address: string
+  phone: string
+  latitude: number | null
+  longitude: number | null
+  reference: string
+  scheduledAt: string
 }
 
 type DispatchShareRecord = {
@@ -148,6 +201,7 @@ type DispatchRecord = {
   termsAndAgreement?: string | null
 
   driverId?: number | null
+  manualDriverName?: string | null
   assignmentStatus?: 'UNASSIGNED' | 'PENDING' | 'ACCEPTED' | 'DECLINED'
   acceptedAt?: string | null
   declinedAt?: string | null
@@ -162,6 +216,8 @@ type DispatchRecord = {
   updatedAt: string
   asset: any | null
   statusEvents: DispatchStatusEvent[]
+  stops?: DispatchStopRecord[]
+  documents?: DispatchDocumentRecord[]
   shares?: DispatchShareRecord[]
 }
 
@@ -308,6 +364,7 @@ function createTrailerIcon(
       <div class="mav-trailer-marker ${movementStatus}${selected ? ' selected' : ''}${hasDispatch ? ' has-dispatch' : ''}">
         <span class="mav-trailer-marker-pulse"></span>
         <span class="mav-trailer-marker-icon">▰</span>
+        <span class="mav-marker-source-badge mav2">M2</span>
         ${hasDispatch ? '<span class="mav-trailer-load-badge">L</span>' : ''}
       </div>
     `,
@@ -320,14 +377,21 @@ function createTrailerIcon(
 function createTruckIcon(
   movementStatus: MovementStatus,
   selected = false,
-  hasDispatch = false
+  hasDispatch = false,
+  trackingSource: 'PHONE' | 'MAV2' = 'PHONE'
 ) {
+  const sourceBadge =
+    trackingSource === 'PHONE'
+      ? '📱'
+      : 'M2'
+
   return L.divIcon({
     className: 'mav-truck-marker-wrapper',
     html: `
       <div class="mav-truck-marker ${movementStatus}${selected ? ' selected' : ''}${hasDispatch ? ' has-dispatch' : ''}">
         <span class="mav-truck-marker-pulse"></span>
         <span class="mav-truck-marker-icon">TRK</span>
+        <span class="mav-marker-source-badge ${trackingSource.toLowerCase()}">${sourceBadge}</span>
         ${hasDispatch ? '<span class="mav-truck-load-badge">L</span>' : ''}
       </div>
     `,
@@ -345,6 +409,471 @@ function assetTypeCode(
   ).toUpperCase() === 'TRK'
     ? 'TRK'
     : 'TRL'
+}
+
+function trackingSourceCode(
+  asset: any
+): 'PHONE' | 'MAV2' {
+  return String(
+    asset?.trackingSource ||
+      (assetTypeCode(asset) === 'TRK'
+        ? 'PHONE'
+        : 'MAV2')
+  ).toUpperCase() === 'PHONE'
+    ? 'PHONE'
+    : 'MAV2'
+}
+
+function TrackingSourceIcon({
+  asset,
+  compact = false
+}: {
+  asset: any
+  compact?: boolean
+}) {
+  const source = trackingSourceCode(asset)
+
+  return (
+    <span
+      className={`tracking-source-icon ${source.toLowerCase()}${compact ? ' compact' : ''}`}
+      title={source === 'PHONE' ? 'Phone GPS' : 'MAV2 device'}
+      aria-label={source === 'PHONE' ? 'Phone GPS' : 'MAV2 device'}
+    >
+      {source === 'PHONE' ? (
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <rect x="6.5" y="2.5" width="11" height="19" rx="2.2" />
+          <line x1="9.5" y1="5" x2="14.5" y2="5" />
+          <circle cx="12" cy="18.5" r="0.8" className="source-fill" />
+        </svg>
+      ) : (
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <rect x="4" y="5" width="16" height="14" rx="2.5" />
+          <circle cx="8" cy="9" r="1" className="source-fill" />
+          <circle cx="12" cy="9" r="1" className="source-fill" />
+          <path d="M7 14h10M7 16.5h7" />
+          <path d="M12 5V2.5M9.5 2.5h5" />
+        </svg>
+      )}
+      {!compact ? (
+        <span>{source === 'PHONE' ? 'PHONE' : 'MAV2'}</span>
+      ) : null}
+    </span>
+  )
+}
+
+function formatDispatchPhone(value: string) {
+  const digits = value.replace(/\D/g, '').slice(0, 10)
+  if (digits.length <= 3) return digits
+  if (digits.length <= 6) return `${digits.slice(0, 3)} ${digits.slice(3)}`
+  return `${digits.slice(0, 3)} ${digits.slice(3, 6)} ${digits.slice(6)}`
+}
+
+type CustomerLocationSuggestion = {
+  id: number
+  code: string
+  customerName: string
+  address: string
+  phone?: string | null
+  latitude?: number | null
+  longitude?: number | null
+}
+
+type AddressSuggestion = {
+  formatted: string
+  city?: string | null
+  state?: string | null
+  postcode?: string | null
+  latitude?: number | null
+  longitude?: number | null
+}
+
+function CustomerLocationInput({
+  code,
+  onCodeChange,
+  onSelect
+}: {
+  code: string
+  onCodeChange: (value: string) => void
+  onSelect: (location: CustomerLocationSuggestion) => void
+}) {
+  const [items, setItems] = useState<CustomerLocationSuggestion[]>([])
+  const [open, setOpen] = useState(false)
+
+  useEffect(() => {
+    const query = code.trim()
+    if (!query) {
+      setItems([])
+      return
+    }
+
+    const token = window.setTimeout(async () => {
+      const auth = localStorage.getItem('maverick_token')
+      if (!auth) return
+      try {
+        const response = await fetch(
+          `${API_BASE}/api/customer-locations?q=${encodeURIComponent(query)}`,
+          { headers: { Authorization: `Bearer ${auth}` } }
+        )
+        const payload = await response.json()
+        if (response.ok && payload.ok) {
+          setItems(payload.locations || [])
+          setOpen(true)
+        }
+      } catch {
+        setItems([])
+      }
+    }, 180)
+
+    return () => window.clearTimeout(token)
+  }, [code])
+
+  return (
+    <div className="dispatch-autocomplete">
+      <input
+        value={code}
+        onFocus={() => items.length > 0 && setOpen(true)}
+        onChange={(event) => {
+          const next = event.target.value
+            .toUpperCase()
+            .replace(/[^A-Z0-9]/g, '')
+            .slice(0, 12)
+          onCodeChange(next)
+        }}
+        placeholder="TAYGUA"
+        autoComplete="off"
+      />
+      {open && items.length > 0 ? (
+        <div className="dispatch-autocomplete-menu">
+          {items.map((item) => (
+            <button
+              key={item.id}
+              type="button"
+              onMouseDown={(event) => event.preventDefault()}
+              onClick={() => {
+                onSelect(item)
+                setOpen(false)
+              }}
+            >
+              <strong>{item.code}</strong>
+              <span>{item.customerName}</span>
+              <small>{item.address}</small>
+            </button>
+          ))}
+        </div>
+      ) : null}
+    </div>
+  )
+}
+
+function AddressAutocompleteInput({
+  value,
+  onChange,
+  onSelect
+}: {
+  value: string
+  onChange: (value: string) => void
+  onSelect: (item: AddressSuggestion) => void
+}) {
+  const [items, setItems] = useState<AddressSuggestion[]>([])
+  const [open, setOpen] = useState(false)
+
+  useEffect(() => {
+    const query = value.trim()
+    if (query.length < 3) {
+      setItems([])
+      return
+    }
+
+    const token = window.setTimeout(async () => {
+      const auth = localStorage.getItem('maverick_token')
+      if (!auth) return
+      try {
+        const response = await fetch(
+          `${API_BASE}/api/address-autocomplete?q=${encodeURIComponent(query)}`,
+          { headers: { Authorization: `Bearer ${auth}` } }
+        )
+        const payload = await response.json()
+        if (response.ok && payload.ok) {
+          setItems(payload.results || [])
+          setOpen((payload.results || []).length > 0)
+        }
+      } catch {
+        setItems([])
+      }
+    }, 350)
+
+    return () => window.clearTimeout(token)
+  }, [value])
+
+  return (
+    <div className="dispatch-autocomplete">
+      <input
+        value={value}
+        onFocus={() => items.length > 0 && setOpen(true)}
+        onChange={(event) => onChange(event.target.value)}
+        placeholder="Start typing an address..."
+        autoComplete="off"
+      />
+      {open && items.length > 0 ? (
+        <div className="dispatch-autocomplete-menu address-menu">
+          {items.map((item, index) => (
+            <button
+              key={`${item.formatted}-${index}`}
+              type="button"
+              onMouseDown={(event) => event.preventDefault()}
+              onClick={() => {
+                onSelect(item)
+                setOpen(false)
+              }}
+            >
+              <strong>{item.formatted}</strong>
+              <small>{[item.city, item.state, item.postcode].filter(Boolean).join(' · ')}</small>
+            </button>
+          ))}
+        </div>
+      ) : null}
+    </div>
+  )
+}
+
+function DispatchStopPairsEditor({
+  stops,
+  setStops
+}: {
+  stops: ExtraDispatchStop[]
+  setStops: (
+    updater: (
+      current: ExtraDispatchStop[]
+    ) => ExtraDispatchStop[]
+  ) => void
+}) {
+  const pairNumbers =
+    Array.from(
+      new Set(
+        stops.map(
+          (stop) => stop.pairNumber
+        )
+      )
+    ).sort((a, b) => a - b)
+
+  const updateStop = (
+    key: string,
+    field:
+      | 'customerCode'
+      | 'name'
+      | 'address'
+      | 'phone'
+      | 'reference'
+      | 'scheduledAt',
+    value: string
+  ) => {
+    setStops(
+      (current) =>
+        current.map(
+          (stop) =>
+            stop.key === key
+              ? {
+                  ...stop,
+                  [field]: value
+                }
+              : stop
+        )
+    )
+  }
+
+  const applyLocation = (
+    key: string,
+    location: CustomerLocationSuggestion
+  ) => {
+    setStops((current) =>
+      current.map((stop) =>
+        stop.key === key
+          ? {
+              ...stop,
+              customerCode: location.code,
+              name: location.customerName,
+              address: location.address,
+              phone: formatDispatchPhone(location.phone || ''),
+              latitude: location.latitude ?? null,
+              longitude: location.longitude ?? null
+            }
+          : stop
+      )
+    )
+  }
+
+  const applyAddress = (
+    key: string,
+    item: AddressSuggestion
+  ) => {
+    setStops((current) =>
+      current.map((stop) =>
+        stop.key === key
+          ? {
+              ...stop,
+              address: item.formatted,
+              latitude: item.latitude ?? null,
+              longitude: item.longitude ?? null
+            }
+          : stop
+      )
+    )
+  }
+
+  return (
+    <>
+      {
+        pairNumbers.length === 0
+          ? (
+            <p className="dispatch-stop-empty">
+              This load currently has one linked pickup / drop pair. Add another pair when freight is picked up and delivered at additional facilities.
+            </p>
+          )
+          : (
+            <div className="dispatch-stop-pairs">
+              {
+                pairNumbers.map(
+                  (pairNumber) => {
+                    const pickup =
+                      stops.find(
+                        (stop) =>
+                          stop.pairNumber === pairNumber &&
+                          stop.type === 'PICKUP'
+                      )
+
+                    const drop =
+                      stops.find(
+                        (stop) =>
+                          stop.pairNumber === pairNumber &&
+                          stop.type === 'DROP'
+                      )
+
+                    if (!pickup || !drop) {
+                      return null
+                    }
+
+                    const renderPoint = (
+                      stop: ExtraDispatchStop,
+                      label: string
+                    ) => (
+                      <div className="dispatch-pair-stop">
+                        <div className="dispatch-pair-stop-title">
+                          {label}
+                        </div>
+
+                        <div className="dispatch-pair-fields">
+                          <label>
+                            <span>Customer / Location Code</span>
+                            <CustomerLocationInput
+                              code={stop.customerCode}
+                              onCodeChange={(value) =>
+                                updateStop(stop.key, 'customerCode', value)
+                              }
+                              onSelect={(location) =>
+                                applyLocation(stop.key, location)
+                              }
+                            />
+                          </label>
+
+                          <label>
+                            <span>Facility *</span>
+                            <input
+                              value={stop.name}
+                              onChange={(event) =>
+                                updateStop(stop.key, 'name', event.target.value)
+                              }
+                              placeholder="Facility name"
+                            />
+                          </label>
+
+                          <label>
+                            <span>Appointment</span>
+                            <input
+                              type="datetime-local"
+                              value={stop.scheduledAt}
+                              onChange={(event) =>
+                                updateStop(stop.key, 'scheduledAt', event.target.value)
+                              }
+                            />
+                          </label>
+
+                          <label>
+                            <span>Phone</span>
+                            <input
+                              value={stop.phone}
+                              onChange={(event) =>
+                                updateStop(stop.key, 'phone', formatDispatchPhone(event.target.value))
+                              }
+                              placeholder="000 000 0000"
+                            />
+                          </label>
+
+                          <label className="wide">
+                            <span>Address *</span>
+                            <AddressAutocompleteInput
+                              value={stop.address}
+                              onChange={(value) => updateStop(stop.key, 'address', value)}
+                              onSelect={(item) => applyAddress(stop.key, item)}
+                            />
+                          </label>
+
+                          <label>
+                            <span>Reference</span>
+                            <input
+                              value={stop.reference}
+                              onChange={(event) =>
+                                updateStop(stop.key, 'reference', event.target.value)
+                              }
+                              placeholder="Reference"
+                            />
+                          </label>
+                        </div>
+                      </div>
+                    )
+
+                    return (
+                      <article
+                        className="dispatch-stop-pair-card"
+                        key={pairNumber}
+                      >
+                        <div className="dispatch-stop-pair-header">
+                          <div>
+                            <span>ROUTE PAIR</span>
+                            <strong>
+                              Pickup {pairNumber} → Drop {pairNumber}
+                            </strong>
+                          </div>
+                          <button
+                            type="button"
+                            className="dispatch-stop-remove"
+                            onClick={() =>
+                              setStops(
+                                (current) =>
+                                  current.filter(
+                                    (stop) =>
+                                      stop.pairNumber !== pairNumber
+                                  )
+                              )
+                            }
+                          >
+                            Remove Pair
+                          </button>
+                        </div>
+
+                        <div className="dispatch-stop-pair-grid">
+                          {renderPoint(pickup, `PICKUP ${pairNumber}`)}
+                          {renderPoint(drop, `DROP ${pairNumber}`)}
+                        </div>
+                      </article>
+                    )
+                  }
+                )
+              }
+            </div>
+          )
+      }
+    </>
+  )
 }
 
 function MapController({
@@ -1190,6 +1719,159 @@ function PublicLoadTrackingPage({
           </article>
         </section>
 
+
+        {
+          (dispatch.stops || []).length > 0 && (
+            <section className="public-track-card public-track-route-stops-card">
+              <div className="public-track-section-heading">
+                <span className="page-kicker">
+                  Route Stops
+                </span>
+                <h2>
+                  Pickups & Drops
+                </h2>
+              </div>
+
+              <div className="public-track-stops-list">
+                {
+                  [...dispatch.stops]
+                    .sort(
+                      (
+                        a: DispatchStopRecord,
+                        b: DispatchStopRecord
+                      ) =>
+                        a.sequence -
+                        b.sequence
+                    )
+                    .map(
+                      (
+                        stop: DispatchStopRecord
+                      ) => (
+                        <article
+                          className={`public-track-route-stop ${String(
+                            stop.status
+                          ).toLowerCase()}`}
+                          key={
+                            stop.id ??
+                            `${stop.sequence}-${stop.type}`
+                          }
+                        >
+                          <div className="public-track-route-stop-number">
+                            {stop.pairNumber || stop.sequence}
+                          </div>
+
+                          <div>
+                            <div className="public-track-route-stop-title">
+                              <strong>
+                                {
+                                  stop.type === 'PICKUP'
+                                    ? 'Pickup'
+                                    : 'Drop'
+                                }
+                                {' · '}
+                                {stop.name}
+                              </strong>
+                              <span>
+                                {
+                                  String(
+                                    stop.status
+                                  )
+                                    .replaceAll(
+                                      '_',
+                                      ' '
+                                    )
+                                }
+                              </span>
+                            </div>
+
+                            <p>
+                              {stop.address}
+                            </p>
+
+                            <small>
+                              {
+                                formatPublicTime(
+                                  stop.scheduledAt
+                                )
+                              }
+                              {
+                                stop.reference
+                                  ? ` · Ref ${stop.reference}`
+                                  : ''
+                              }
+                            </small>
+                          </div>
+                        </article>
+                      )
+                    )
+                }
+              </div>
+            </section>
+          )
+        }
+
+        {
+          (dispatch.documents || []).length > 0 && (
+            <section className="public-track-card public-track-documents-card">
+              <div className="public-track-section-heading">
+                <span className="page-kicker">
+                  Documents
+                </span>
+                <h2>
+                  Load Documents
+                </h2>
+              </div>
+
+              <div className="public-track-documents-list">
+                {
+                  (dispatch.documents || []).map(
+                    (
+                      document: DispatchDocumentRecord
+                    ) => (
+                      <a
+                        key={document.id}
+                        href={`${API_BASE}/api/public/track/${encodeURIComponent(
+                          token
+                        )}/documents/${document.id}/file`}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="public-track-document-row"
+                      >
+                        <span>
+                          {
+                            document.isSignature
+                              ? 'SIGN'
+                              : document.category === 'PHOTO'
+                                ? 'IMG'
+                                : 'DOC'
+                          }
+                        </span>
+                        <div>
+                          <strong>
+                            {document.originalName}
+                          </strong>
+                          <small>
+                            {
+                              document.isSignature
+                                ? `Signed by ${document.signedBy || 'driver'}`
+                                : `Uploaded by ${document.uploadedByName || document.uploadedByRole}`
+                            }
+                            {' · '}
+                            {formatPublicTime(document.createdAt)}
+                          </small>
+                        </div>
+                        <b>
+                          View
+                        </b>
+                      </a>
+                    )
+                  )
+                }
+              </div>
+            </section>
+          )
+        }
+
         {
           hasLocation ? (
             <section className="public-track-map-card public-track-map-card-complete">
@@ -1259,7 +1941,8 @@ function PublicLoadTrackingPage({
                               ? 'moving'
                               : 'parked',
                             true,
-                            true
+                            true,
+                            trackingSourceCode(dispatch.asset)
                           )
                         : createTrailerIcon(
                             String(
@@ -1399,7 +2082,7 @@ function PublicLoadTrackingPage({
                   </dt>
                   <dd>
                     {valueOrDash(
-                      driver?.name
+                      driver?.name || dispatch.manualDriverName
                     )}
                   </dd>
                 </div>
@@ -1453,7 +2136,8 @@ function PublicLoadTrackingPage({
               </dl>
             </article>
 
-            <article className="public-track-card public-track-info-card">
+            {dispatch.asset?.trackingSource !== 'PHONE' && (
+<article className="public-track-card public-track-info-card">
               <div className="public-track-card-heading">
                 Temperature
               </div>
@@ -1512,6 +2196,7 @@ function PublicLoadTrackingPage({
                 </div>
               </div>
             </article>
+)}
 
             {
               (
@@ -1804,20 +2489,27 @@ function App() {
     bolNumber: '',
     referenceNumber: '',
     driverId: '',
+    manualDriverName: '',
     assetId: '',
     truckNumber: '',
     trailerNumber: '',
     trailerLicense: '',
     carrierName: '',
     lessorName: '',
+    pickupCustomerCode: '',
     pickupName: '',
     pickupAddress: '',
     pickupPhone: '',
+    pickupLatitude: null as number | null,
+    pickupLongitude: null as number | null,
     pickupReference: '',
     pickupScheduledAt: '',
+    deliveryCustomerCode: '',
     deliveryName: '',
     deliveryAddress: '',
     deliveryPhone: '',
+    deliveryLatitude: null as number | null,
+    deliveryLongitude: null as number | null,
     deliveryReference: '',
     deliveryScheduledAt: '',
     commodity: '',
@@ -1833,6 +2525,21 @@ function App() {
     termsAndAgreement: '',
     notes: ''
   })
+
+  const [
+    newStopPairs,
+    setNewStopPairs
+  ] = useState<ExtraDispatchStop[]>([])
+
+  const [
+    editStopPairs,
+    setEditStopPairs
+  ] = useState<ExtraDispatchStop[]>([])
+
+  const [
+    documentUploadingId,
+    setDocumentUploadingId
+  ] = useState<number | null>(null)
 
   const [
     backendNotifications,
@@ -1912,20 +2619,27 @@ function App() {
     bolNumber: '',
     referenceNumber: '',
     driverId: '',
+    manualDriverName: '',
     assetId: '',
     truckNumber: '',
     trailerNumber: '',
     trailerLicense: '',
     carrierName: '',
     lessorName: '',
+    pickupCustomerCode: '',
     pickupName: '',
     pickupAddress: '',
     pickupPhone: '',
+    pickupLatitude: null as number | null,
+    pickupLongitude: null as number | null,
     pickupReference: '',
     pickupScheduledAt: '',
+    deliveryCustomerCode: '',
     deliveryName: '',
     deliveryAddress: '',
     deliveryPhone: '',
+    deliveryLatitude: null as number | null,
+    deliveryLongitude: null as number | null,
     deliveryReference: '',
     deliveryScheduledAt: '',
     commodity: '',
@@ -2951,7 +3665,295 @@ function App() {
       }
     }
 
+  const createExtraDispatchStop = (
+    type: 'PICKUP' | 'DROP',
+    pairNumber: number
+  ): ExtraDispatchStop => ({
+    key:
+      `${Date.now()}-${Math.random()
+        .toString(16)
+        .slice(2)}-${type}`,
+    pairNumber,
+    type,
+    customerCode: '',
+    name: '',
+    address: '',
+    phone: '',
+    latitude: null,
+    longitude: null,
+    reference: '',
+    scheduledAt: ''
+  })
+
+  const addDispatchStopPair = (
+    current: ExtraDispatchStop[]
+  ) => {
+    const highestPair =
+      current.reduce(
+        (max, stop) =>
+          Math.max(max, stop.pairNumber || 1),
+        1
+      )
+
+    const pairNumber = highestPair + 1
+
+    return [
+      ...current,
+      createExtraDispatchStop('PICKUP', pairNumber),
+      createExtraDispatchStop('DROP', pairNumber)
+    ]
+  }
+
+  const buildStopsPayload = (
+    form: typeof newDispatchForm,
+    extras: ExtraDispatchStop[]
+  ) => [
+    {
+      pairNumber: 1,
+      type: 'PICKUP',
+      customerCode: form.pickupCustomerCode,
+      name: form.pickupName,
+      address: form.pickupAddress,
+      phone: form.pickupPhone,
+      latitude: form.pickupLatitude,
+      longitude: form.pickupLongitude,
+      reference: form.pickupReference,
+      scheduledAt:
+        form.pickupScheduledAt
+          ? new Date(form.pickupScheduledAt).toISOString()
+          : null
+    },
+    {
+      pairNumber: 1,
+      type: 'DROP',
+      customerCode: form.deliveryCustomerCode,
+      name: form.deliveryName,
+      address: form.deliveryAddress,
+      phone: form.deliveryPhone,
+      latitude: form.deliveryLatitude,
+      longitude: form.deliveryLongitude,
+      reference: form.deliveryReference,
+      scheduledAt:
+        form.deliveryScheduledAt
+          ? new Date(form.deliveryScheduledAt).toISOString()
+          : null
+    },
+    ...extras
+      .slice()
+      .sort(
+        (a, b) =>
+          a.pairNumber - b.pairNumber ||
+          (a.type === 'PICKUP' ? -1 : 1)
+      )
+      .map((stop) => ({
+        pairNumber: stop.pairNumber,
+        type: stop.type,
+        customerCode: stop.customerCode,
+        name: stop.name,
+        address: stop.address,
+        phone: stop.phone,
+        latitude: stop.latitude,
+        longitude: stop.longitude,
+        reference: stop.reference,
+        scheduledAt:
+          stop.scheduledAt
+            ? new Date(stop.scheduledAt).toISOString()
+            : null
+      }))
+  ]
+
+  const readBrowserFileAsBase64 = (
+    file: File
+  ) =>
+    new Promise<string>(
+      (resolve, reject) => {
+        const reader =
+          new FileReader()
+
+        reader.onload = () => {
+          const result =
+            String(
+              reader.result || ''
+            )
+
+          const commaIndex =
+            result.indexOf(',')
+
+          resolve(
+            commaIndex >= 0
+              ? result.slice(
+                  commaIndex + 1
+                )
+              : result
+          )
+        }
+
+        reader.onerror = () =>
+          reject(
+            new Error(
+              'Unable to read file'
+            )
+          )
+
+        reader.readAsDataURL(
+          file
+        )
+      }
+    )
+
+  const uploadDispatchDocument =
+    async (
+      dispatchId: number,
+      file: File
+    ) => {
+      const token =
+        localStorage.getItem(
+          'maverick_token'
+        )
+
+      if (!token) {
+        return
+      }
+
+      if (
+        file.size >
+        8 * 1024 * 1024
+      ) {
+        setDispatchError(
+          'Documents must be 8 MB or smaller.'
+        )
+        return
+      }
+
+      setDocumentUploadingId(
+        dispatchId
+      )
+
+      try {
+        const dataBase64 =
+          await readBrowserFileAsBase64(
+            file
+          )
+
+        const response =
+          await fetch(
+            `${API_BASE}/api/dispatches/${dispatchId}/documents`,
+            {
+              method: 'POST',
+              headers: {
+                'Content-Type':
+                  'application/json',
+                Authorization:
+                  `Bearer ${token}`
+              },
+              body: JSON.stringify({
+                originalName:
+                  file.name,
+                mimeType:
+                  file.type ||
+                  'application/octet-stream',
+                category:
+                  file.type.startsWith(
+                    'image/'
+                  )
+                    ? 'PHOTO'
+                    : 'DOCUMENT',
+                dataBase64,
+                customerVisible:
+                  true
+              })
+            }
+          )
+
+        const payload =
+          await response.json()
+
+        if (
+          !response.ok ||
+          !payload.ok
+        ) {
+          setDispatchError(
+            payload.message ||
+            'Unable to upload document.'
+          )
+          return
+        }
+
+        await loadDispatches()
+      } catch {
+        setDispatchError(
+          'Unable to upload document.'
+        )
+      } finally {
+        setDocumentUploadingId(
+          null
+        )
+      }
+    }
+
+  const openDispatchDocument =
+    async (
+      dispatchId: number,
+      documentId: number,
+      fileName: string
+    ) => {
+      const token =
+        localStorage.getItem(
+          'maverick_token'
+        )
+
+      if (!token) {
+        return
+      }
+
+      try {
+        const response =
+          await fetch(
+            `${API_BASE}/api/dispatches/${dispatchId}/documents/${documentId}/file`,
+            {
+              headers: {
+                Authorization:
+                  `Bearer ${token}`
+              }
+            }
+          )
+
+        if (!response.ok) {
+          throw new Error(
+            'Unable to open document'
+          )
+        }
+
+        const blob =
+          await response.blob()
+
+        const url =
+          URL.createObjectURL(
+            blob
+          )
+
+        window.open(
+          url,
+          '_blank',
+          'noopener,noreferrer'
+        )
+
+        window.setTimeout(
+          () =>
+            URL.revokeObjectURL(
+              url
+            ),
+          60_000
+        )
+      } catch {
+        setDispatchError(
+          `Unable to open ${fileName}.`
+        )
+      }
+    }
+
   const resetNewDispatchForm = () => {
+    setNewStopPairs([])
     setNewDispatchForm({
       loadNumber: '',
       dispatcherName: '',
@@ -2960,20 +3962,27 @@ function App() {
       bolNumber: '',
       referenceNumber: '',
       driverId: '',
+      manualDriverName: '',
       assetId: '',
       truckNumber: '',
       trailerNumber: '',
       trailerLicense: '',
       carrierName: '',
       lessorName: '',
+      pickupCustomerCode: '',
       pickupName: '',
       pickupAddress: '',
       pickupPhone: '',
+      pickupLatitude: null,
+      pickupLongitude: null,
       pickupReference: '',
       pickupScheduledAt: '',
+      deliveryCustomerCode: '',
       deliveryName: '',
       deliveryAddress: '',
       deliveryPhone: '',
+      deliveryLatitude: null,
+      deliveryLongitude: null,
       deliveryReference: '',
       deliveryScheduledAt: '',
       commodity: '',
@@ -3030,6 +4039,22 @@ function App() {
         return
       }
 
+      const newAsset =
+        assets.find((asset) =>
+          String(asset.id) === newDispatchForm.assetId
+        )
+
+      if (
+        newAsset &&
+        trackingSourceCode(newAsset) !== 'PHONE' &&
+        !newDispatchForm.manualDriverName.trim()
+      ) {
+        setDispatchError(
+          'Driver name is required for MAV2 assets.'
+        )
+        return
+      }
+
       setNewDispatchSaving(true)
       setDispatchError('')
 
@@ -3054,20 +4079,32 @@ function App() {
                         newDispatchForm.assetId
                       )
                     : null,
+                pickupCustomerCode:
+                  newDispatchForm.pickupCustomerCode,
                 pickupName:
                   newDispatchForm.pickupName,
                 pickupAddress:
                   newDispatchForm.pickupAddress,
+                pickupLatitude:
+                  newDispatchForm.pickupLatitude,
+                pickupLongitude:
+                  newDispatchForm.pickupLongitude,
                 pickupScheduledAt:
                   newDispatchForm.pickupScheduledAt
                     ? new Date(
                         newDispatchForm.pickupScheduledAt
                       ).toISOString()
                     : null,
+                deliveryCustomerCode:
+                  newDispatchForm.deliveryCustomerCode,
                 deliveryName:
                   newDispatchForm.deliveryName,
                 deliveryAddress:
                   newDispatchForm.deliveryAddress,
+                deliveryLatitude:
+                  newDispatchForm.deliveryLatitude,
+                deliveryLongitude:
+                  newDispatchForm.deliveryLongitude,
                 deliveryScheduledAt:
                   newDispatchForm.deliveryScheduledAt
                     ? new Date(
@@ -3090,6 +4127,8 @@ function App() {
                   newDispatchForm.driverId
                     ? Number(newDispatchForm.driverId)
                     : null,
+                manualDriverName:
+                  newDispatchForm.manualDriverName,
                 truckNumber:
                   newDispatchForm.truckNumber,
                 trailerNumber:
@@ -3141,6 +4180,11 @@ function App() {
                 temperatureMaxC:
                   toCelsius(
                     newDispatchForm.temperatureMaxF
+                  ),
+                stops:
+                  buildStopsPayload(
+                    newDispatchForm,
+                    newStopPairs
                   ),
                 notes:
                   newDispatchForm.notes
@@ -3331,6 +4375,60 @@ function App() {
         dispatch.notes || ''
     })
 
+    const sortedStops =
+      [...(
+        dispatch.stops || []
+      )].sort(
+        (a, b) =>
+          a.sequence -
+          b.sequence
+      )
+
+    const pairTypeCounts: Record<
+      'PICKUP' | 'DROP',
+      number
+    > = {
+      PICKUP: 0,
+      DROP: 0
+    }
+
+    const normalizedStops =
+      sortedStops.map(
+        (stop) => {
+          pairTypeCounts[stop.type] += 1
+
+          return {
+            key:
+              String(
+                stop.id ??
+                `${stop.sequence}-${stop.type}`
+              ),
+            pairNumber:
+              Number(
+                stop.pairNumber ||
+                pairTypeCounts[stop.type]
+              ),
+            type: stop.type,
+            name: stop.name || '',
+            address: stop.address || '',
+            phone: formatDispatchPhone(stop.phone || ''),
+            latitude: stop.latitude ?? null,
+            longitude: stop.longitude ?? null,
+            reference: stop.reference || '',
+            scheduledAt:
+              stop.scheduledAt
+                ? toDateTimeLocalValue(stop.scheduledAt)
+                : ''
+          }
+        }
+      )
+
+    setEditStopPairs(
+      normalizedStops.filter(
+        (stop) => stop.pairNumber > 1
+      )
+    )
+
     setEditDispatchOpen(true)
   }
 
@@ -3435,20 +4533,32 @@ function App() {
                         editDispatchForm.assetId
                       )
                     : null,
+                pickupCustomerCode:
+                  editDispatchForm.pickupCustomerCode,
                 pickupName:
                   editDispatchForm.pickupName,
                 pickupAddress:
                   editDispatchForm.pickupAddress,
+                pickupLatitude:
+                  editDispatchForm.pickupLatitude,
+                pickupLongitude:
+                  editDispatchForm.pickupLongitude,
                 pickupScheduledAt:
                   editDispatchForm.pickupScheduledAt
                     ? new Date(
                         editDispatchForm.pickupScheduledAt
                       ).toISOString()
                     : null,
+                deliveryCustomerCode:
+                  editDispatchForm.deliveryCustomerCode,
                 deliveryName:
                   editDispatchForm.deliveryName,
                 deliveryAddress:
                   editDispatchForm.deliveryAddress,
+                deliveryLatitude:
+                  editDispatchForm.deliveryLatitude,
+                deliveryLongitude:
+                  editDispatchForm.deliveryLongitude,
                 deliveryScheduledAt:
                   editDispatchForm.deliveryScheduledAt
                     ? new Date(
@@ -3471,6 +4581,8 @@ function App() {
                   editDispatchForm.driverId
                     ? Number(editDispatchForm.driverId)
                     : null,
+                manualDriverName:
+                  editDispatchForm.manualDriverName,
                 truckNumber:
                   editDispatchForm.truckNumber,
                 trailerNumber:
@@ -3522,6 +4634,11 @@ function App() {
                 temperatureMaxC:
                   toCelsius(
                     editDispatchForm.temperatureMaxF
+                  ),
+                stops:
+                  buildStopsPayload(
+                    editDispatchForm,
+                    editStopPairs
                   ),
                 notes:
                   editDispatchForm.notes
@@ -3944,25 +5061,29 @@ function App() {
     ) => ({
       ...current,
       assetId: assetIdValue,
-      ...(asset &&
-      assetTypeCode(asset) === 'TRK'
+      ...(asset && trackingSourceCode(asset) === 'PHONE'
         ? {
             driverId:
               matchedDriver
                 ? String(matchedDriver.id)
                 : '',
+            manualDriverName: '',
             truckNumber:
+              matchedDriver?.profile?.physicalTruckNumber ||
               asset.deviceId || '',
             trailerNumber:
-              matchedDriver?.profile
-                ?.currentTrailerNumber ||
+              matchedDriver?.profile?.currentTrailerNumber ||
               current.trailerNumber,
             trailerLicense:
-              matchedDriver?.profile
-                ?.currentTrailerLicense ||
-              current.trailerLicense
+              matchedDriver?.profile?.currentTrailerLicense ||
+              current.trailerLicense,
+            temperatureSetpointF: '',
+            temperatureMinF: '',
+            temperatureMaxF: ''
           }
-        : {})
+        : asset
+          ? { driverId: '', manualDriverName: current.manualDriverName }
+          : {})
     })
 
     if (mode === 'new') {
@@ -3977,6 +5098,24 @@ function App() {
       )
     }
   }
+
+  const selectedNewDispatchAsset =
+    assets.find(
+      (asset) =>
+        String(asset.id) === newDispatchForm.assetId
+    )
+
+  const selectedEditDispatchAsset =
+    assets.find(
+      (asset) =>
+        String(asset.id) === editDispatchForm.assetId
+    )
+
+  const selectedNewIsPhone =
+    trackingSourceCode(selectedNewDispatchAsset) === 'PHONE'
+
+  const selectedEditIsPhone =
+    trackingSourceCode(selectedEditDispatchAsset) === 'PHONE'
 
   const selectedNewTruckDriver =
     getDriverForTruckAsset(
@@ -6954,6 +8093,11 @@ function App() {
                                 ◈
                               </span>
 
+                              <TrackingSourceIcon
+                                asset={asset}
+                                compact
+                              />
+
                               <span className="asset-search-result-copy">
                                 <strong>
                                   {
@@ -7474,7 +8618,8 @@ function App() {
                                   selected,
                                   Boolean(
                                     activeDispatch
-                                  )
+                                  ),
+                                  trackingSourceCode(asset)
                                 )
                               : createTrailerIcon(
                                   movement,
@@ -8639,6 +9784,11 @@ function App() {
                                 ◈
                               </span>
 
+                              <TrackingSourceIcon
+                                asset={asset}
+                                compact
+                              />
+
                               <div>
                                 <strong>
                                   {asset.name || asset.deviceId}
@@ -8649,6 +9799,12 @@ function App() {
                                   {' · '}
                                   <span className={`asset-type-inline ${rowAssetType.toLowerCase()}`}>
                                     {rowAssetType}
+                                  </span>
+                                  {' · '}
+                                  <span className="asset-source-label">
+                                    {trackingSourceCode(asset) === 'PHONE'
+                                      ? 'Phone GPS'
+                                      : 'MAV2'}
                                   </span>
                                 </small>
                               </div>
@@ -9538,6 +10694,7 @@ function App() {
                                           dispatch.driver?.profile?.lastName
                                             ? `${dispatch.driver?.profile?.firstName || ''} ${dispatch.driver?.profile?.lastName || ''}`.trim()
                                             : dispatch.driver?.name ||
+                                              dispatch.manualDriverName ||
                                               'Unassigned'
                                         }
                                       </dd>
@@ -9579,6 +10736,105 @@ function App() {
                                         <p>{dispatch.driverInstructions}</p>
                                       </div>
                                     )
+                                  }
+                                </section>
+
+                                <section className="operations-progress-card operations-documents-card">
+                                  <div className="operations-card-heading-row">
+                                    <div>
+                                      <span className="page-kicker">
+                                        Load Documents
+                                      </span>
+                                      <h3>
+                                        Documents & Signatures
+                                      </h3>
+                                    </div>
+
+                                    <label className="secondary-action dispatch-document-upload">
+                                      {
+                                        documentUploadingId === dispatch.id
+                                          ? 'Uploading…'
+                                          : '+ Add Document'
+                                      }
+                                      <input
+                                        type="file"
+                                        accept="image/*,.pdf,.doc,.docx,.xls,.xlsx"
+                                        disabled={
+                                          documentUploadingId === dispatch.id
+                                        }
+                                        onChange={(event) => {
+                                          const file =
+                                            event.target.files?.[0]
+
+                                          if (file) {
+                                            void uploadDispatchDocument(
+                                              dispatch.id,
+                                              file
+                                            )
+                                          }
+
+                                          event.currentTarget.value = ''
+                                        }}
+                                      />
+                                    </label>
+                                  </div>
+
+                                  {
+                                    (dispatch.documents || []).length > 0
+                                      ? (
+                                        <div className="dispatch-document-list">
+                                          {
+                                            (dispatch.documents || []).map(
+                                              (document) => (
+                                                <button
+                                                  type="button"
+                                                  className="dispatch-document-row"
+                                                  key={document.id}
+                                                  onClick={() =>
+                                                    void openDispatchDocument(
+                                                      dispatch.id,
+                                                      document.id,
+                                                      document.originalName
+                                                    )
+                                                  }
+                                                >
+                                                  <span className="dispatch-document-kind">
+                                                    {
+                                                      document.isSignature
+                                                        ? 'SIGN'
+                                                        : document.category === 'PHOTO'
+                                                          ? 'IMG'
+                                                          : 'DOC'
+                                                    }
+                                                  </span>
+                                                  <span>
+                                                    <strong>
+                                                      {document.originalName}
+                                                    </strong>
+                                                    <small>
+                                                      {
+                                                        document.isSignature
+                                                          ? `Signed by ${document.signedBy || 'driver'}`
+                                                          : `Uploaded by ${document.uploadedByName || document.uploadedByRole}`
+                                                      }
+                                                      {' · '}
+                                                      {formatDateTime(document.createdAt)}
+                                                    </small>
+                                                  </span>
+                                                  <b>
+                                                    View
+                                                  </b>
+                                                </button>
+                                              )
+                                            )
+                                          }
+                                        </div>
+                                      )
+                                      : (
+                                        <p className="dispatch-stop-empty">
+                                          No documents uploaded yet.
+                                        </p>
+                                      )
                                   }
                                 </section>
 
@@ -9625,9 +10881,12 @@ function App() {
                                                   <i />
                                                   <div>
                                                     <strong>
-                                                      {dispatchStatusLabel(
-                                                        event.status
-                                                      )}
+                                                      {
+                                                        event.title ||
+                                                        dispatchStatusLabel(
+                                                          event.status
+                                                        )
+                                                      }
                                                     </strong>
                                                     <span>
                                                       {formatDateTime(
@@ -9931,7 +11190,7 @@ function App() {
                                 onChange={(event) =>
                                   setNewDispatchForm((current) => ({
                                     ...current,
-                                    dispatcherPhone: event.target.value
+                                    dispatcherPhone: formatDispatchPhone(event.target.value)
                                   }))
                                 }
                                 placeholder="(831) 000-0000"
@@ -10153,11 +11412,31 @@ function App() {
                             </label>
                           </div>
                         </section>
-                        <section className="dispatch-form-group">
+                        <section className="dispatch-form-group dispatch-pair-primary pickup">
                           <div className="dispatch-form-section-title">
-                            PICKUP
+                            PICKUP 1
                           </div>
                           <div className="dispatch-form-group-grid">
+                            <label>
+                              <span>Customer / Location Code</span>
+                              <CustomerLocationInput
+                                code={newDispatchForm.pickupCustomerCode}
+                                onCodeChange={(value) =>
+                                  setNewDispatchForm((current) => ({ ...current, pickupCustomerCode: value }))
+                                }
+                                onSelect={(location) =>
+                                  setNewDispatchForm((current) => ({
+                                    ...current,
+                                    pickupCustomerCode: location.code,
+                                    pickupName: location.customerName,
+                                    pickupAddress: location.address,
+                                    pickupPhone: formatDispatchPhone(location.phone || ''),
+                                    pickupLatitude: location.latitude ?? null,
+                                    pickupLongitude: location.longitude ?? null
+                                  }))
+                                }
+                              />
+                            </label>
                             <label>
                               <span>Pickup Facility *</span>
                               <input
@@ -10168,7 +11447,7 @@ function App() {
                                     pickupName: event.target.value
                                   }))
                                 }
-                                placeholder="Latitude Salinas"
+                                placeholder="Facility name"
                               />
                             </label>
                             <label>
@@ -10191,23 +11470,30 @@ function App() {
                                 onChange={(event) =>
                                   setNewDispatchForm((current) => ({
                                     ...current,
-                                    pickupPhone: event.target.value
+                                    pickupPhone: formatDispatchPhone(event.target.value)
                                   }))
                                 }
-                                placeholder="(000) 000-0000"
+                                placeholder="000 000 0000"
                               />
                             </label>
                             <label className="wide">
                               <span>Pickup Address *</span>
-                              <input
+                              <AddressAutocompleteInput
                                 value={newDispatchForm.pickupAddress}
-                                onChange={(event) =>
+                                onChange={(value) =>
                                   setNewDispatchForm((current) => ({
                                     ...current,
-                                    pickupAddress: event.target.value
+                                    pickupAddress: value
                                   }))
                                 }
-                                placeholder="340 El Camino Real, Salinas, CA"
+                                onSelect={(item) =>
+                                  setNewDispatchForm((current) => ({
+                                    ...current,
+                                    pickupAddress: item.formatted,
+                                    pickupLatitude: item.latitude ?? null,
+                                    pickupLongitude: item.longitude ?? null
+                                  }))
+                                }
                               />
                             </label>
                             <label>
@@ -10225,11 +11511,32 @@ function App() {
                             </label>
                           </div>
                         </section>
-                        <section className="dispatch-form-group">
+
+                        <section className="dispatch-form-group dispatch-pair-primary drop">
                           <div className="dispatch-form-section-title">
-                            DELIVERY
+                            DROP 1
                           </div>
                           <div className="dispatch-form-group-grid">
+                            <label>
+                              <span>Customer / Location Code</span>
+                              <CustomerLocationInput
+                                code={newDispatchForm.deliveryCustomerCode}
+                                onCodeChange={(value) =>
+                                  setNewDispatchForm((current) => ({ ...current, deliveryCustomerCode: value }))
+                                }
+                                onSelect={(location) =>
+                                  setNewDispatchForm((current) => ({
+                                    ...current,
+                                    deliveryCustomerCode: location.code,
+                                    deliveryName: location.customerName,
+                                    deliveryAddress: location.address,
+                                    deliveryPhone: formatDispatchPhone(location.phone || ''),
+                                    deliveryLatitude: location.latitude ?? null,
+                                    deliveryLongitude: location.longitude ?? null
+                                  }))
+                                }
+                              />
+                            </label>
                             <label>
                               <span>Delivery Facility *</span>
                               <input
@@ -10240,7 +11547,7 @@ function App() {
                                     deliveryName: event.target.value
                                   }))
                                 }
-                                placeholder="Taylor Farms"
+                                placeholder="Facility name"
                               />
                             </label>
                             <label>
@@ -10263,23 +11570,30 @@ function App() {
                                 onChange={(event) =>
                                   setNewDispatchForm((current) => ({
                                     ...current,
-                                    deliveryPhone: event.target.value
+                                    deliveryPhone: formatDispatchPhone(event.target.value)
                                   }))
                                 }
-                                placeholder="(000) 000-0000"
+                                placeholder="000 000 0000"
                               />
                             </label>
                             <label className="wide">
                               <span>Delivery Address *</span>
-                              <input
+                              <AddressAutocompleteInput
                                 value={newDispatchForm.deliveryAddress}
-                                onChange={(event) =>
+                                onChange={(value) =>
                                   setNewDispatchForm((current) => ({
                                     ...current,
-                                    deliveryAddress: event.target.value
+                                    deliveryAddress: value
                                   }))
                                 }
-                                placeholder="4595 W Main St, Guadalupe, CA"
+                                onSelect={(item) =>
+                                  setNewDispatchForm((current) => ({
+                                    ...current,
+                                    deliveryAddress: item.formatted,
+                                    deliveryLatitude: item.latitude ?? null,
+                                    deliveryLongitude: item.longitude ?? null
+                                  }))
+                                }
                               />
                             </label>
                             <label>
@@ -10297,7 +11611,29 @@ function App() {
                             </label>
                           </div>
                         </section>
-                        <section className="dispatch-form-group dispatch-form-group-wide">
+                        <section className="dispatch-form-group dispatch-form-group-wide dispatch-linked-pairs-group">
+                          <div className="dispatch-form-section-title dispatch-form-section-title-actions">
+                            <span>ADDITIONAL LINKED PICKUP / DROP PAIRS</span>
+                            <button
+                              type="button"
+                              className="secondary-action"
+                              onClick={() =>
+                                setNewStopPairs((current) =>
+                                  addDispatchStopPair(current)
+                                )
+                              }
+                            >
+                              + Add Pickup / Drop Pair
+                            </button>
+                          </div>
+
+                          <DispatchStopPairsEditor
+                            stops={newStopPairs}
+                            setStops={setNewStopPairs}
+                          />
+                        </section>
+                        {!selectedNewIsPhone && (
+<section className="dispatch-form-group dispatch-form-group-wide">
                           <div className="dispatch-form-section-title">
                             TEMPERATURE
                           </div>
@@ -10343,6 +11679,7 @@ function App() {
                             </label>
                           </div>
                         </section>
+)}
                         <section className="dispatch-form-group dispatch-form-group-wide">
                           <div className="dispatch-form-section-title">
                             INTERNAL NOTES
@@ -10481,7 +11818,7 @@ function App() {
                                 onChange={(event) =>
                                   setEditDispatchForm((current) => ({
                                     ...current,
-                                    dispatcherPhone: event.target.value
+                                    dispatcherPhone: formatDispatchPhone(event.target.value)
                                   }))
                                 }
                                 placeholder="(831) 000-0000"
@@ -10703,11 +12040,31 @@ function App() {
                             </label>
                           </div>
                         </section>
-                        <section className="dispatch-form-group">
+                        <section className="dispatch-form-group dispatch-pair-primary pickup">
                           <div className="dispatch-form-section-title">
-                            PICKUP
+                            PICKUP 1
                           </div>
                           <div className="dispatch-form-group-grid">
+                            <label>
+                              <span>Customer / Location Code</span>
+                              <CustomerLocationInput
+                                code={editDispatchForm.pickupCustomerCode}
+                                onCodeChange={(value) =>
+                                  setEditDispatchForm((current) => ({ ...current, pickupCustomerCode: value }))
+                                }
+                                onSelect={(location) =>
+                                  setEditDispatchForm((current) => ({
+                                    ...current,
+                                    pickupCustomerCode: location.code,
+                                    pickupName: location.customerName,
+                                    pickupAddress: location.address,
+                                    pickupPhone: formatDispatchPhone(location.phone || ''),
+                                    pickupLatitude: location.latitude ?? null,
+                                    pickupLongitude: location.longitude ?? null
+                                  }))
+                                }
+                              />
+                            </label>
                             <label>
                               <span>Pickup Facility *</span>
                               <input
@@ -10718,7 +12075,7 @@ function App() {
                                     pickupName: event.target.value
                                   }))
                                 }
-                                placeholder="Latitude Salinas"
+                                placeholder="Facility name"
                               />
                             </label>
                             <label>
@@ -10741,23 +12098,30 @@ function App() {
                                 onChange={(event) =>
                                   setEditDispatchForm((current) => ({
                                     ...current,
-                                    pickupPhone: event.target.value
+                                    pickupPhone: formatDispatchPhone(event.target.value)
                                   }))
                                 }
-                                placeholder="(000) 000-0000"
+                                placeholder="000 000 0000"
                               />
                             </label>
                             <label className="wide">
                               <span>Pickup Address *</span>
-                              <input
+                              <AddressAutocompleteInput
                                 value={editDispatchForm.pickupAddress}
-                                onChange={(event) =>
+                                onChange={(value) =>
                                   setEditDispatchForm((current) => ({
                                     ...current,
-                                    pickupAddress: event.target.value
+                                    pickupAddress: value
                                   }))
                                 }
-                                placeholder="340 El Camino Real, Salinas, CA"
+                                onSelect={(item) =>
+                                  setEditDispatchForm((current) => ({
+                                    ...current,
+                                    pickupAddress: item.formatted,
+                                    pickupLatitude: item.latitude ?? null,
+                                    pickupLongitude: item.longitude ?? null
+                                  }))
+                                }
                               />
                             </label>
                             <label>
@@ -10775,11 +12139,32 @@ function App() {
                             </label>
                           </div>
                         </section>
-                        <section className="dispatch-form-group">
+
+                        <section className="dispatch-form-group dispatch-pair-primary drop">
                           <div className="dispatch-form-section-title">
-                            DELIVERY
+                            DROP 1
                           </div>
                           <div className="dispatch-form-group-grid">
+                            <label>
+                              <span>Customer / Location Code</span>
+                              <CustomerLocationInput
+                                code={editDispatchForm.deliveryCustomerCode}
+                                onCodeChange={(value) =>
+                                  setEditDispatchForm((current) => ({ ...current, deliveryCustomerCode: value }))
+                                }
+                                onSelect={(location) =>
+                                  setEditDispatchForm((current) => ({
+                                    ...current,
+                                    deliveryCustomerCode: location.code,
+                                    deliveryName: location.customerName,
+                                    deliveryAddress: location.address,
+                                    deliveryPhone: formatDispatchPhone(location.phone || ''),
+                                    deliveryLatitude: location.latitude ?? null,
+                                    deliveryLongitude: location.longitude ?? null
+                                  }))
+                                }
+                              />
+                            </label>
                             <label>
                               <span>Delivery Facility *</span>
                               <input
@@ -10790,7 +12175,7 @@ function App() {
                                     deliveryName: event.target.value
                                   }))
                                 }
-                                placeholder="Taylor Farms"
+                                placeholder="Facility name"
                               />
                             </label>
                             <label>
@@ -10813,23 +12198,30 @@ function App() {
                                 onChange={(event) =>
                                   setEditDispatchForm((current) => ({
                                     ...current,
-                                    deliveryPhone: event.target.value
+                                    deliveryPhone: formatDispatchPhone(event.target.value)
                                   }))
                                 }
-                                placeholder="(000) 000-0000"
+                                placeholder="000 000 0000"
                               />
                             </label>
                             <label className="wide">
                               <span>Delivery Address *</span>
-                              <input
+                              <AddressAutocompleteInput
                                 value={editDispatchForm.deliveryAddress}
-                                onChange={(event) =>
+                                onChange={(value) =>
                                   setEditDispatchForm((current) => ({
                                     ...current,
-                                    deliveryAddress: event.target.value
+                                    deliveryAddress: value
                                   }))
                                 }
-                                placeholder="4595 W Main St, Guadalupe, CA"
+                                onSelect={(item) =>
+                                  setEditDispatchForm((current) => ({
+                                    ...current,
+                                    deliveryAddress: item.formatted,
+                                    deliveryLatitude: item.latitude ?? null,
+                                    deliveryLongitude: item.longitude ?? null
+                                  }))
+                                }
                               />
                             </label>
                             <label>
@@ -10847,7 +12239,29 @@ function App() {
                             </label>
                           </div>
                         </section>
-                        <section className="dispatch-form-group dispatch-form-group-wide">
+                        <section className="dispatch-form-group dispatch-form-group-wide dispatch-linked-pairs-group">
+                          <div className="dispatch-form-section-title dispatch-form-section-title-actions">
+                            <span>ADDITIONAL LINKED PICKUP / DROP PAIRS</span>
+                            <button
+                              type="button"
+                              className="secondary-action"
+                              onClick={() =>
+                                setEditStopPairs((current) =>
+                                  addDispatchStopPair(current)
+                                )
+                              }
+                            >
+                              + Add Pickup / Drop Pair
+                            </button>
+                          </div>
+
+                          <DispatchStopPairsEditor
+                            stops={editStopPairs}
+                            setStops={setEditStopPairs}
+                          />
+                        </section>
+                        {!selectedEditIsPhone && (
+<section className="dispatch-form-group dispatch-form-group-wide">
                           <div className="dispatch-form-section-title">
                             TEMPERATURE
                           </div>
@@ -10893,6 +12307,7 @@ function App() {
                             </label>
                           </div>
                         </section>
+)}
                         <section className="dispatch-form-group dispatch-form-group-wide">
                           <div className="dispatch-form-section-title">
                             INTERNAL NOTES

@@ -6876,6 +6876,7 @@ button:disabled {
   overflow: hidden;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
+  line-clamp: 2;
   white-space: normal;
   color: #d3deeb;
   font-size: 0.64rem;
@@ -8605,4 +8606,515 @@ button:disabled {
 }
 .dispatch-notes-only label {
   grid-column: 1 / -1;
+}
+
+/* =====================================================
+   MAVTRACK DEFAULT UI SCALE — browser-like 80% view
+   Desktop application only.
+   Keep the full map and right asset panel inside view.
+   ===================================================== */
+.mav-shell {
+  width: 125vw;
+  max-width: 125vw;
+  height: 125dvh;
+  min-height: 125dvh;
+  zoom: 0.8;
+  overflow: hidden;
+}
+
+.map-workspace {
+  position: relative;
+  width: 100%;
+  min-width: 0;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* Keep the right telemetry panel visible after the 80% scale. */
+@media (min-width: 721px) {
+  .asset-panel {
+    display: block !important;
+    visibility: visible !important;
+    opacity: 1 !important;
+    top: 14px !important;
+    right: 18px !important;
+    left: auto !important;
+    width: 318px !important;
+    max-width: calc(100% - 36px) !important;
+    max-height: calc(100% - 28px) !important;
+    overflow-x: hidden !important;
+    overflow-y: auto !important;
+    z-index: 1200 !important;
+  }
+
+  .filter-panel {
+    z-index: 1200 !important;
+  }
+
+  .movement-legend {
+    z-index: 1210 !important;
+  }
+}
+
+/* Tracking-source identification: PHONE vs MAV2 */
+.tracking-source-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  min-width: 30px;
+  height: 26px;
+  padding: 0 7px;
+  border-radius: 8px;
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  background: rgba(15, 23, 42, 0.82);
+  color: #cbd5e1;
+  font-size: 0.58rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  flex: 0 0 auto;
+}
+
+.tracking-source-icon.compact {
+  width: 28px;
+  min-width: 28px;
+  height: 28px;
+  padding: 5px;
+  border-radius: 8px;
+}
+
+.tracking-source-icon svg {
+  width: 16px;
+  height: 16px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.tracking-source-icon .source-fill {
+  fill: currentColor;
+  stroke: none;
+}
+
+.tracking-source-icon.phone {
+  color: #93c5fd;
+  border-color: rgba(96, 165, 250, 0.3);
+  background: rgba(37, 99, 235, 0.12);
+}
+
+.tracking-source-icon.mav2 {
+  color: #86efac;
+  border-color: rgba(74, 222, 128, 0.26);
+  background: rgba(34, 197, 94, 0.1);
+}
+
+.asset-source-label {
+  color: #7f91a9;
+  font-weight: 700;
+}
+
+.mav-marker-source-badge {
+  position: absolute;
+  top: -5px;
+  right: -7px;
+  z-index: 4;
+  display: grid;
+  place-items: center;
+  min-width: 19px;
+  height: 19px;
+  padding: 0 3px;
+  border-radius: 7px;
+  border: 2px solid #08111f;
+  background: #16243a;
+  color: #e5edf7;
+  font-size: 9px;
+  font-weight: 900;
+  line-height: 1;
+}
+
+.mav-marker-source-badge.phone {
+  background: #1d4ed8;
+}
+
+.mav-marker-source-badge.mav2 {
+  background: #15803d;
+}
+
+.fleet-asset-name {
+  gap: 8px;
+}
+
+
+/* =====================================================
+   MULTI-STOP DISPATCH + LOAD DOCUMENTS
+   ===================================================== */
+
+.dispatch-form-section-title-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.dispatch-stop-add-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.dispatch-extra-stops {
+  display: grid;
+  gap: 12px;
+}
+
+.dispatch-extra-stop-card {
+  padding: 14px;
+  border: 1px solid rgba(96, 165, 250, 0.18);
+  border-radius: 12px;
+  background: rgba(15, 23, 42, 0.46);
+}
+
+.dispatch-extra-stop-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.dispatch-extra-stop-header strong {
+  color: #eaf2fb;
+  font-size: 0.76rem;
+}
+
+.dispatch-stop-remove {
+  border: 0;
+  background: transparent;
+  color: #fca5a5;
+  font-size: 0.7rem;
+  font-weight: 800;
+}
+
+.dispatch-stop-empty {
+  margin: 0;
+  padding: 12px 14px;
+  border: 1px dashed rgba(148, 163, 184, 0.18);
+  border-radius: 9px;
+  color: #8292a7;
+  font-size: 0.72rem;
+  line-height: 1.5;
+}
+
+.operations-documents-card {
+  min-width: 0;
+}
+
+.dispatch-document-upload {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.dispatch-document-upload input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.dispatch-document-list {
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.dispatch-document-row {
+  width: 100%;
+  display: grid;
+  grid-template-columns: 44px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 11px;
+  padding: 10px 12px;
+  border: 1px solid rgba(148, 163, 184, 0.12);
+  border-radius: 9px;
+  background: #152238;
+  color: inherit;
+  text-align: left;
+}
+
+.dispatch-document-row:hover {
+  background: #1b2a42;
+}
+
+.dispatch-document-row > span:nth-child(2) {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+
+.dispatch-document-row strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.75rem;
+}
+
+.dispatch-document-row small {
+  color: #8393a9;
+  font-size: 0.66rem;
+}
+
+.dispatch-document-row > b {
+  color: #93c5fd;
+  font-size: 0.68rem;
+}
+
+.dispatch-document-kind {
+  height: 34px;
+  display: grid;
+  place-items: center;
+  border-radius: 8px;
+  background: rgba(37, 99, 235, 0.15);
+  color: #93c5fd;
+  font-size: 0.62rem;
+  font-weight: 900;
+  letter-spacing: 0.04em;
+}
+
+.public-track-route-stops-card,
+.public-track-documents-card {
+  margin-top: 18px;
+}
+
+.public-track-section-heading h2 {
+  margin: 5px 0 0;
+  font-size: 1.05rem;
+}
+
+.public-track-stops-list,
+.public-track-documents-list {
+  display: grid;
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.public-track-route-stop {
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr);
+  gap: 12px;
+  padding: 12px;
+  border: 1px solid rgba(148, 163, 184, 0.12);
+  border-radius: 10px;
+  background: rgba(15, 23, 42, 0.36);
+}
+
+.public-track-route-stop.completed {
+  border-color: rgba(34, 197, 94, 0.25);
+  background: rgba(34, 197, 94, 0.05);
+}
+
+.public-track-route-stop.arrived {
+  border-color: rgba(96, 165, 250, 0.28);
+}
+
+.public-track-route-stop-number {
+  width: 32px;
+  height: 32px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: #1e293b;
+  color: #e5edf7;
+  font-size: 0.72rem;
+  font-weight: 900;
+}
+
+.public-track-route-stop-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.public-track-route-stop-title strong {
+  font-size: 0.78rem;
+}
+
+.public-track-route-stop-title span {
+  color: #93c5fd;
+  font-size: 0.63rem;
+  font-weight: 850;
+  text-transform: uppercase;
+}
+
+.public-track-route-stop p {
+  margin: 4px 0;
+  color: #a7b5c8;
+  font-size: 0.74rem;
+}
+
+.public-track-route-stop small {
+  color: #748399;
+  font-size: 0.66rem;
+}
+
+.public-track-document-row {
+  display: grid;
+  grid-template-columns: 44px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 11px;
+  padding: 11px 12px;
+  border: 1px solid rgba(148, 163, 184, 0.12);
+  border-radius: 9px;
+  background: rgba(15, 23, 42, 0.42);
+  color: inherit;
+  text-decoration: none;
+}
+
+.public-track-document-row > span {
+  height: 34px;
+  display: grid;
+  place-items: center;
+  border-radius: 8px;
+  background: rgba(37, 99, 235, 0.14);
+  color: #93c5fd;
+  font-size: 0.61rem;
+  font-weight: 900;
+}
+
+.public-track-document-row > div {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+
+.public-track-document-row strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.76rem;
+}
+
+.public-track-document-row small {
+  color: #8190a5;
+  font-size: 0.66rem;
+}
+
+.public-track-document-row > b {
+  color: #60a5fa;
+  font-size: 0.68rem;
+}
+
+@media (max-width: 720px) {
+  .dispatch-form-section-title-actions,
+  .public-track-route-stop-title {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .dispatch-stop-add-actions {
+    width: 100%;
+    flex-wrap: wrap;
+  }
+}
+
+
+/* =====================================================
+   DISPATCH — LINKED PICKUP / DROP PAIRS
+   ===================================================== */
+.dispatch-pair-primary { min-height: 100%; }
+.dispatch-pair-primary .dispatch-form-group-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.dispatch-pair-primary .dispatch-form-group-grid label,
+.dispatch-pair-primary .dispatch-form-group-grid label.wide { grid-column: auto; min-width: 0; }
+.dispatch-pair-primary .dispatch-form-group-grid input,
+.dispatch-pair-primary .dispatch-form-group-grid select { width: 100%; min-width: 0; height: 38px; }
+.dispatch-pair-primary.pickup { border-color: rgba(96, 165, 250, 0.25); }
+.dispatch-pair-primary.drop { border-color: rgba(74, 222, 128, 0.22); }
+.dispatch-linked-pairs-group { display: grid; gap: 12px; }
+.dispatch-stop-pairs { display: grid; gap: 14px; }
+.dispatch-stop-pair-card { min-width: 0; padding: 14px; border: 1px solid rgba(96, 165, 250, 0.22); border-radius: 12px; background: rgba(15, 23, 42, 0.48); }
+.dispatch-stop-pair-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; padding-bottom: 10px; border-bottom: 1px solid rgba(148, 163, 184, 0.12); }
+.dispatch-stop-pair-header > div { display: grid; gap: 2px; }
+.dispatch-stop-pair-header span { color: #6f87a6; font-size: 0.62rem; font-weight: 800; letter-spacing: 0.11em; }
+.dispatch-stop-pair-header strong { color: #edf6ff; font-size: 0.8rem; }
+.dispatch-stop-pair-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: stretch; gap: 12px; }
+.dispatch-pair-stop { min-width: 0; padding: 12px; border: 1px solid rgba(148, 163, 184, 0.13); border-radius: 10px; background: rgba(9, 20, 36, 0.56); }
+.dispatch-pair-stop:first-child { border-color: rgba(96, 165, 250, 0.22); }
+.dispatch-pair-stop:last-child { border-color: rgba(74, 222, 128, 0.20); }
+.dispatch-pair-stop-title { margin-bottom: 10px; color: #86b7ff; font-size: 0.69rem; font-weight: 850; letter-spacing: 0.09em; }
+.dispatch-pair-stop:last-child .dispatch-pair-stop-title { color: #86efac; }
+.dispatch-pair-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 10px; }
+.dispatch-pair-fields label { min-width: 0; }
+.dispatch-pair-fields input, .dispatch-pair-fields select { width: 100%; min-width: 0; height: 38px; }
+@media (max-width: 900px) { .dispatch-stop-pair-grid { grid-template-columns: 1fr; } }
+@media (max-width: 760px) {
+  .dispatch-pair-primary .dispatch-form-group-grid, .dispatch-pair-fields { grid-template-columns: 1fr; }
+  .dispatch-stop-pair-header { align-items: flex-start; flex-direction: column; }
+}
+
+
+/* =====================================================
+   CUSTOMER / LOCATION AUTOCOMPLETE
+   ===================================================== */
+.dispatch-autocomplete {
+  position: relative;
+  width: 100%;
+}
+
+.dispatch-autocomplete > input {
+  width: 100%;
+}
+
+.dispatch-autocomplete-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  right: 0;
+  z-index: 5000;
+  max-height: 260px;
+  overflow-y: auto;
+  padding: 6px;
+  border: 1px solid rgba(96, 165, 250, 0.28);
+  border-radius: 10px;
+  background: #0e1b2e;
+  box-shadow: 0 18px 50px rgba(2, 6, 23, 0.55);
+}
+
+.dispatch-autocomplete-menu button {
+  width: 100%;
+  display: grid;
+  gap: 3px;
+  padding: 10px 11px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: #e5edf7;
+  text-align: left;
+}
+
+.dispatch-autocomplete-menu button:hover {
+  background: rgba(96, 165, 250, 0.12);
+}
+
+.dispatch-autocomplete-menu strong {
+  color: #f8fafc;
+  font-size: 0.78rem;
+}
+
+.dispatch-autocomplete-menu span,
+.dispatch-autocomplete-menu small {
+  color: #9fb0c6;
+  font-size: 0.7rem;
+  line-height: 1.35;
+}
+
+.dispatch-pair-fields > label,
+.dispatch-form-group-grid > label {
+  min-width: 0;
 }

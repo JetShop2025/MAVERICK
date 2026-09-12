@@ -39,7 +39,9 @@ const PORT =
 app.use(cors())
 
 app.use(
-  express.json()
+  express.json({
+    limit: '16mb'
+  })
 )
 
 // =====================================================
@@ -71,6 +73,9 @@ const PUBLIC_FRONTEND_URL =
 
 const MOBILE_TELEMETRY_KEY =
   process.env.MOBILE_TELEMETRY_KEY?.trim() || ''
+
+const GEOAPIFY_API_KEY =
+  process.env.GEOAPIFY_API_KEY?.trim() || ''
 
 const DEFAULT_NOTIFICATION_EMAIL =
   process.env.NOTIFICATION_EMAIL
@@ -235,6 +240,26 @@ async function createNotificationEvent({
           : null
     }
   })
+}
+
+function normalizeCustomerCode(value: unknown) {
+  return String(value ?? '')
+    .toUpperCase()
+    .replace(/[^A-Z0-9]/g, '')
+    .slice(0, 12)
+}
+
+function formatPhone(value: unknown) {
+  const digits = String(value ?? '')
+    .replace(/\D/g, '')
+    .slice(0, 10)
+
+  if (digits.length <= 3) return digits
+  if (digits.length <= 6) {
+    return `${digits.slice(0, 3)} ${digits.slice(3)}`
+  }
+
+  return `${digits.slice(0, 3)} ${digits.slice(3, 6)} ${digits.slice(6)}`
 }
 
 function dispatchStatusLabel(
@@ -1823,6 +1848,32 @@ app.get(
                 createdAt: 'desc'
               },
               take: 20
+            },
+            stops: {
+              orderBy: {
+                sequence: 'asc'
+              }
+            },
+            documents: {
+              select: {
+                id: true,
+                dispatchId: true,
+                originalName: true,
+                mimeType: true,
+                sizeBytes: true,
+                category: true,
+                uploadedByRole: true,
+                uploadedByName: true,
+                customerVisible: true,
+                isSignature: true,
+                signedBy: true,
+                signedAt: true,
+                description: true,
+                createdAt: true
+              },
+              orderBy: {
+                createdAt: 'desc'
+              }
             }
           },
           orderBy: [
@@ -1887,6 +1938,13 @@ async function respondToDriverAssignment({
           id: dispatchId,
           companyId: req.user!.companyId,
           driverId: req.user!.userId
+        },
+        include: {
+          driver: {
+            include: {
+              driverProfile: true
+            }
+          }
         }
       })
 
@@ -1919,50 +1977,190 @@ async function respondToDriverAssignment({
       })
     }
 
+    const profile =
+      existing.driver?.driverProfile
+
+    const signedBy =
+      [
+        profile?.firstName,
+        profile?.lastName
+      ]
+        .filter(Boolean)
+        .join(' ')
+        .trim() ||
+      existing.driver?.name ||
+      req.user!.email
+
+    let signatureBase64: string | null = null
+    let signatureSize = 0
+
+    if (action === 'ACCEPTED') {
+      signatureBase64 =
+        optionalString(
+          req.body?.signatureDataBase64
+        )
+
+      const signatureBuffer =
+        decodeBase64File(
+          signatureBase64
+        )
+
+      if (
+        !signatureBase64 ||
+        !signatureBuffer ||
+        signatureBuffer.length < 100
+      ) {
+        return res.status(400).json({
+          ok: false,
+          message:
+            'Driver signature is required to accept this load'
+        })
+      }
+
+      if (
+        signatureBuffer.length >
+        512 * 1024
+      ) {
+        return res.status(413).json({
+          ok: false,
+          message:
+            'Signature is too large'
+        })
+      }
+
+      signatureSize =
+        signatureBuffer.length
+    }
+
     const now = new Date()
 
     const updated =
-      await prisma.dispatch.update({
-        where: {
-          id: existing.id
-        },
-        data: {
-          assignmentStatus: action,
-          acceptedAt:
-            action === 'ACCEPTED'
-              ? now
-              : null,
-          declinedAt:
-            action === 'DECLINED'
-              ? now
-              : null,
-          statusEvents: {
-            create: {
-              status: existing.status,
+      await prisma.$transaction(
+        async (tx) => {
+          await tx.dispatch.update({
+            where: {
+              id: existing.id
+            },
+            data: {
+              assignmentStatus: action,
+              acceptedAt:
+                action === 'ACCEPTED'
+                  ? now
+                  : null,
+              declinedAt:
+                action === 'DECLINED'
+                  ? now
+                  : null
+            }
+          })
+
+          await tx.dispatchStatusEvent.create({
+            data: {
+              dispatchId:
+                existing.id,
+              status:
+                existing.status,
+              eventType:
+                action === 'ACCEPTED'
+                  ? 'DRIVER_ACCEPTED'
+                  : 'DRIVER_DECLINED',
+              title:
+                action === 'ACCEPTED'
+                  ? 'Driver accepted load'
+                  : 'Driver declined load',
               notes:
                 action === 'ACCEPTED'
-                  ? 'Driver accepted assignment'
-                  : 'Driver declined assignment'
+                  ? `${signedBy} accepted and signed for load ${existing.loadNumber}`
+                  : `${signedBy} declined load ${existing.loadNumber}`
             }
+          })
+
+          if (
+            action === 'ACCEPTED' &&
+            signatureBase64
+          ) {
+            await tx.dispatchDocument.create({
+              data: {
+                dispatchId:
+                  existing.id,
+                originalName:
+                  `Load-${existing.loadNumber}-Acceptance-Signature.svg`,
+                mimeType:
+                  'image/svg+xml',
+                sizeBytes:
+                  signatureSize,
+                category:
+                  'SIGNATURE',
+                dataBase64:
+                  signatureBase64,
+                uploadedByUserId:
+                  req.user!.userId,
+                uploadedByRole:
+                  'driver',
+                uploadedByName:
+                  signedBy,
+                customerVisible:
+                  true,
+                isSignature:
+                  true,
+                signedBy,
+                signedAt:
+                  now,
+                description:
+                  `Driver acceptance signature for load ${existing.loadNumber}`
+              }
+            })
           }
-        },
-        include: {
-          asset: true,
-          driver: {
-            select: {
-              id: true,
-              email: true,
-              name: true,
-              driverProfile: true
+
+          return tx.dispatch.findUnique({
+            where: {
+              id: existing.id
+            },
+            include: {
+              asset: true,
+              driver: {
+                select: {
+                  id: true,
+                  email: true,
+                  name: true,
+                  driverProfile: true
+                }
+              },
+              statusEvents: {
+                orderBy: {
+                  createdAt: 'desc'
+                }
+              },
+              stops: {
+                orderBy: {
+                  sequence: 'asc'
+                }
+              },
+              documents: {
+                select: {
+                  id: true,
+                  dispatchId: true,
+                  originalName: true,
+                  mimeType: true,
+                  sizeBytes: true,
+                  category: true,
+                  uploadedByRole: true,
+                  uploadedByName: true,
+                  customerVisible: true,
+                  isSignature: true,
+                  signedBy: true,
+                  signedAt: true,
+                  description: true,
+                  createdAt: true
+                },
+                orderBy: {
+                  createdAt: 'desc'
+                }
+              }
             }
-          },
-          statusEvents: {
-            orderBy: {
-              createdAt: 'desc'
-            }
-          }
+          })
         }
-      })
+      )
 
     await createNotificationEvent({
       companyId: existing.companyId,
@@ -1983,9 +2181,9 @@ async function respondToDriverAssignment({
             : 'declined'
         }`,
       message:
-        `${req.user!.email} ${
+        `${signedBy} ${
           action === 'ACCEPTED'
-            ? 'accepted'
+            ? 'accepted and signed'
             : 'declined'
         } load ${existing.loadNumber}.`
     })
@@ -2873,6 +3071,117 @@ app.patch(
 )
 
 
+async function rememberCustomerLocations(
+  companyId: number,
+  stops: DispatchStopInput[]
+) {
+  for (const stop of stops) {
+    const code = normalizeCustomerCode(stop.customerCode)
+    if (!code || !stop.name || !stop.address) continue
+
+    await prisma.customerLocation.upsert({
+      where: {
+        companyId_code: { companyId, code }
+      },
+      update: {
+        customerName: stop.name,
+        address: stop.address,
+        phone: stop.phone,
+        latitude: stop.latitude,
+        longitude: stop.longitude,
+        lastUsedAt: new Date()
+      },
+      create: {
+        companyId,
+        code,
+        customerName: stop.name,
+        address: stop.address,
+        phone: stop.phone,
+        latitude: stop.latitude,
+        longitude: stop.longitude,
+        lastUsedAt: new Date()
+      }
+    })
+  }
+}
+
+app.get(
+  '/api/customer-locations',
+  requireAuth,
+  async (req: AuthenticatedRequest, res: Response) => {
+    const companyId = req.user?.companyId
+    if (!companyId) {
+      return res.status(401).json({ ok: false, message: 'Invalid session' })
+    }
+
+    const q = String(req.query.q || '').trim()
+    const locations = await prisma.customerLocation.findMany({
+      where: {
+        companyId,
+        ...(q
+          ? {
+              OR: [
+                { code: { contains: q.toUpperCase() } },
+                { customerName: { contains: q, mode: 'insensitive' } },
+                { address: { contains: q, mode: 'insensitive' } }
+              ]
+            }
+          : {})
+      },
+      orderBy: [{ lastUsedAt: 'desc' }],
+      take: 12
+    })
+
+    return res.json({ ok: true, locations })
+  }
+)
+
+app.get(
+  '/api/address-autocomplete',
+  requireAuth,
+  async (req: AuthenticatedRequest, res: Response) => {
+    const q = String(req.query.q || '').trim()
+    if (q.length < 3) return res.json({ ok: true, results: [] })
+
+    if (!GEOAPIFY_API_KEY) {
+      return res.json({ ok: true, results: [], configured: false })
+    }
+
+    try {
+      const params = new URLSearchParams({
+        text: q,
+        format: 'json',
+        limit: '6',
+        filter: 'countrycode:us',
+        apiKey: GEOAPIFY_API_KEY
+      })
+
+      const response = await fetch(
+        `https://api.geoapify.com/v1/geocode/autocomplete?${params}`
+      )
+
+      if (!response.ok) {
+        return res.status(502).json({ ok: false, message: 'Address search unavailable' })
+      }
+
+      const payload: any = await response.json()
+      const results = (payload.results || []).map((item: any) => ({
+        formatted: item.formatted,
+        city: item.city || item.town || item.village || null,
+        state: item.state || null,
+        postcode: item.postcode || null,
+        latitude: item.lat,
+        longitude: item.lon
+      }))
+
+      return res.json({ ok: true, results, configured: true })
+    } catch (error) {
+      console.error('Address autocomplete error:', error)
+      return res.status(502).json({ ok: false, message: 'Address search unavailable' })
+    }
+  }
+)
+
 // =====================================================
 // DISPATCH / OPERATIONS
 // =====================================================
@@ -2943,6 +3252,150 @@ function optionalDate(value: unknown) {
     : parsed
 }
 
+type DispatchStopInput = {
+  sequence: number
+  pairNumber: number
+  type: 'PICKUP' | 'DROP'
+  customerCode: string | null
+  name: string
+  address: string
+  phone: string | null
+  latitude: number | null
+  longitude: number | null
+  reference: string | null
+  notes: string | null
+  scheduledAt: Date | null
+}
+
+function parseDispatchStops(
+  value: unknown
+): {
+  stops: DispatchStopInput[] | null
+  error: string | null
+} {
+  if (value === undefined) {
+    return { stops: null, error: null }
+  }
+
+  if (!Array.isArray(value)) {
+    return { stops: null, error: 'Stops must be an array' }
+  }
+
+  const stops: DispatchStopInput[] = []
+  const fallbackPairCount = { PICKUP: 0, DROP: 0 }
+
+  for (let index = 0; index < value.length; index += 1) {
+    const raw = value[index] as any
+    const type = String(raw?.type || '').trim().toUpperCase()
+    const name = optionalString(raw?.name)
+    const address = optionalString(raw?.address)
+
+    if ((type !== 'PICKUP' && type !== 'DROP') || !name || !address) {
+      return {
+        stops: null,
+        error: `Stop ${index + 1} must include a valid type, facility name and address`
+      }
+    }
+
+    fallbackPairCount[type as 'PICKUP' | 'DROP'] += 1
+    const explicitPairNumber = Number(raw?.pairNumber)
+    const pairNumber =
+      Number.isInteger(explicitPairNumber) && explicitPairNumber > 0
+        ? explicitPairNumber
+        : fallbackPairCount[type as 'PICKUP' | 'DROP']
+
+    stops.push({
+      sequence: index + 1,
+      pairNumber,
+      type: type as 'PICKUP' | 'DROP',
+      customerCode:
+        normalizeCustomerCode(raw?.customerCode) || null,
+      name,
+      address,
+      phone:
+        formatPhone(raw?.phone) || null,
+      latitude: optionalNumber(raw?.latitude),
+      longitude: optionalNumber(raw?.longitude),
+      reference: optionalString(raw?.reference),
+      notes: optionalString(raw?.notes),
+      scheduledAt: optionalDate(raw?.scheduledAt)
+    })
+  }
+
+  const pairNumbers = Array.from(new Set(stops.map((stop) => stop.pairNumber))).sort((a, b) => a - b)
+
+  if (pairNumbers.length === 0) {
+    return { stops: null, error: 'A load must contain at least one pickup / drop pair' }
+  }
+
+  for (const pairNumber of pairNumbers) {
+    const pairStops = stops.filter((stop) => stop.pairNumber === pairNumber)
+    const pickups = pairStops.filter((stop) => stop.type === 'PICKUP')
+    const drops = pairStops.filter((stop) => stop.type === 'DROP')
+
+    if (pairStops.length !== 2 || pickups.length !== 1 || drops.length !== 1) {
+      return {
+        stops: null,
+        error: `Route pair ${pairNumber} must contain exactly one pickup and one drop`
+      }
+    }
+  }
+
+  const orderedStops = stops
+    .slice()
+    .sort((a, b) =>
+      a.pairNumber - b.pairNumber ||
+      (a.type === 'PICKUP' ? -1 : 1)
+    )
+    .map((stop, index) => ({ ...stop, sequence: index + 1 }))
+
+  return { stops: orderedStops, error: null }
+}
+
+function dispatchDocumentMeta(
+  document: {
+    id: number
+    dispatchId: number
+    originalName: string
+    mimeType: string
+    sizeBytes: number
+    category: string
+    uploadedByRole: string
+    uploadedByName: string | null
+    customerVisible: boolean
+    isSignature: boolean
+    signedBy: string | null
+    signedAt: Date | null
+    description: string | null
+    createdAt: Date
+  }
+) {
+  return document
+}
+
+function decodeBase64File(
+  value: unknown
+): Buffer | null {
+  if (
+    typeof value !== 'string' ||
+    !value.trim()
+  ) {
+    return null
+  }
+
+  try {
+    return Buffer.from(
+      value.trim(),
+      'base64'
+    )
+  } catch {
+    return null
+  }
+}
+
+const MAX_DISPATCH_DOCUMENT_BYTES =
+  8 * 1024 * 1024
+
 app.get(
   '/api/dispatches',
   requireAuth,
@@ -2991,6 +3444,32 @@ app.get(
                 createdAt: 'desc'
               },
               take: 20
+            },
+            stops: {
+              orderBy: {
+                sequence: 'asc'
+              }
+            },
+            documents: {
+              select: {
+                id: true,
+                dispatchId: true,
+                originalName: true,
+                mimeType: true,
+                sizeBytes: true,
+                category: true,
+                uploadedByRole: true,
+                uploadedByName: true,
+                customerVisible: true,
+                isSignature: true,
+                signedBy: true,
+                signedAt: true,
+                description: true,
+                createdAt: true
+              },
+              orderBy: {
+                createdAt: 'desc'
+              }
             },
             shares: {
               where: {
@@ -3072,6 +3551,32 @@ app.get(
               }
             },
             statusEvents: {
+              orderBy: {
+                createdAt: 'desc'
+              }
+            },
+            stops: {
+              orderBy: {
+                sequence: 'asc'
+              }
+            },
+            documents: {
+              select: {
+                id: true,
+                dispatchId: true,
+                originalName: true,
+                mimeType: true,
+                sizeBytes: true,
+                category: true,
+                uploadedByRole: true,
+                uploadedByName: true,
+                customerVisible: true,
+                isSignature: true,
+                signedBy: true,
+                signedAt: true,
+                description: true,
+                createdAt: true
+              },
               orderBy: {
                 createdAt: 'desc'
               }
@@ -3252,7 +3757,70 @@ app.post(
         })
       }
 
+      const parsedStopResult =
+        parseDispatchStops(
+          req.body?.stops
+        )
+
+      if (parsedStopResult.error) {
+        return res.status(400).json({
+          ok: false,
+          message:
+            parsedStopResult.error
+        })
+      }
+
+      const dispatchStops =
+        parsedStopResult.stops ||
+        [
+          {
+            sequence: 1,
+            pairNumber: 1,
+            type: 'PICKUP' as const,
+            customerCode:
+              normalizeCustomerCode(req.body?.pickupCustomerCode) || null,
+            name: pickupName,
+            address: pickupAddress,
+            phone:
+              formatPhone(req.body?.pickupPhone) || null,
+            latitude: optionalNumber(req.body?.pickupLatitude),
+            longitude: optionalNumber(req.body?.pickupLongitude),
+            reference:
+              optionalString(
+                req.body?.pickupReference
+              ),
+            notes: null,
+            scheduledAt:
+              optionalDate(
+                req.body?.pickupScheduledAt
+              )
+          },
+          {
+            sequence: 2,
+            pairNumber: 1,
+            type: 'DROP' as const,
+            customerCode:
+              normalizeCustomerCode(req.body?.deliveryCustomerCode) || null,
+            name: deliveryName,
+            address: deliveryAddress,
+            phone:
+              formatPhone(req.body?.deliveryPhone) || null,
+            latitude: optionalNumber(req.body?.deliveryLatitude),
+            longitude: optionalNumber(req.body?.deliveryLongitude),
+            reference:
+              optionalString(
+                req.body?.deliveryReference
+              ),
+            notes: null,
+            scheduledAt:
+              optionalDate(
+                req.body?.deliveryScheduledAt
+              )
+          }
+        ]
+
       let assetId: number | null = null
+      let selectedAssetTrackingSource: string | null = null
 
       if (
         req.body?.assetId !== null &&
@@ -3333,6 +3901,8 @@ app.post(
         }
 
         assetId = asset.id
+        selectedAssetTrackingSource =
+          String(asset.trackingSource || 'MAV2').toUpperCase()
       }
 
       let driverId: number | null = null
@@ -3407,6 +3977,30 @@ app.post(
         driverId = driver.id
       }
 
+      const manualDriverName =
+        optionalString(req.body?.manualDriverName)
+
+      if (
+        assetId != null &&
+        selectedAssetTrackingSource !== 'PHONE' &&
+        !manualDriverName
+      ) {
+        return res.status(400).json({
+          ok: false,
+          message: 'Driver name is required for MAV2 assets'
+        })
+      }
+
+      if (
+        selectedAssetTrackingSource === 'PHONE' &&
+        driverId == null
+      ) {
+        return res.status(400).json({
+          ok: false,
+          message: 'This PHONE asset is not linked to an active MavDriver driver'
+        })
+      }
+
       const requestedStatus =
         isDispatchStatus(
           req.body?.status
@@ -3448,6 +4042,10 @@ app.post(
             companyId,
             assetId,
             driverId,
+            manualDriverName:
+              selectedAssetTrackingSource === 'PHONE'
+                ? null
+                : manualDriverName,
             assignmentStatus:
               driverId != null
                 ? 'PENDING'
@@ -3501,9 +4099,7 @@ app.post(
                 req.body?.dispatcherName
               ),
             dispatcherPhone:
-              optionalString(
-                req.body?.dispatcherPhone
-              ),
+              formatPhone(req.body?.dispatcherPhone) || null,
             poNumber:
               optionalString(
                 req.body?.poNumber
@@ -3534,18 +4130,14 @@ app.post(
               ),
 
             pickupPhone:
-              optionalString(
-                req.body?.pickupPhone
-              ),
+              formatPhone(req.body?.pickupPhone) || null,
             pickupReference:
               optionalString(
                 req.body?.pickupReference
               ),
 
             deliveryPhone:
-              optionalString(
-                req.body?.deliveryPhone
-              ),
+              formatPhone(req.body?.deliveryPhone) || null,
             deliveryReference:
               optionalString(
                 req.body?.deliveryReference
@@ -3600,9 +4192,18 @@ app.post(
               create: {
                 status:
                   requestedStatus,
+                eventType:
+                  'DISPATCH_CREATED',
+                title:
+                  'Load assigned',
                 notes:
-                  'Dispatch created'
+                  'Dispatch created and assigned'
               }
+            },
+
+            stops: {
+              create:
+                dispatchStops
             }
           },
           include: {
@@ -3621,6 +4222,32 @@ app.post(
                 createdAt: 'desc'
               }
             },
+            stops: {
+              orderBy: {
+                sequence: 'asc'
+              }
+            },
+            documents: {
+              select: {
+                id: true,
+                dispatchId: true,
+                originalName: true,
+                mimeType: true,
+                sizeBytes: true,
+                category: true,
+                uploadedByRole: true,
+                uploadedByName: true,
+                customerVisible: true,
+                isSignature: true,
+                signedBy: true,
+                signedAt: true,
+                description: true,
+                createdAt: true
+              },
+              orderBy: {
+                createdAt: 'desc'
+              }
+            },
             shares: {
               where: {
                 revokedAt: null
@@ -3631,6 +4258,11 @@ app.post(
             }
           }
         })
+
+      await rememberCustomerLocations(
+        companyId,
+        dispatchStops
+      )
 
       return res.status(201).json({
         ok: true,
@@ -3701,6 +4333,7 @@ app.patch(
       }
 
       const data: Record<string, any> = {}
+      let updatedStopsForCatalog: DispatchStopInput[] | null = null
 
       if (
         req.body?.assetId !== undefined
@@ -3871,6 +4504,7 @@ app.patch(
 
       const stringFields = [
         'loadNumber',
+        'manualDriverName',
         'pickupName',
         'pickupAddress',
         'pickupPhone',
@@ -3904,6 +4538,17 @@ app.patch(
             optionalString(
               req.body[field]
             )
+        }
+      }
+
+      for (const phoneField of [
+        'dispatcherPhone',
+        'pickupPhone',
+        'deliveryPhone'
+      ] as const) {
+        if (req.body?.[phoneField] !== undefined) {
+          data[phoneField] =
+            formatPhone(req.body[phoneField]) || null
         }
       }
 
@@ -3952,6 +4597,31 @@ app.patch(
           )
       }
 
+      if (
+        req.body?.stops !== undefined
+      ) {
+        const parsedStopResult =
+          parseDispatchStops(
+            req.body.stops
+          )
+
+        if (parsedStopResult.error) {
+          return res.status(400).json({
+            ok: false,
+            message:
+              parsedStopResult.error
+          })
+        }
+
+        updatedStopsForCatalog =
+          parsedStopResult.stops || []
+
+        data.stops = {
+          deleteMany: {},
+          create: updatedStopsForCatalog
+        }
+      }
+
       const updated =
         await prisma.dispatch.update({
           where: {
@@ -3974,6 +4644,32 @@ app.patch(
                 createdAt: 'desc'
               }
             },
+            stops: {
+              orderBy: {
+                sequence: 'asc'
+              }
+            },
+            documents: {
+              select: {
+                id: true,
+                dispatchId: true,
+                originalName: true,
+                mimeType: true,
+                sizeBytes: true,
+                category: true,
+                uploadedByRole: true,
+                uploadedByName: true,
+                customerVisible: true,
+                isSignature: true,
+                signedBy: true,
+                signedAt: true,
+                description: true,
+                createdAt: true
+              },
+              orderBy: {
+                createdAt: 'desc'
+              }
+            },
             shares: {
               where: {
                 revokedAt: null
@@ -3984,6 +4680,13 @@ app.patch(
             }
           }
         })
+
+      if (updatedStopsForCatalog) {
+        await rememberCustomerLocations(
+          companyId,
+          updatedStopsForCatalog
+        )
+      }
 
       return res.json({
         ok: true,
@@ -4215,6 +4918,576 @@ app.post(
 )
 
 
+
+
+// =====================================================
+// DISPATCH STOPS + DOCUMENTS
+// =====================================================
+
+app.post(
+  '/api/driver/dispatches/:id/stops/:stopId/status',
+  requireAuth,
+  async (
+    req: AuthenticatedRequest,
+    res: Response
+  ) => {
+    try {
+      if (!isDriver(req.user?.role)) {
+        return res.status(403).json({
+          ok: false,
+          message: 'Driver account required'
+        })
+      }
+
+      const dispatchId =
+        Number(req.params.id)
+
+      const stopId =
+        Number(req.params.stopId)
+
+      const status =
+        String(
+          req.body?.status || ''
+        ).toUpperCase()
+
+      if (
+        !Number.isInteger(dispatchId) ||
+        !Number.isInteger(stopId) ||
+        ![
+          'PENDING',
+          'EN_ROUTE',
+          'ARRIVED',
+          'COMPLETED'
+        ].includes(status)
+      ) {
+        return res.status(400).json({
+          ok: false,
+          message:
+            'Invalid stop update'
+        })
+      }
+
+      const dispatch =
+        await prisma.dispatch.findFirst({
+          where: {
+            id: dispatchId,
+            companyId:
+              req.user!.companyId,
+            driverId:
+              req.user!.userId,
+            assignmentStatus:
+              'ACCEPTED'
+          },
+          include: {
+            stops: {
+              orderBy: {
+                sequence: 'asc'
+              }
+            }
+          }
+        })
+
+      if (!dispatch) {
+        return res.status(404).json({
+          ok: false,
+          message:
+            'Accepted load not found'
+        })
+      }
+
+      const stop =
+        dispatch.stops.find(
+          (item) =>
+            item.id === stopId
+        )
+
+      if (!stop) {
+        return res.status(404).json({
+          ok: false,
+          message:
+            'Stop not found'
+        })
+      }
+
+      const now =
+        new Date()
+
+      const nextGlobalStatus =
+        status === 'EN_ROUTE'
+          ? (
+              stop.type === 'PICKUP'
+                ? 'EN_ROUTE_TO_PICKUP'
+                : 'IN_TRANSIT'
+            )
+          : status === 'ARRIVED'
+            ? (
+                stop.type === 'PICKUP'
+                  ? 'AT_PICKUP'
+                  : 'AT_DELIVERY'
+              )
+            : status === 'COMPLETED'
+              ? (
+                  stop.type === 'PICKUP'
+                    ? 'LOADED'
+                    : (
+                        dispatch.stops
+                          .filter(
+                            (item) =>
+                              item.type === 'DROP' &&
+                              item.id !== stop.id
+                          )
+                          .every(
+                            (item) =>
+                              item.status === 'COMPLETED'
+                          )
+                          ? 'DELIVERED'
+                          : 'IN_TRANSIT'
+                      )
+                )
+              : dispatch.status
+
+      const stopTitle =
+        `${stop.type === 'PICKUP' ? 'Pickup' : 'Drop'} ${stop.sequence}: ${
+          status === 'EN_ROUTE'
+            ? 'En route'
+            : status === 'ARRIVED'
+              ? 'Arrived'
+              : status === 'COMPLETED'
+                ? 'Completed'
+                : 'Pending'
+        }`
+
+      const updated =
+        await prisma.$transaction(
+          async (tx) => {
+            await tx.dispatchStop.update({
+              where: {
+                id: stop.id
+              },
+              data: {
+                status:
+                  status as any,
+                arrivedAt:
+                  status === 'ARRIVED'
+                    ? now
+                    : stop.arrivedAt,
+                completedAt:
+                  status === 'COMPLETED'
+                    ? now
+                    : stop.completedAt
+              }
+            })
+
+            await tx.dispatch.update({
+              where: {
+                id: dispatch.id
+              },
+              data: {
+                status:
+                  nextGlobalStatus as any,
+                completedAt:
+                  nextGlobalStatus === 'DELIVERED'
+                    ? now
+                    : null
+              }
+            })
+
+            await tx.dispatchStatusEvent.create({
+              data: {
+                dispatchId:
+                  dispatch.id,
+                status:
+                  nextGlobalStatus as any,
+                eventType:
+                  'STOP_STATUS',
+                title:
+                  stopTitle,
+                notes:
+                  `${stop.name} — ${stop.address}`
+              }
+            })
+
+            return tx.dispatch.findUnique({
+              where: {
+                id:
+                  dispatch.id
+              },
+              include: {
+                asset: true,
+                driver: {
+                  select: {
+                    id: true,
+                    email: true,
+                    name: true,
+                    driverProfile: true
+                  }
+                },
+                statusEvents: {
+                  orderBy: {
+                    createdAt: 'desc'
+                  }
+                },
+                stops: {
+                  orderBy: {
+                    sequence: 'asc'
+                  }
+                },
+                documents: {
+                  select: {
+                    id: true,
+                    dispatchId: true,
+                    originalName: true,
+                    mimeType: true,
+                    sizeBytes: true,
+                    category: true,
+                    uploadedByRole: true,
+                    uploadedByName: true,
+                    customerVisible: true,
+                    isSignature: true,
+                    signedBy: true,
+                    signedAt: true,
+                    description: true,
+                    createdAt: true
+                  },
+                  orderBy: {
+                    createdAt: 'desc'
+                  }
+                }
+              }
+            })
+          }
+        )
+
+      return res.json({
+        ok: true,
+        dispatch: updated
+      })
+    } catch (error) {
+      console.error(
+        'Driver stop status error:',
+        error
+      )
+
+      return res.status(500).json({
+        ok: false,
+        message:
+          'Unable to update stop'
+      })
+    }
+  }
+)
+
+app.post(
+  '/api/dispatches/:id/documents',
+  requireAuth,
+  async (
+    req: AuthenticatedRequest,
+    res: Response
+  ) => {
+    try {
+      const companyId =
+        req.user?.companyId
+
+      const dispatchId =
+        Number(req.params.id)
+
+      if (
+        !companyId ||
+        !Number.isInteger(dispatchId)
+      ) {
+        return res.status(400).json({
+          ok: false,
+          message:
+            'Invalid dispatch'
+        })
+      }
+
+      const dispatch =
+        await prisma.dispatch.findFirst({
+          where: {
+            id: dispatchId,
+            companyId
+          },
+          include: {
+            driver: {
+              select: {
+                id: true,
+                name: true,
+                email: true,
+                driverProfile: true
+              }
+            }
+          }
+        })
+
+      if (!dispatch) {
+        return res.status(404).json({
+          ok: false,
+          message:
+            'Dispatch not found'
+        })
+      }
+
+      const role =
+        String(
+          req.user?.role || ''
+        ).toLowerCase()
+
+      if (
+        role === 'driver' &&
+        (
+          dispatch.driverId !==
+            req.user!.userId ||
+          dispatch.assignmentStatus !==
+            'ACCEPTED'
+        )
+      ) {
+        return res.status(403).json({
+          ok: false,
+          message:
+            'Driver must accept this load before uploading documents'
+        })
+      }
+
+      const originalName =
+        optionalString(
+          req.body?.originalName
+        )
+
+      const mimeType =
+        optionalString(
+          req.body?.mimeType
+        ) ||
+        'application/octet-stream'
+
+      const category =
+        optionalString(
+          req.body?.category
+        ) ||
+        'OTHER'
+
+      const dataBase64 =
+        optionalString(
+          req.body?.dataBase64
+        )
+
+      const buffer =
+        decodeBase64File(
+          dataBase64
+        )
+
+      if (
+        !originalName ||
+        !dataBase64 ||
+        !buffer ||
+        buffer.length === 0
+      ) {
+        return res.status(400).json({
+          ok: false,
+          message:
+            'Document name and file data are required'
+        })
+      }
+
+      if (
+        buffer.length >
+        MAX_DISPATCH_DOCUMENT_BYTES
+      ) {
+        return res.status(413).json({
+          ok: false,
+          message:
+            'Document must be 8 MB or smaller'
+        })
+      }
+
+      const profile =
+        dispatch.driver
+          ?.driverProfile
+
+      const driverName =
+        [
+          profile?.firstName,
+          profile?.lastName
+        ]
+          .filter(Boolean)
+          .join(' ')
+          .trim()
+
+      const uploaderName =
+        role === 'driver'
+          ? (
+              driverName ||
+              dispatch.driver?.name ||
+              req.user!.email
+            )
+          : req.user!.email
+
+      const document =
+        await prisma.dispatchDocument.create({
+          data: {
+            dispatchId:
+              dispatch.id,
+            originalName,
+            mimeType,
+            sizeBytes:
+              buffer.length,
+            category,
+            dataBase64,
+            uploadedByUserId:
+              req.user!.userId,
+            uploadedByRole:
+              role || 'user',
+            uploadedByName:
+              uploaderName,
+            customerVisible:
+              req.body?.customerVisible !==
+              false,
+            isSignature:
+              false,
+            description:
+              optionalString(
+                req.body?.description
+              )
+          },
+          select: {
+            id: true,
+            dispatchId: true,
+            originalName: true,
+            mimeType: true,
+            sizeBytes: true,
+            category: true,
+            uploadedByRole: true,
+            uploadedByName: true,
+            customerVisible: true,
+            isSignature: true,
+            signedBy: true,
+            signedAt: true,
+            description: true,
+            createdAt: true
+          }
+        })
+
+      await prisma.dispatchStatusEvent.create({
+        data: {
+          dispatchId:
+            dispatch.id,
+          status:
+            dispatch.status,
+          eventType:
+            'DOCUMENT_UPLOADED',
+          title:
+            'Document uploaded',
+          notes:
+            `${uploaderName} uploaded ${originalName}`
+        }
+      })
+
+      return res.status(201).json({
+        ok: true,
+        document
+      })
+    } catch (error) {
+      console.error(
+        'Dispatch document upload error:',
+        error
+      )
+
+      return res.status(500).json({
+        ok: false,
+        message:
+          'Unable to upload document'
+      })
+    }
+  }
+)
+
+app.get(
+  '/api/dispatches/:id/documents/:documentId/file',
+  requireAuth,
+  async (
+    req: AuthenticatedRequest,
+    res: Response
+  ) => {
+    try {
+      const dispatchId =
+        Number(req.params.id)
+
+      const documentId =
+        Number(req.params.documentId)
+
+      const document =
+        await prisma.dispatchDocument.findFirst({
+          where: {
+            id: documentId,
+            dispatchId,
+            dispatch: {
+              companyId:
+                req.user!.companyId,
+              ...(
+                isDriver(
+                  req.user?.role
+                )
+                  ? {
+                      driverId:
+                        req.user!.userId
+                    }
+                  : {}
+              )
+            }
+          }
+        })
+
+      if (!document) {
+        return res.status(404).json({
+          ok: false,
+          message:
+            'Document not found'
+        })
+      }
+
+      if (
+        isDriver(req.user?.role) &&
+        document.dispatchId !==
+          dispatchId
+      ) {
+        return res.status(403).json({
+          ok: false,
+          message:
+            'Document access denied'
+        })
+      }
+
+      const buffer =
+        Buffer.from(
+          document.dataBase64,
+          'base64'
+        )
+
+      res.setHeader(
+        'Content-Type',
+        document.mimeType
+      )
+
+      res.setHeader(
+        'Content-Disposition',
+        `inline; filename="${document.originalName.replace(/"/g, '')}"`
+      )
+
+      return res.send(buffer)
+    } catch (error) {
+      console.error(
+        'Dispatch document file error:',
+        error
+      )
+
+      return res.status(500).json({
+        ok: false,
+        message:
+          'Unable to open document'
+      })
+    }
+  }
+)
 
 // =====================================================
 // DISPATCH SHARING
@@ -4955,6 +6228,36 @@ app.get(
                   },
                   take: 20
                 }
+                ,
+                stops: {
+                  orderBy: {
+                    sequence: 'asc'
+                  }
+                },
+                documents: {
+                  where: {
+                    customerVisible: true
+                  },
+                  select: {
+                    id: true,
+                    dispatchId: true,
+                    originalName: true,
+                    mimeType: true,
+                    sizeBytes: true,
+                    category: true,
+                    uploadedByRole: true,
+                    uploadedByName: true,
+                    customerVisible: true,
+                    isSignature: true,
+                    signedBy: true,
+                    signedAt: true,
+                    description: true,
+                    createdAt: true
+                  },
+                  orderBy: {
+                    createdAt: 'desc'
+                  }
+                }
               }
             }
           }
@@ -5132,6 +6435,8 @@ app.get(
 
           assignmentStatus:
             share.dispatch.assignmentStatus,
+          manualDriverName:
+            share.dispatch.manualDriverName,
 
           asset:
             share.dispatch.asset
@@ -5174,7 +6479,19 @@ app.get(
               : null,
 
           statusEvents:
-            share.dispatch.statusEvents
+            share.dispatch.statusEvents,
+
+          stops:
+            share.dispatch.stops,
+
+          documents:
+            share.dispatch.documents.map(
+              (document) => ({
+                ...document,
+                fileUrl:
+                  `${PUBLIC_FRONTEND_URL}/api/public/track/${share.token}/documents/${document.id}/file`
+              })
+            )
         },
 
         telemetry:
@@ -5248,6 +6565,93 @@ app.get(
         message:
           'Unable to load tracking information'
       })
+    }
+  }
+)
+
+
+app.get(
+  '/api/public/track/:token/documents/:documentId/file',
+  async (
+    req,
+    res
+  ) => {
+    try {
+      const token =
+        String(
+          req.params.token || ''
+        ).trim()
+
+      const documentId =
+        Number(
+          req.params.documentId
+        )
+
+      const share =
+        await prisma.dispatchShare.findUnique({
+          where: {
+            token
+          }
+        })
+
+      if (
+        !share ||
+        share.revokedAt ||
+        (
+          share.expiresAt &&
+          share.expiresAt <= new Date()
+        ) ||
+        !Number.isInteger(documentId)
+      ) {
+        return res.status(404).send(
+          'Document not available'
+        )
+      }
+
+      const document =
+        await prisma.dispatchDocument.findFirst({
+          where: {
+            id:
+              documentId,
+            dispatchId:
+              share.dispatchId,
+            customerVisible:
+              true
+          }
+        })
+
+      if (!document) {
+        return res.status(404).send(
+          'Document not available'
+        )
+      }
+
+      const buffer =
+        Buffer.from(
+          document.dataBase64,
+          'base64'
+        )
+
+      res.setHeader(
+        'Content-Type',
+        document.mimeType
+      )
+
+      res.setHeader(
+        'Content-Disposition',
+        `inline; filename="${document.originalName.replace(/"/g, '')}"`
+      )
+
+      return res.send(buffer)
+    } catch (error) {
+      console.error(
+        'Public document file error:',
+        error
+      )
+
+      return res.status(500).send(
+        'Unable to open document'
+      )
     }
   }
 )

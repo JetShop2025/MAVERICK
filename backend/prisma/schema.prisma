@@ -18,8 +18,9 @@ model Company {
   users          User[]
   driverProfiles DriverProfile[]
   assets         Asset[]
-  dispatches     Dispatch[]
-  notifications  NotificationEvent[]
+  dispatches        Dispatch[]
+  customerLocations CustomerLocation[]
+  notifications     NotificationEvent[]
 }
 
 model User {
@@ -189,6 +190,18 @@ enum DispatchStatus {
   CANCELLED
 }
 
+enum DispatchStopType {
+  PICKUP
+  DROP
+}
+
+enum DispatchStopStatus {
+  PENDING
+  EN_ROUTE
+  ARRIVED
+  COMPLETED
+}
+
 model Dispatch {
   id         Int            @id @default(autoincrement())
   loadNumber String
@@ -206,6 +219,7 @@ model Dispatch {
   assignmentStatus DriverAssignmentStatus @default(UNASSIGNED)
   acceptedAt       DateTime?
   declinedAt       DateTime?
+  manualDriverName String?
 
   pickupName        String
   pickupAddress     String
@@ -258,6 +272,8 @@ model Dispatch {
   updatedAt DateTime @updatedAt
 
   statusEvents  DispatchStatusEvent[]
+  stops         DispatchStop[]
+  documents     DispatchDocument[]
   shares        DispatchShare[]
   notifications NotificationEvent[]
 
@@ -272,6 +288,8 @@ model Dispatch {
 model DispatchStatusEvent {
   id        Int            @id @default(autoincrement())
   status    DispatchStatus
+  eventType String          @default("STATUS")
+  title     String?
   notes     String?
   createdAt DateTime       @default(now())
 
@@ -279,6 +297,89 @@ model DispatchStatusEvent {
   dispatch   Dispatch @relation(fields: [dispatchId], references: [id], onDelete: Cascade)
 
   @@index([dispatchId, createdAt])
+}
+
+model DispatchStop {
+  id Int @id @default(autoincrement())
+
+  dispatchId Int
+  dispatch   Dispatch @relation(fields: [dispatchId], references: [id], onDelete: Cascade)
+
+  sequence   Int
+  pairNumber Int              @default(1)
+  type       DispatchStopType
+  status     DispatchStopStatus @default(PENDING)
+
+  customerCode String?
+  name         String
+  address      String
+  phone        String?
+  latitude     Float?
+  longitude    Float?
+  reference   String?
+  notes       String?
+  scheduledAt DateTime?
+
+  arrivedAt   DateTime?
+  completedAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([dispatchId, sequence])
+  @@index([dispatchId, pairNumber])
+  @@index([dispatchId, status])
+}
+
+model CustomerLocation {
+  id Int @id @default(autoincrement())
+
+  companyId Int
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  code         String
+  customerName String
+  address      String
+  phone        String?
+  city         String?
+  latitude     Float?
+  longitude    Float?
+  lastUsedAt   DateTime @default(now())
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([companyId, code])
+  @@index([companyId, customerName])
+  @@index([companyId, lastUsedAt])
+}
+
+model DispatchDocument {
+  id Int @id @default(autoincrement())
+
+  dispatchId Int
+  dispatch   Dispatch @relation(fields: [dispatchId], references: [id], onDelete: Cascade)
+
+  originalName String
+  mimeType     String
+  sizeBytes    Int
+  category     String @default("OTHER")
+  dataBase64   String
+
+  uploadedByUserId Int?
+  uploadedByRole   String
+  uploadedByName   String?
+  customerVisible Boolean @default(true)
+
+  isSignature Boolean @default(false)
+  signedBy    String?
+  signedAt    DateTime?
+  description String?
+
+  createdAt DateTime @default(now())
+
+  @@index([dispatchId, createdAt])
+  @@index([dispatchId, category])
 }
 
 model DispatchShare {

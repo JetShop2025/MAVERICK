@@ -2,9 +2,11 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
+  AppState,
   FlatList,
   Image,
   KeyboardAvoidingView,
+  Linking,
   Platform,
   Pressable,
   SafeAreaView,
@@ -18,6 +20,9 @@ import {
 import * as Location from "expo-location";
 import * as TaskManager from "expo-task-manager";
 import * as SecureStore from "expo-secure-store";
+import * as ImagePicker from "expo-image-picker";
+import * as DocumentPicker from "expo-document-picker";
+import * as FileSystem from "expo-file-system/legacy";
 
 
 (Text as any).defaultProps = {
@@ -43,6 +48,11 @@ const TOKEN_KEY = "mavtrack_driver_token";
 const USER_KEY = "mavtrack_driver_user";
 const TRACKING_DEVICE_KEY =
   "mavtrack_tracking_device_id";
+
+const GPS_PING_INTERVAL_MS = 60_000;
+const GPS_PING_MIN_GAP_MS = 55_000;
+const LAST_GPS_PING_KEY =
+  "mavtrack_last_gps_ping_at";
 
 const DEFAULT_TRACKING_DEVICE_ID =
   "TRK-TEST-001";
@@ -98,6 +108,48 @@ type Asset = {
   trackingSource?: string | null;
 };
 
+type DispatchStop = {
+  id: number;
+  sequence: number;
+  pairNumber: number;
+  type: "PICKUP" | "DROP";
+  status:
+    | "PENDING"
+    | "EN_ROUTE"
+    | "ARRIVED"
+    | "COMPLETED";
+  name: string;
+  address: string;
+  phone?: string | null;
+  reference?: string | null;
+  notes?: string | null;
+  scheduledAt?: string | null;
+  arrivedAt?: string | null;
+  completedAt?: string | null;
+};
+
+type DispatchDocument = {
+  id: number;
+  dispatchId: number;
+  originalName: string;
+  mimeType: string;
+  sizeBytes: number;
+  category: string;
+  uploadedByRole: string;
+  uploadedByName?: string | null;
+  customerVisible: boolean;
+  isSignature: boolean;
+  signedBy?: string | null;
+  signedAt?: string | null;
+  description?: string | null;
+  createdAt: string;
+};
+
+type SignaturePoint = {
+  x: number;
+  y: number;
+};
+
 type Dispatch = {
   id: number;
   loadNumber: string;
@@ -137,6 +189,8 @@ type Dispatch = {
   acceptedAt?: string | null;
   declinedAt?: string | null;
   asset?: Asset | null;
+  stops?: DispatchStop[];
+  documents?: DispatchDocument[];
 };
 
 type GPSData = {
@@ -150,10 +204,33 @@ type GPSData = {
 
 async function postLocationToMavtrack(
   location: Location.LocationObject,
-  deviceId: string
+  deviceId: string,
+  force = false
 ) {
   if (!MOBILE_TELEMETRY_KEY || !deviceId) {
     return false;
+  }
+
+  const now = Date.now();
+
+  if (!force) {
+    const savedLastPing =
+      await SecureStore.getItemAsync(
+        LAST_GPS_PING_KEY
+      );
+
+    const lastPingAt =
+      savedLastPing
+        ? Number(savedLastPing)
+        : 0;
+
+    if (
+      Number.isFinite(lastPingAt) &&
+      now - lastPingAt <
+        GPS_PING_MIN_GAP_MS
+    ) {
+      return true;
+    }
   }
 
   const speedKph =
@@ -185,6 +262,13 @@ async function postLocationToMavtrack(
     }
   );
 
+  if (response.ok) {
+    await SecureStore.setItemAsync(
+      LAST_GPS_PING_KEY,
+      String(now)
+    );
+  }
+
   return response.ok;
 }
 
@@ -210,15 +294,22 @@ TaskManager.defineTask(
 
     const locations = payload.locations || [];
 
-    for (const location of locations) {
-      try {
-        await postLocationToMavtrack(
-          location,
-          deviceId
-        );
-      } catch {
-        // Background task will retry on the next update.
-      }
+    if (!locations.length) {
+      return;
+    }
+
+    // M2-style telemetry cycle:
+    // use only the freshest fix and send at most one ping per minute.
+    const latestLocation =
+      locations[locations.length - 1];
+
+    try {
+      await postLocationToMavtrack(
+        latestLocation,
+        deviceId
+      );
+    } catch {
+      // iOS will deliver another native location update later.
     }
   }
 );
@@ -338,6 +429,12 @@ export default function App() {
   const [selectedLoad, setSelectedLoad] =
     useState<Dispatch | null>(null);
 
+  const [signingLoad, setSigningLoad] =
+    useState<Dispatch | null>(null);
+
+  const [documentBusy, setDocumentBusy] =
+    useState(false);
+
   const [loadingLoads, setLoadingLoads] =
     useState(false);
 
@@ -375,6 +472,13 @@ export default function App() {
     useRef<ReturnType<typeof setInterval> | null>(
       null
     );
+
+  const liveGpsPollRef =
+    useRef<ReturnType<typeof setInterval> | null>(
+      null
+    );
+
+  const liveGpsPollBusyRef = useRef(false);
 
   const [menuOpen, setMenuOpen] =
     useState(false);
@@ -629,7 +733,8 @@ export default function App() {
 
   async function respondToLoad(
     dispatch: Dispatch,
-    action: "accept" | "decline"
+    action: "accept" | "decline",
+    signatureDataBase64?: string
   ) {
     try {
       await apiFetch(
@@ -642,7 +747,9 @@ export default function App() {
                   reason:
                     "Declined in MavApp",
                 })
-              : undefined,
+              : JSON.stringify({
+                  signatureDataBase64,
+                }),
         }
       );
 
@@ -651,10 +758,228 @@ export default function App() {
       if (action === "accept") {
         setLoadFilter("active");
         setSelectedLoad(null);
+        setSigningLoad(null);
       }
     } catch (err) {
       Alert.alert(
         "Unable to update load",
+        err instanceof Error
+          ? err.message
+          : "Please try again."
+      );
+    }
+  }
+
+  async function uploadDocumentPayload(
+    dispatch: Dispatch,
+    payload: {
+      originalName: string;
+      mimeType: string;
+      category: string;
+      dataBase64: string;
+    }
+  ) {
+    try {
+      setDocumentBusy(true);
+
+      await apiFetch(
+        `/api/dispatches/${dispatch.id}/documents`,
+        {
+          method: "POST",
+          body: JSON.stringify({
+            ...payload,
+            customerVisible: true,
+          }),
+        }
+      );
+
+      await loadAssignments();
+    } catch (err) {
+      Alert.alert(
+        "Unable to upload document",
+        err instanceof Error
+          ? err.message
+          : "Please try again."
+      );
+    } finally {
+      setDocumentBusy(false);
+    }
+  }
+
+  async function addLoadPhoto(
+    dispatch: Dispatch
+  ) {
+    const permission =
+      await ImagePicker.requestMediaLibraryPermissionsAsync();
+
+    if (!permission.granted) {
+      Alert.alert(
+        "Photo access required",
+        "Allow photo access to upload load photos."
+      );
+      return;
+    }
+
+    const result =
+      await ImagePicker.launchImageLibraryAsync({
+        mediaTypes:
+          ImagePicker.MediaTypeOptions.Images,
+        quality: 0.82,
+        base64: true,
+      });
+
+    if (
+      result.canceled ||
+      !result.assets?.[0]?.base64
+    ) {
+      return;
+    }
+
+    const asset =
+      result.assets[0];
+
+    await uploadDocumentPayload(
+      dispatch,
+      {
+        originalName:
+          asset.fileName ||
+          `load-photo-${Date.now()}.jpg`,
+        mimeType:
+          asset.mimeType ||
+          "image/jpeg",
+        category:
+          "PHOTO",
+        dataBase64:
+          asset.base64!,
+      }
+    );
+  }
+
+  async function addLoadDocument(
+    dispatch: Dispatch
+  ) {
+    const result =
+      await DocumentPicker.getDocumentAsync({
+        copyToCacheDirectory: true,
+        multiple: false,
+      });
+
+    if (
+      result.canceled ||
+      !result.assets?.[0]
+    ) {
+      return;
+    }
+
+    const asset =
+      result.assets[0];
+
+    try {
+      const dataBase64 =
+        await FileSystem.readAsStringAsync(
+          asset.uri,
+          {
+            encoding:
+              FileSystem.EncodingType.Base64,
+          }
+        );
+
+      await uploadDocumentPayload(
+        dispatch,
+        {
+          originalName:
+            asset.name,
+          mimeType:
+            asset.mimeType ||
+            "application/octet-stream",
+          category:
+            "DOCUMENT",
+          dataBase64,
+        }
+      );
+    } catch {
+      Alert.alert(
+        "Unable to read document",
+        "Please choose another file."
+      );
+    }
+  }
+
+  async function openLoadDocument(
+    dispatch: Dispatch,
+    document: DispatchDocument
+  ) {
+    try {
+      const savedToken =
+        token ||
+        await SecureStore.getItemAsync(
+          TOKEN_KEY
+        );
+
+      if (!savedToken) {
+        throw new Error(
+          "Session expired."
+        );
+      }
+
+      const safeName =
+        document.originalName
+          .replace(
+            /[^a-zA-Z0-9._-]/g,
+            "_"
+          );
+
+      const destination =
+        `${FileSystem.cacheDirectory}${document.id}-${safeName}`;
+
+      const result =
+        await FileSystem.downloadAsync(
+          `${API_URL}/api/dispatches/${dispatch.id}/documents/${document.id}/file`,
+          destination,
+          {
+            headers: {
+              Authorization:
+                `Bearer ${savedToken}`,
+            },
+          }
+        );
+
+      await Linking.openURL(
+        result.uri
+      );
+    } catch (err) {
+      Alert.alert(
+        "Unable to open document",
+        err instanceof Error
+          ? err.message
+          : "Please try again."
+      );
+    }
+  }
+
+  async function updateStopStatus(
+    dispatch: Dispatch,
+    stop: DispatchStop,
+    status:
+      | "EN_ROUTE"
+      | "ARRIVED"
+      | "COMPLETED"
+  ) {
+    try {
+      await apiFetch(
+        `/api/driver/dispatches/${dispatch.id}/stops/${stop.id}/status`,
+        {
+          method: "POST",
+          body: JSON.stringify({
+            status,
+          }),
+        }
+      );
+
+      await loadAssignments();
+    } catch (err) {
+      Alert.alert(
+        "Unable to update stop",
         err instanceof Error
           ? err.message
           : "Please try again."
@@ -719,7 +1044,7 @@ export default function App() {
         setTracking(true);
         setTrackingMode("background");
         setTrackingStatus(
-          "BACKGROUND TRACKING ACTIVE"
+          "1-MIN GPS PING ACTIVE"
         );
       }
     } catch {
@@ -793,46 +1118,75 @@ export default function App() {
     DEFAULT_TRACKING_DEVICE_ID;
 
   useEffect(() => {
+    if (heartbeatRef.current) {
+      clearInterval(heartbeatRef.current);
+      heartbeatRef.current = null;
+    }
+
+    if (liveGpsPollRef.current) {
+      clearInterval(liveGpsPollRef.current);
+      liveGpsPollRef.current = null;
+    }
+
     if (!tracking || !trackingDeviceId) {
-      if (heartbeatRef.current) {
-        clearInterval(heartbeatRef.current);
-        heartbeatRef.current = null;
-      }
       return;
     }
 
-    heartbeatRef.current =
-      setInterval(() => {
-        const last =
-          lastLocationRef.current;
+    const sendMinuteGpsPing = async () => {
+      if (
+        AppState.currentState !== "active" ||
+        liveGpsPollBusyRef.current
+      ) {
+        return;
+      }
 
-        if (!last) return;
+      liveGpsPollBusyRef.current = true;
 
-        void postLocationToMavtrack(
-          last,
+      try {
+        // Do not reuse a cached coordinate. Ask iOS for a fresh GPS fix,
+        // then transmit it exactly like MAV2's periodic telemetry cycle.
+        const location =
+          await Location.getCurrentPositionAsync({
+            accuracy:
+              Location.Accuracy.BestForNavigation,
+            mayShowUserSettingsDialog: true,
+          });
+
+        await applyLocationUpdate(
+          location,
           trackingDeviceId
-        )
-          .then((sent) =>
-            setServerStatus(
-              sent ? "CONNECTED" : "SEND FAILED"
-            )
-          )
-          .catch(() =>
-            setServerStatus("SEND FAILED")
-          );
-      }, 60000);
+        );
+      } catch {
+        setServerStatus("GPS WAITING");
+      } finally {
+        liveGpsPollBusyRef.current = false;
+      }
+    };
+
+    // START already sends the first point immediately.
+    // After that, request and transmit one fresh fix every 60 seconds.
+    liveGpsPollRef.current =
+      setInterval(() => {
+        void sendMinuteGpsPing();
+      }, GPS_PING_INTERVAL_MS);
 
     return () => {
       if (heartbeatRef.current) {
         clearInterval(heartbeatRef.current);
         heartbeatRef.current = null;
       }
+
+      if (liveGpsPollRef.current) {
+        clearInterval(liveGpsPollRef.current);
+        liveGpsPollRef.current = null;
+      }
     };
   }, [tracking, trackingDeviceId]);
 
   async function applyLocationUpdate(
     location: Location.LocationObject,
-    deviceId: string
+    deviceId: string,
+    forceSend = false
   ) {
     lastLocationRef.current = location;
 
@@ -854,7 +1208,8 @@ export default function App() {
       const sent =
         await postLocationToMavtrack(
           location,
-          deviceId
+          deviceId,
+          forceSend
         );
 
       setServerStatus(
@@ -868,28 +1223,16 @@ export default function App() {
   async function beginForegroundTracking(
     deviceId: string
   ) {
+    // We intentionally do not depend on watchPositionAsync anymore.
+    // The reliable path proven by STOP -> START is a fresh
+    // getCurrentPositionAsync request. We repeat that once per minute.
     foregroundWatchRef.current?.remove();
     foregroundWatchRef.current = null;
-
-    foregroundWatchRef.current =
-      await Location.watchPositionAsync(
-        {
-          accuracy: Location.Accuracy.High,
-          distanceInterval: 5,
-          timeInterval: 10000,
-        },
-        (location) => {
-          void applyLocationUpdate(
-            location,
-            deviceId
-          );
-        }
-      );
 
     setTracking(true);
     setTrackingMode("foreground");
     setTrackingStatus(
-      "FOREGROUND TRACKING ACTIVE"
+      "1-MIN GPS PING ACTIVE"
     );
   }
 
@@ -947,13 +1290,14 @@ export default function App() {
         await Location.getCurrentPositionAsync(
           {
             accuracy:
-              Location.Accuracy.High,
+              Location.Accuracy.BestForNavigation,
           }
         );
 
       await applyLocationUpdate(
         current,
-        trackingDeviceId
+        trackingDeviceId,
+        true
       );
 
       // Always start foreground tracking first.
@@ -981,45 +1325,61 @@ export default function App() {
           return;
         }
 
+        // Always restart the native background task when START is pressed.
+        // iOS/Expo keeps the old native task configuration across app
+        // updates, so merely checking `alreadyStarted` can leave the device
+        // running the settings from an older TestFlight build.
         const alreadyStarted =
           await Location.hasStartedLocationUpdatesAsync(
             BACKGROUND_LOCATION_TASK
           );
 
-        if (!alreadyStarted) {
-          await Location.startLocationUpdatesAsync(
-            BACKGROUND_LOCATION_TASK,
-            {
-              accuracy:
-                Location.Accuracy.High,
-              distanceInterval: 5,
-              timeInterval: 10000,
-              deferredUpdatesDistance: 5,
-              deferredUpdatesInterval: 10000,
-              pausesUpdatesAutomatically:
-                false,
-              activityType:
-                Location.ActivityType
-                  .AutomotiveNavigation,
-              showsBackgroundLocationIndicator:
-                true,
-              foregroundService: {
-                notificationTitle:
-                  "MavApp tracking active",
-                notificationBody:
-                  `Tracking ${trackingDeviceId} for MAVTRACK dispatch.`,
-              },
-            }
+        if (alreadyStarted) {
+          await Location.stopLocationUpdatesAsync(
+            BACKGROUND_LOCATION_TASK
           );
         }
 
-        foregroundWatchRef.current?.remove();
-        foregroundWatchRef.current = null;
+        await Location.startLocationUpdatesAsync(
+          BACKGROUND_LOCATION_TASK,
+          {
+            accuracy:
+              Location.Accuracy.BestForNavigation,
+            // Ask the native service for periodic fixes. On iOS the
+            // OS controls exact delivery timing, so outgoing telemetry
+            // is additionally throttled to one fresh point per minute.
+            distanceInterval: 0,
+            timeInterval:
+              GPS_PING_INTERVAL_MS,
+            deferredUpdatesDistance: 0,
+            deferredUpdatesInterval:
+              GPS_PING_INTERVAL_MS,
+            pausesUpdatesAutomatically:
+              false,
+            activityType:
+              Location.ActivityType
+                .AutomotiveNavigation,
+            showsBackgroundLocationIndicator:
+              true,
+            foregroundService: {
+              notificationTitle:
+                "MavApp tracking active",
+              notificationBody:
+                `Tracking ${trackingDeviceId} for MAVTRACK dispatch.`,
+            },
+          }
+        );
+
+        // IMPORTANT: keep the foreground watcher alive.
+        // When the app is visible it provides the fastest live updates.
+        // The native background task takes over while iOS backgrounds
+        // or locks the app. Stopping this watcher here caused MAVTRACK
+        // to remain ONLINE while the map stayed on an old coordinate.
 
         setTracking(true);
         setTrackingMode("background");
         setTrackingStatus(
-          "BACKGROUND TRACKING ACTIVE"
+          "1-MIN GPS PING ACTIVE"
         );
       } catch {
         // Foreground tracking is already alive.
@@ -1069,6 +1429,9 @@ export default function App() {
 
       await SecureStore.deleteItemAsync(
         TRACKING_DEVICE_KEY
+      );
+      await SecureStore.deleteItemAsync(
+        LAST_GPS_PING_KEY
       );
 
       setTracking(false);
@@ -1240,6 +1603,25 @@ export default function App() {
     );
   }
 
+  if (signingLoad) {
+    return (
+      <SignatureAcceptanceScreen
+        load={signingLoad}
+        driver={user}
+        onCancel={() =>
+          setSigningLoad(null)
+        }
+        onConfirm={(signatureDataBase64) =>
+          void respondToLoad(
+            signingLoad,
+            "accept",
+            signatureDataBase64
+          )
+        }
+      />
+    );
+  }
+
   if (selectedLoad) {
     return (
       <LoadDetailScreen
@@ -1248,9 +1630,32 @@ export default function App() {
           setSelectedLoad(null)
         }
         onAccept={() =>
-          void respondToLoad(
+          setSigningLoad(
+            selectedLoad
+          )
+        }
+        documentBusy={documentBusy}
+        onAddPhoto={() =>
+          void addLoadPhoto(
+            selectedLoad
+          )
+        }
+        onAddDocument={() =>
+          void addLoadDocument(
+            selectedLoad
+          )
+        }
+        onOpenDocument={(document) =>
+          void openLoadDocument(
             selectedLoad,
-            "accept"
+            document
+          )
+        }
+        onUpdateStop={(stop, status) =>
+          void updateStopStatus(
+            selectedLoad,
+            stop,
+            status
           )
         }
         onDecline={() =>
@@ -1883,16 +2288,513 @@ function LoadsScreen({
   );
 }
 
+
+function encodeAsciiBase64(
+  value: string
+) {
+  const alphabet =
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+
+  let output = "";
+
+  for (
+    let index = 0;
+    index < value.length;
+    index += 3
+  ) {
+    const a =
+      value.charCodeAt(index) & 255;
+    const b =
+      index + 1 < value.length
+        ? value.charCodeAt(index + 1) & 255
+        : NaN;
+    const c =
+      index + 2 < value.length
+        ? value.charCodeAt(index + 2) & 255
+        : NaN;
+
+    const triple =
+      (a << 16) |
+      ((Number.isNaN(b) ? 0 : b) << 8) |
+      (Number.isNaN(c) ? 0 : c);
+
+    output +=
+      alphabet[(triple >> 18) & 63] +
+      alphabet[(triple >> 12) & 63] +
+      (Number.isNaN(b)
+        ? "="
+        : alphabet[(triple >> 6) & 63]) +
+      (Number.isNaN(c)
+        ? "="
+        : alphabet[triple & 63]);
+  }
+
+  return output;
+}
+
+function SignatureAcceptanceScreen({
+  load,
+  driver,
+  onCancel,
+  onConfirm,
+}: {
+  load: Dispatch;
+  driver: DriverUser | null;
+  onCancel: () => void;
+  onConfirm: (
+    signatureDataBase64: string
+  ) => void;
+}) {
+  const [
+    points,
+    setPoints
+  ] = useState<
+    Array<SignaturePoint | null>
+  >([]);
+
+  const [saving, setSaving] =
+    useState(false);
+
+  const width = 320;
+  const height = 180;
+
+  const addPoint = (
+    event: any
+  ) => {
+    const {
+      locationX,
+      locationY,
+    } = event.nativeEvent;
+
+    setPoints(
+      (current) => [
+        ...current,
+        {
+          x: Math.max(
+            0,
+            Math.min(
+              width,
+              Number(locationX)
+            )
+          ),
+          y: Math.max(
+            0,
+            Math.min(
+              height,
+              Number(locationY)
+            )
+          ),
+        },
+      ]
+    );
+  };
+
+  const endStroke = () => {
+    setPoints(
+      (current) =>
+        current.length > 0 &&
+        current[current.length - 1] !== null
+          ? [...current, null]
+          : current
+    );
+  };
+
+  const visiblePoints =
+    points.filter(
+      (point): point is SignaturePoint =>
+        point !== null
+    );
+
+  const segments =
+    points
+      .map(
+        (point, index) => {
+          if (
+            !point ||
+            index === 0
+          ) {
+            return null;
+          }
+
+          const previous =
+            points[index - 1];
+
+          if (!previous) {
+            return null;
+          }
+
+          const dx =
+            point.x -
+            previous.x;
+          const dy =
+            point.y -
+            previous.y;
+          const length =
+            Math.sqrt(
+              dx * dx +
+              dy * dy
+            );
+          const angle =
+            Math.atan2(
+              dy,
+              dx
+            ) *
+            180 /
+            Math.PI;
+
+          return {
+            key:
+              `segment-${index}`,
+            left:
+              previous.x,
+            top:
+              previous.y,
+            length,
+            angle,
+          };
+        }
+      )
+      .filter(Boolean) as Array<{
+        key: string;
+        left: number;
+        top: number;
+        length: number;
+        angle: number;
+      }>;
+
+  const confirm = () => {
+    if (
+      visiblePoints.length <
+      8
+    ) {
+      Alert.alert(
+        "Signature required",
+        "Please sign before accepting the load."
+      );
+      return;
+    }
+
+    setSaving(true);
+
+    try {
+      const profile =
+        driver?.profile ||
+        driver?.driverProfile;
+
+      const signedBy =
+        [
+          profile?.firstName,
+          profile?.lastName,
+        ]
+          .filter(Boolean)
+          .join(" ")
+          .trim() ||
+        driver?.name ||
+        driver?.email ||
+        "Driver";
+
+      const signedAt =
+        new Date()
+          .toISOString();
+
+      const polylineGroups:
+        SignaturePoint[][] = [];
+
+      let currentStroke:
+        SignaturePoint[] = [];
+
+      for (
+        const point of points
+      ) {
+        if (point) {
+          currentStroke.push(
+            point
+          );
+        } else if (
+          currentStroke.length > 0
+        ) {
+          polylineGroups.push(
+            currentStroke
+          );
+          currentStroke = [];
+        }
+      }
+
+      if (
+        currentStroke.length > 0
+      ) {
+        polylineGroups.push(
+          currentStroke
+        );
+      }
+
+      const escapeXml = (
+        value: string
+      ) =>
+        value
+          .replace(/&/g, "&amp;")
+          .replace(/</g, "&lt;")
+          .replace(/>/g, "&gt;")
+          .replace(/"/g, "&quot;");
+
+      const signatureSvg =
+        polylineGroups
+          .map(
+            (stroke) =>
+              `<polyline points="${stroke
+                .map(
+                  (point) =>
+                    `${point.x.toFixed(1)},${point.y.toFixed(1)}`
+                )
+                .join(" ")}" fill="none" stroke="#0f172a" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"/>`
+          )
+          .join("");
+
+      const svg =
+        `<svg xmlns="http://www.w3.org/2000/svg" width="900" height="620" viewBox="0 0 900 620">` +
+        `<rect width="900" height="620" fill="white"/>` +
+        `<text x="40" y="55" font-family="Arial" font-size="28" font-weight="700" fill="#0f172a">MAVTRACK Load Acceptance</text>` +
+        `<text x="40" y="100" font-family="Arial" font-size="18" fill="#334155">Load: ${escapeXml(load.loadNumber)}</text>` +
+        `<text x="40" y="130" font-family="Arial" font-size="18" fill="#334155">Driver: ${escapeXml(signedBy)}</text>` +
+        `<text x="40" y="160" font-family="Arial" font-size="18" fill="#334155">Truck: ${escapeXml(load.truckNumber || load.asset?.deviceId || "—")}</text>` +
+        `<text x="40" y="190" font-family="Arial" font-size="18" fill="#334155">Trailer: ${escapeXml(load.trailerNumber || "—")}</text>` +
+        `<text x="40" y="220" font-family="Arial" font-size="18" fill="#334155">Accepted: ${escapeXml(signedAt)}</text>` +
+        `<text x="40" y="270" font-family="Arial" font-size="16" font-weight="700" fill="#475569">Driver Signature</text>` +
+        `<g transform="translate(40,290) scale(2.45,1.55)">${signatureSvg}</g>` +
+        `<line x1="40" y1="575" x2="860" y2="575" stroke="#cbd5e1"/>` +
+        `<text x="40" y="603" font-family="Arial" font-size="13" fill="#64748b">Signed electronically in MavDriver</text>` +
+        `</svg>`;
+
+      onConfirm(
+        encodeAsciiBase64(
+          svg
+        )
+      );
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <SafeAreaView
+      style={styles.app}
+    >
+      <StatusBar
+        barStyle="light-content"
+        backgroundColor="#07111F"
+      />
+
+      <View
+        style={
+          styles.detailHeader
+        }
+      >
+        <Pressable
+          onPress={onCancel}
+          style={styles.backButton}
+        >
+          <Text
+            style={styles.backText}
+          >
+            ‹
+          </Text>
+        </Pressable>
+
+        <View
+          style={{ flex: 1 }}
+        >
+          <Text
+            style={
+              styles.headerEyebrow
+            }
+          >
+            ACCEPT LOAD
+          </Text>
+          <Text
+            style={
+              styles.detailTitle
+            }
+          >
+            {load.loadNumber}
+          </Text>
+        </View>
+      </View>
+
+      <ScrollView
+        style={styles.content}
+        contentContainerStyle={
+          styles.signatureContent
+        }
+      >
+        <View
+          style={styles.detailCard}
+        >
+          <DetailSectionTitle
+            title="SIGNATURE REQUIRED"
+          />
+
+          <Text
+            style={
+              styles.signatureCopy
+            }
+          >
+            Sign below to confirm
+            that you accept this load.
+            Your signed acceptance
+            will be saved in Load
+            Documents.
+          </Text>
+
+          <View
+            style={[
+              styles.signaturePad,
+              {
+                width,
+                height,
+              },
+            ]}
+            onStartShouldSetResponder={() =>
+              true
+            }
+            onMoveShouldSetResponder={() =>
+              true
+            }
+            onResponderGrant={
+              addPoint
+            }
+            onResponderMove={
+              addPoint
+            }
+            onResponderRelease={
+              endStroke
+            }
+            onResponderTerminate={
+              endStroke
+            }
+          >
+            {
+              segments.map(
+                (segment) => (
+                  <View
+                    key={
+                      segment.key
+                    }
+                    style={[
+                      styles.signatureSegment,
+                      {
+                        left:
+                          segment.left,
+                        top:
+                          segment.top,
+                        width:
+                          segment.length,
+                        transform: [
+                          {
+                            rotate:
+                              `${segment.angle}deg`,
+                          },
+                        ],
+                      },
+                    ]}
+                  />
+                )
+              )
+            }
+
+            {
+              visiblePoints.length === 0
+                ? (
+                  <Text
+                    style={
+                      styles.signaturePlaceholder
+                    }
+                  >
+                    Sign here
+                  </Text>
+                )
+                : null
+            }
+          </View>
+
+          <Pressable
+            onPress={() =>
+              setPoints([])
+            }
+            style={
+              styles.signatureClearButton
+            }
+          >
+            <Text
+              style={
+                styles.signatureClearText
+              }
+            >
+              CLEAR SIGNATURE
+            </Text>
+          </Pressable>
+        </View>
+
+        <Pressable
+          onPress={confirm}
+          disabled={saving}
+          style={[
+            styles.acceptButton,
+            styles.signatureAcceptButton,
+            saving &&
+              styles.buttonDisabled,
+          ]}
+        >
+          {
+            saving
+              ? (
+                <ActivityIndicator
+                  color="#FFFFFF"
+                />
+              )
+              : (
+                <Text
+                  style={
+                    styles.acceptButtonText
+                  }
+                >
+                  ACCEPT & SIGN
+                </Text>
+              )
+          }
+        </Pressable>
+      </ScrollView>
+    </SafeAreaView>
+  );
+}
+
 function LoadDetailScreen({
   load,
   onBack,
   onAccept,
   onDecline,
+  documentBusy,
+  onAddPhoto,
+  onAddDocument,
+  onOpenDocument,
+  onUpdateStop,
 }: {
   load: Dispatch;
   onBack: () => void;
   onAccept: () => void;
   onDecline: () => void;
+  documentBusy: boolean;
+  onAddPhoto: () => void;
+  onAddDocument: () => void;
+  onOpenDocument: (
+    document: DispatchDocument
+  ) => void;
+  onUpdateStop: (
+    stop: DispatchStop,
+    status:
+      | "EN_ROUTE"
+      | "ARRIVED"
+      | "COMPLETED"
+  ) => void;
 }) {
   const pending =
     load.assignmentStatus === "PENDING";
@@ -1952,6 +2854,138 @@ function LoadDetailScreen({
           />
           <RoutePreview load={load} />
         </View>
+
+        {
+          (load.stops || []).length > 0
+            ? (
+              <View style={styles.detailCard}>
+                <DetailSectionTitle
+                  title="PICKUPS & DROPS"
+                />
+
+                <View style={styles.mobileStopsList}>
+                  {
+                    [...(load.stops || [])]
+                      .sort(
+                        (a, b) =>
+                          a.sequence -
+                          b.sequence
+                      )
+                      .map(
+                        (stop) => (
+                          <View
+                            key={stop.id}
+                            style={[
+                              styles.mobileStopCard,
+                              stop.status === "COMPLETED" &&
+                                styles.mobileStopCardComplete,
+                            ]}
+                          >
+                            <View style={styles.mobileStopHeader}>
+                              <View style={styles.mobileStopNumber}>
+                                <Text style={styles.mobileStopNumberText}>
+                                  {stop.pairNumber || stop.sequence}
+                                </Text>
+                              </View>
+
+                              <View style={{ flex: 1 }}>
+                                <Text style={styles.mobileStopType}>
+                                  {
+                                    stop.type === "PICKUP"
+                                      ? `PICKUP ${stop.pairNumber || stop.sequence}`
+                                      : `DROP ${stop.pairNumber || stop.sequence}`
+                                  }
+                                  {" · "}
+                                  {
+                                    stop.status
+                                      .replaceAll("_", " ")
+                                  }
+                                </Text>
+                                <Text style={styles.mobileStopName}>
+                                  {stop.name}
+                                </Text>
+                                <Text style={styles.mobileStopAddress}>
+                                  {stop.address}
+                                </Text>
+                                {
+                                  stop.scheduledAt
+                                    ? (
+                                      <Text style={styles.mobileStopMeta}>
+                                        {formatDateTime(stop.scheduledAt)}
+                                      </Text>
+                                    )
+                                    : null
+                                }
+                              </View>
+                            </View>
+
+                            {
+                              load.assignmentStatus === "ACCEPTED" &&
+                              stop.status !== "COMPLETED"
+                                ? (
+                                  <View style={styles.mobileStopActions}>
+                                    {
+                                      stop.status === "PENDING"
+                                        ? (
+                                          <Pressable
+                                            onPress={() =>
+                                              onUpdateStop(
+                                                stop,
+                                                "EN_ROUTE"
+                                              )
+                                            }
+                                            style={styles.mobileStopActionButton}
+                                          >
+                                            <Text style={styles.mobileStopActionText}>
+                                              START EN ROUTE
+                                            </Text>
+                                          </Pressable>
+                                        )
+                                        : stop.status === "EN_ROUTE"
+                                          ? (
+                                            <Pressable
+                                              onPress={() =>
+                                                onUpdateStop(
+                                                  stop,
+                                                  "ARRIVED"
+                                                )
+                                              }
+                                              style={styles.mobileStopActionButton}
+                                            >
+                                              <Text style={styles.mobileStopActionText}>
+                                                MARK ARRIVED
+                                              </Text>
+                                            </Pressable>
+                                          )
+                                          : (
+                                            <Pressable
+                                              onPress={() =>
+                                                onUpdateStop(
+                                                  stop,
+                                                  "COMPLETED"
+                                                )
+                                              }
+                                              style={styles.mobileStopActionButton}
+                                            >
+                                              <Text style={styles.mobileStopActionText}>
+                                                COMPLETE STOP
+                                              </Text>
+                                            </Pressable>
+                                          )
+                                    }
+                                  </View>
+                                )
+                                : null
+                            }
+                          </View>
+                        )
+                      )
+                  }
+                </View>
+              </View>
+            )
+            : null
+        }
 
         <View style={styles.detailCard}>
           <DetailSectionTitle
@@ -2052,31 +3086,100 @@ function LoadDetailScreen({
           <DetailSectionTitle
             title="DOCUMENTS"
           />
-          <View style={styles.comingSoonRow}>
-            <Text
-              style={styles.comingSoonIcon}
-            >
-              ▤
-            </Text>
-            <View style={{ flex: 1 }}>
-              <Text
-                style={
-                  styles.comingSoonTitle
-                }
-              >
-                Load documents
-              </Text>
-              <Text
-                style={
-                  styles.comingSoonCopy
-                }
-              >
-                Rate confirmations, BOL,
-                POD, receipts and photos
-                will appear here.
-              </Text>
-            </View>
-          </View>
+
+          {
+            (load.documents || []).length > 0
+              ? (
+                <View style={styles.mobileDocumentList}>
+                  {
+                    (load.documents || []).map(
+                      (document) => (
+                        <Pressable
+                          key={document.id}
+                          onPress={() =>
+                            onOpenDocument(
+                              document
+                            )
+                          }
+                          style={styles.mobileDocumentRow}
+                        >
+                          <View style={styles.mobileDocumentBadge}>
+                            <Text style={styles.mobileDocumentBadgeText}>
+                              {
+                                document.isSignature
+                                  ? "SIGN"
+                                  : document.category === "PHOTO"
+                                    ? "IMG"
+                                    : "DOC"
+                              }
+                            </Text>
+                          </View>
+
+                          <View style={{ flex: 1 }}>
+                            <Text
+                              style={styles.mobileDocumentName}
+                              numberOfLines={1}
+                            >
+                              {document.originalName}
+                            </Text>
+                            <Text style={styles.mobileDocumentMeta}>
+                              {
+                                document.isSignature
+                                  ? `Signed by ${document.signedBy || "driver"}`
+                                  : `Uploaded by ${document.uploadedByName || document.uploadedByRole}`
+                              }
+                              {" · "}
+                              {formatDateTime(document.createdAt)}
+                            </Text>
+                          </View>
+
+                          <Text style={styles.mobileDocumentOpen}>
+                            OPEN
+                          </Text>
+                        </Pressable>
+                      )
+                    )
+                  }
+                </View>
+              )
+              : (
+                <Text style={styles.comingSoonCopy}>
+                  No load documents yet.
+                </Text>
+              )
+          }
+
+          {
+            load.assignmentStatus === "ACCEPTED"
+              ? (
+                <View style={styles.mobileDocumentActions}>
+                  <Pressable
+                    onPress={onAddPhoto}
+                    disabled={documentBusy}
+                    style={styles.mobileDocumentActionButton}
+                  >
+                    <Text style={styles.mobileDocumentActionText}>
+                      + PHOTO
+                    </Text>
+                  </Pressable>
+
+                  <Pressable
+                    onPress={onAddDocument}
+                    disabled={documentBusy}
+                    style={styles.mobileDocumentActionButton}
+                  >
+                    <Text style={styles.mobileDocumentActionText}>
+                      + DOCUMENT
+                    </Text>
+                  </Pressable>
+                </View>
+              )
+              : (
+                <Text style={styles.mobileDocumentHint}>
+                  Accept and sign the load before uploading documents.
+                </Text>
+              )
+          }
         </View>
 
         {pending ? (
@@ -3772,6 +4875,203 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: "900",
     letterSpacing: 0.7,
+  },
+
+  signatureContent: {
+    padding: 16,
+    paddingBottom: 34,
+  },
+  signatureCopy: {
+    marginBottom: 14,
+    color: "#AFC0D4",
+    fontSize: 13,
+    lineHeight: 19,
+  },
+  signaturePad: {
+    position: "relative",
+    alignSelf: "center",
+    overflow: "hidden",
+    borderWidth: 1,
+    borderColor: "#334155",
+    borderRadius: 12,
+    backgroundColor: "#FFFFFF",
+  },
+  signatureSegment: {
+    position: "absolute",
+    height: 2.4,
+    borderRadius: 999,
+    backgroundColor: "#0F172A",
+  },
+  signaturePlaceholder: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    top: 78,
+    textAlign: "center",
+    color: "#94A3B8",
+    fontSize: 15,
+    fontWeight: "700",
+  },
+  signatureClearButton: {
+    alignSelf: "flex-end",
+    marginTop: 10,
+    paddingVertical: 7,
+    paddingHorizontal: 10,
+  },
+  signatureClearText: {
+    color: "#93C5FD",
+    fontSize: 11,
+    fontWeight: "800",
+    letterSpacing: 0.4,
+  },
+  signatureAcceptButton: {
+    minHeight: 50,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: 12,
+  },
+
+  mobileStopsList: {
+    gap: 10,
+  },
+  mobileStopCard: {
+    padding: 12,
+    borderWidth: 1,
+    borderColor: "#203248",
+    borderRadius: 12,
+    backgroundColor: "#0C1828",
+  },
+  mobileStopCardComplete: {
+    borderColor: "rgba(74, 222, 128, 0.28)",
+    backgroundColor: "rgba(34, 197, 94, 0.06)",
+  },
+  mobileStopHeader: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: 10,
+  },
+  mobileStopNumber: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#1E293B",
+  },
+  mobileStopNumberText: {
+    color: "#EAF2FB",
+    fontSize: 12,
+    fontWeight: "900",
+  },
+  mobileStopType: {
+    color: "#60A5FA",
+    fontSize: 10,
+    fontWeight: "900",
+    letterSpacing: 0.5,
+  },
+  mobileStopName: {
+    marginTop: 3,
+    color: "#F8FAFC",
+    fontSize: 14,
+    fontWeight: "800",
+  },
+  mobileStopAddress: {
+    marginTop: 2,
+    color: "#9FB0C4",
+    fontSize: 12,
+    lineHeight: 17,
+  },
+  mobileStopMeta: {
+    marginTop: 4,
+    color: "#71849B",
+    fontSize: 11,
+  },
+  mobileStopActions: {
+    marginTop: 10,
+    alignItems: "flex-end",
+  },
+  mobileStopActionButton: {
+    minHeight: 36,
+    paddingHorizontal: 12,
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 1,
+    borderColor: "rgba(96, 165, 250, 0.28)",
+    borderRadius: 9,
+    backgroundColor: "rgba(37, 99, 235, 0.12)",
+  },
+  mobileStopActionText: {
+    color: "#93C5FD",
+    fontSize: 11,
+    fontWeight: "900",
+  },
+
+  mobileDocumentList: {
+    gap: 8,
+  },
+  mobileDocumentRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    padding: 10,
+    borderWidth: 1,
+    borderColor: "#203248",
+    borderRadius: 10,
+    backgroundColor: "#0C1828",
+  },
+  mobileDocumentBadge: {
+    width: 38,
+    height: 34,
+    borderRadius: 8,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(37, 99, 235, 0.16)",
+  },
+  mobileDocumentBadgeText: {
+    color: "#93C5FD",
+    fontSize: 9,
+    fontWeight: "900",
+  },
+  mobileDocumentName: {
+    color: "#F8FAFC",
+    fontSize: 12,
+    fontWeight: "800",
+  },
+  mobileDocumentMeta: {
+    marginTop: 2,
+    color: "#788AA1",
+    fontSize: 10,
+  },
+  mobileDocumentOpen: {
+    color: "#60A5FA",
+    fontSize: 10,
+    fontWeight: "900",
+  },
+  mobileDocumentActions: {
+    flexDirection: "row",
+    gap: 8,
+    marginTop: 12,
+  },
+  mobileDocumentActionButton: {
+    flex: 1,
+    minHeight: 40,
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 1,
+    borderColor: "rgba(96, 165, 250, 0.25)",
+    borderRadius: 9,
+    backgroundColor: "rgba(37, 99, 235, 0.11)",
+  },
+  mobileDocumentActionText: {
+    color: "#93C5FD",
+    fontSize: 11,
+    fontWeight: "900",
+  },
+  mobileDocumentHint: {
+    marginTop: 10,
+    color: "#7F91A8",
+    fontSize: 11,
+    lineHeight: 16,
   },
 
   trackingFinePrint: {

@@ -9345,3 +9345,404 @@ button:disabled {
     margin: 8px 0 0;
   }
 }
+
+/* =====================================================
+   MAVTRACK — LINKED PICKUP / DROP PAIRS OVERLAP FIX
+   Prevents extra stop-pair headers/cards from intruding into
+   the primary Pickup 1 / Drop 1 row inside the compact modal.
+   ===================================================== */
+
+.dispatch-form-grid-real > .dispatch-pair-primary {
+  min-height: 0 !important;
+  height: auto !important;
+  align-self: stretch;
+}
+
+.details-modal.dispatch-modal .dispatch-linked-pairs-group {
+  grid-column: 1 / -1 !important;
+  position: relative;
+  z-index: 1;
+  min-width: 0;
+  min-height: 0;
+  height: auto;
+  align-self: start;
+  overflow: visible;
+}
+
+.details-modal.dispatch-modal .dispatch-linked-pairs-group > .dispatch-form-section-title {
+  position: relative;
+  z-index: 2;
+  margin-top: 0;
+}
+
+.details-modal.dispatch-modal .dispatch-stop-pairs {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  grid-auto-rows: max-content;
+  gap: 10px;
+  min-width: 0;
+  min-height: 0;
+}
+
+.details-modal.dispatch-modal .dispatch-stop-pair-card {
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+  height: auto;
+  overflow: visible;
+}
+
+.details-modal.dispatch-modal .dispatch-stop-pair-grid {
+  align-items: start;
+}
+
+.details-modal.dispatch-modal .dispatch-pair-stop {
+  min-height: 0;
+  height: auto;
+}
+
+@media (min-width: 1101px) {
+  .details-modal.dispatch-modal .dispatch-linked-pairs-group {
+    margin-top: 0;
+  }
+
+  .details-modal.dispatch-modal .dispatch-stop-pair-card {
+    padding: 9px 10px;
+  }
+
+  .details-modal.dispatch-modal .dispatch-stop-pair-header {
+    margin-bottom: 8px;
+    padding-bottom: 7px;
+  }
+
+  .details-modal.dispatch-modal .dispatch-pair-stop {
+    padding: 9px 10px;
+  }
+
+  .details-modal.dispatch-modal .dispatch-pair-stop-title {
+    margin-bottom: 7px;
+  }
+
+  .details-modal.dispatch-modal .dispatch-pair-fields {
+    gap: 5px 8px;
+  }
+
+  .details-modal.dispatch-modal .dispatch-pair-fields label {
+    gap: 2px;
+  }
+
+  .details-modal.dispatch-modal .dispatch-pair-fields label > span {
+    font-size: 0.56rem;
+    line-height: 1.05;
+  }
+
+  .details-modal.dispatch-modal .dispatch-pair-fields input,
+  .details-modal.dispatch-modal .dispatch-pair-fields select {
+    min-height: 29px;
+    height: 29px;
+    padding: 0 7px;
+    border-radius: 6px;
+    font-size: 0.72rem;
+  }
+}
+
+
+/* =====================================================
+   CUSTOMER SHARE PERMISSIONS — CLEAR 2x2 LAYOUT
+   Keeps each switch visually attached to its label.
+   ===================================================== */
+
+.share-permissions {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  padding: 12px;
+}
+
+.share-permissions .toggle-row {
+  min-height: 58px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 10px 12px;
+  border: 1px solid rgba(148, 163, 184, 0.13);
+  border-radius: 8px;
+  background: rgba(17, 31, 50, 0.72);
+  cursor: pointer;
+}
+
+.share-permissions .toggle-row:hover {
+  border-color: rgba(96, 165, 250, 0.28);
+  background: rgba(22, 39, 62, 0.88);
+}
+
+.share-permissions .toggle-row > span {
+  min-width: 0;
+  display: grid;
+  align-items: initial;
+  gap: 2px;
+}
+
+.share-permissions .toggle-row > span strong {
+  color: #dce7f5;
+  font-size: 0.72rem;
+  font-weight: 750;
+}
+
+.share-permissions .toggle-row > span small {
+  color: #7f90a6;
+  font-size: 0.6rem;
+  line-height: 1.3;
+}
+
+.share-permissions .toggle {
+  flex: 0 0 auto;
+}
+
+@media (max-width: 760px) {
+  .share-permissions {
+    grid-template-columns: 1fr;
+  }
+}
+
+
+/* =====================================================
+   MAVTRACK — EDIT DISPATCH LAYOUT HARDENING
+   Keeps Edit Dispatch on the same stable grid as New Dispatch
+   and prevents primary/extra route cards from overlapping.
+   ===================================================== */
+
+.details-modal.dispatch-edit-modal .dispatch-form-grid-real {
+  grid-auto-flow: row;
+  grid-auto-rows: max-content;
+  align-content: start;
+}
+
+.details-modal.dispatch-edit-modal .dispatch-form-grid-real > .dispatch-form-group {
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+  height: auto;
+  transform: none;
+}
+
+.details-modal.dispatch-edit-modal .dispatch-pair-primary,
+.details-modal.dispatch-edit-modal .dispatch-linked-pairs-group,
+.details-modal.dispatch-edit-modal .dispatch-stop-pair-card,
+.details-modal.dispatch-edit-modal .dispatch-pair-stop {
+  position: relative;
+  min-height: 0 !important;
+  height: auto !important;
+  transform: none !important;
+}
+
+.details-modal.dispatch-edit-modal .dispatch-linked-pairs-group {
+  clear: both;
+  grid-column: 1 / -1 !important;
+  margin-top: 0;
+  overflow: visible;
+}
+
+.details-modal.dispatch-edit-modal .dispatch-stop-pairs {
+  display: grid;
+  grid-template-columns: 1fr;
+  grid-auto-rows: max-content;
+  gap: 10px;
+  width: 100%;
+}
+
+@media (min-width: 1101px) {
+  .details-modal.dispatch-edit-modal .dispatch-form-grid-real {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 8px 10px;
+  }
+
+  /* LOAD / TRIP and EQUIPMENT / CARRIER */
+  .details-modal.dispatch-edit-modal .dispatch-form-grid-real > .dispatch-form-group:nth-child(1) {
+    grid-column: 1 / 3;
+  }
+
+  .details-modal.dispatch-edit-modal .dispatch-form-grid-real > .dispatch-form-group:nth-child(2) {
+    grid-column: 3 / 5;
+  }
+
+  /* Primary Pickup 1 and Drop 1 always share their own row. */
+  .details-modal.dispatch-edit-modal .dispatch-pair-primary.pickup {
+    grid-column: 1 / 3 !important;
+  }
+
+  .details-modal.dispatch-edit-modal .dispatch-pair-primary.drop {
+    grid-column: 3 / 5 !important;
+  }
+
+  /* Every additional route pair starts below the primary row. */
+  .details-modal.dispatch-edit-modal .dispatch-linked-pairs-group {
+    grid-column: 1 / -1 !important;
+  }
+
+  .details-modal.dispatch-edit-modal .dispatch-stop-pair-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    align-items: start;
+    gap: 10px;
+  }
+
+  .details-modal.dispatch-edit-modal .dispatch-temperature-group,
+  .details-modal.dispatch-edit-modal .dispatch-notes-group {
+    grid-column: span 2 !important;
+  }
+}
+
+@media (max-width: 1100px) {
+  .details-modal.dispatch-edit-modal .dispatch-form-grid-real,
+  .details-modal.dispatch-edit-modal .dispatch-stop-pair-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .details-modal.dispatch-edit-modal .dispatch-form-grid-real > .dispatch-form-group,
+  .details-modal.dispatch-edit-modal .dispatch-pair-primary,
+  .details-modal.dispatch-edit-modal .dispatch-linked-pairs-group,
+  .details-modal.dispatch-edit-modal .dispatch-temperature-group,
+  .details-modal.dispatch-edit-modal .dispatch-notes-group {
+    grid-column: 1 / -1 !important;
+  }
+}
+
+/* =====================================================
+   MULTI-STOP ROUTE PROGRESS
+   ===================================================== */
+
+.operations-stop-progress-card {
+  margin-bottom: 10px;
+  padding: 12px 13px;
+  border: 1px solid rgba(148, 163, 184, 0.12);
+  border-radius: 9px;
+  background: rgba(16, 31, 50, 0.78);
+}
+
+.operations-stop-progress-card .operations-card-heading-row > small {
+  color: #7f90a6;
+  font-size: 0.56rem;
+  text-align: right;
+}
+
+.operations-stop-progress-list {
+  display: grid;
+  gap: 7px;
+  margin-top: 10px;
+}
+
+.operations-stop-progress-row {
+  display: grid;
+  grid-template-columns: 30px minmax(0, 1fr) 132px;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  padding: 9px 10px;
+  border: 1px solid rgba(148, 163, 184, 0.11);
+  border-radius: 8px;
+  background: rgba(9, 20, 35, 0.55);
+}
+
+.operations-stop-progress-row.arrived {
+  border-color: rgba(96, 165, 250, 0.28);
+  background: rgba(37, 99, 235, 0.07);
+}
+
+.operations-stop-progress-row.completed {
+  border-color: rgba(34, 197, 94, 0.24);
+  background: rgba(34, 197, 94, 0.055);
+}
+
+.operations-stop-progress-row.en_route {
+  border-color: rgba(245, 158, 11, 0.23);
+  background: rgba(245, 158, 11, 0.05);
+}
+
+.operations-stop-progress-index {
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: #17283e;
+  color: #9fc7ff;
+  font-size: 0.66rem;
+  font-weight: 800;
+}
+
+.operations-stop-progress-row.completed .operations-stop-progress-index {
+  background: rgba(34, 197, 94, 0.16);
+  color: #86efac;
+}
+
+.operations-stop-progress-main {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.operations-stop-progress-main strong,
+.operations-stop-progress-main span,
+.operations-stop-progress-main small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.operations-stop-progress-main strong {
+  color: #edf4fc;
+  font-size: 0.67rem;
+}
+
+.operations-stop-progress-main span {
+  color: #9aaabd;
+  font-size: 0.58rem;
+}
+
+.operations-stop-progress-main small {
+  color: #6f8198;
+  font-size: 0.54rem;
+}
+
+.operations-stop-progress-control {
+  display: grid;
+  gap: 4px;
+}
+
+.operations-stop-progress-control > span {
+  color: #71849c;
+  text-transform: uppercase;
+  letter-spacing: 0.045em;
+  font-size: 0.5rem;
+}
+
+.operations-stop-progress-control select {
+  width: 100%;
+  height: 31px;
+  padding: 0 7px;
+  border: 1px solid rgba(148, 163, 184, 0.16);
+  border-radius: 6px;
+  background: #132237;
+  color: #e6eef8;
+  font-size: 0.58rem;
+}
+
+.operations-stop-progress-control select:disabled {
+  opacity: 0.58;
+}
+
+@media (max-width: 760px) {
+  .operations-stop-progress-row {
+    grid-template-columns: 30px minmax(0, 1fr);
+  }
+
+  .operations-stop-progress-control {
+    grid-column: 1 / -1;
+  }
+
+  .operations-stop-progress-card .operations-card-heading-row > small {
+    text-align: left;
+  }
+}

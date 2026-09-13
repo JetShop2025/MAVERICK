@@ -1611,7 +1611,9 @@ function PublicLoadTrackingPage({
                         : telemetry?.deviceStatus === 'offline'
                           ? 'Offline · showing last known GPS'
                           : 'Last known GPS'
-                      : 'GPS unavailable'
+                      : share?.allowLocation === false
+                        ? 'Location sharing disabled'
+                        : 'GPS unavailable'
                 }
               </span>
             </div>
@@ -1977,11 +1979,19 @@ function PublicLoadTrackingPage({
           ) : (
             <section className="public-track-map-card public-track-map-empty">
               <strong>
-                Location not available yet
+                {
+                  share?.allowLocation === false
+                    ? 'Location sharing is disabled for this link'
+                    : 'Waiting for GPS position'
+                }
               </strong>
 
               <span>
-                MAVTRACK will show the map as soon as this truck reports a valid GPS position.
+                {
+                  share?.allowLocation === false
+                    ? 'The sender chose not to share live location on this customer link.'
+                    : 'MAVTRACK will show the map as soon as this asset reports a valid GPS position.'
+                }
               </span>
             </section>
           )
@@ -4755,6 +4765,67 @@ function App() {
           setDispatchError(
             data.message ||
             'Unable to update dispatch status.'
+          )
+          return
+        }
+
+        setDispatches((current) =>
+          current.map((item) =>
+            item.id === dispatchId
+              ? data.dispatch
+              : item
+          )
+        )
+      } catch {
+        setDispatchError(
+          'Unable to connect to Maverick.'
+        )
+      }
+    }
+
+
+  const updateDispatchStopStatus =
+    async (
+      dispatchId: number,
+      stopId: number,
+      status: DispatchStopRecord['status']
+    ) => {
+      const token =
+        localStorage.getItem(
+          'maverick_token'
+        )
+
+      if (!token) {
+        return
+      }
+
+      setDispatchError('')
+
+      try {
+        const res =
+          await fetch(
+            `${API_BASE}/api/dispatches/${dispatchId}/stops/${stopId}/status`,
+            {
+              method: 'POST',
+              headers: {
+                'Content-Type':
+                  'application/json',
+                Authorization:
+                  `Bearer ${token}`
+              },
+              body: JSON.stringify({
+                status
+              })
+            }
+          )
+
+        const data =
+          await res.json()
+
+        if (!res.ok || !data.ok) {
+          setDispatchError(
+            data.message ||
+            'Unable to update stop status.'
           )
           return
         }
@@ -10717,6 +10788,71 @@ function App() {
                                   </div>
                                 </section>
 
+                                {
+                                  (dispatch.stops || []).length > 0 && (
+                                    <section className="operations-stop-progress-card">
+                                      <div className="operations-card-heading-row">
+                                        <div>
+                                          <span className="page-kicker">Route Progress</span>
+                                          <h3>Pickup & Drop Status</h3>
+                                        </div>
+                                        <small>Global load status updates automatically</small>
+                                      </div>
+
+                                      <div className="operations-stop-progress-list">
+                                        {[...(dispatch.stops || [])]
+                                          .sort((a, b) => a.sequence - b.sequence)
+                                          .map((stop) => (
+                                            <article
+                                              className={`operations-stop-progress-row ${String(stop.status).toLowerCase()}`}
+                                              key={stop.id ?? `${stop.sequence}-${stop.type}`}
+                                            >
+                                              <div className="operations-stop-progress-index">
+                                                {stop.pairNumber || stop.sequence}
+                                              </div>
+
+                                              <div className="operations-stop-progress-main">
+                                                <strong>
+                                                  {stop.type === 'PICKUP' ? 'Pickup' : 'Drop'} {stop.pairNumber || stop.sequence}
+                                                  {' · '}
+                                                  {stop.name}
+                                                </strong>
+                                                <span>{stop.address}</span>
+                                                <small>
+                                                  {formatDateTime(stop.scheduledAt)}
+                                                  {stop.reference ? ` · Ref ${stop.reference}` : ''}
+                                                </small>
+                                              </div>
+
+                                              <label className="operations-stop-progress-control">
+                                                <span>Status</span>
+                                                <select
+                                                  value={stop.status}
+                                                  disabled={!stop.id || operationsTab === 'history'}
+                                                  onChange={(event) => {
+                                                    if (stop.id) {
+                                                      void updateDispatchStopStatus(
+                                                        dispatch.id,
+                                                        stop.id,
+                                                        event.target.value as DispatchStopRecord['status']
+                                                      )
+                                                    }
+                                                  }}
+                                                  aria-label={`${stop.type === 'PICKUP' ? 'Pickup' : 'Drop'} ${stop.pairNumber || stop.sequence} status`}
+                                                >
+                                                  <option value="PENDING">Pending</option>
+                                                  <option value="EN_ROUTE">En route</option>
+                                                  <option value="ARRIVED">Arrived</option>
+                                                  <option value="COMPLETED">Completed</option>
+                                                </select>
+                                              </label>
+                                            </article>
+                                          ))}
+                                      </div>
+                                    </section>
+                                  )
+                                }
+
                                 <section className="operations-load-data-card">
                                   <div className="operations-card-heading-row">
                                     <div>
@@ -11100,9 +11236,10 @@ function App() {
                                         )
                                         : (
                                           <label>
-                                            <span>Status</span>
+                                            <span>Overall Status</span>
                                             <select
                                               value={dispatch.status}
+                                              disabled={(dispatch.stops || []).length > 2}
                                               onChange={(event) =>
                                                 updateDispatchStatus(
                                                   dispatch.id,
@@ -11811,7 +11948,7 @@ function App() {
                     }}
                   >
                     <section
-                      className="details-modal dispatch-modal"
+                      className="details-modal dispatch-modal dispatch-edit-modal"
                       onMouseDown={(event) =>
                         event.stopPropagation()
                       }
@@ -14675,7 +14812,8 @@ function App() {
                 <div className="share-permissions">
                   <label className="toggle-row">
                     <span>
-                      Live location
+                      <strong>Live location</strong>
+                      <small>Current map position</small>
                     </span>
                     <input
                       type="checkbox"
@@ -14699,7 +14837,8 @@ function App() {
 
                   <label className="toggle-row">
                     <span>
-                      Temperature
+                      <strong>Temperature</strong>
+                      <small>Current and load temperature data</small>
                     </span>
                     <input
                       type="checkbox"
@@ -14723,7 +14862,8 @@ function App() {
 
                   <label className="toggle-row">
                     <span>
-                      Driver information
+                      <strong>Driver information</strong>
+                      <small>Name, phone and license</small>
                     </span>
                     <input
                       type="checkbox"
@@ -14747,7 +14887,8 @@ function App() {
 
                   <label className="toggle-row">
                     <span>
-                      ETA / schedule
+                      <strong>ETA / schedule</strong>
+                      <small>Pickup and delivery schedule</small>
                     </span>
                     <input
                       type="checkbox"

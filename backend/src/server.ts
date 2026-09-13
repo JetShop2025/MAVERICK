@@ -5054,96 +5054,144 @@ app.post(
 // DISPATCH STOPS + DOCUMENTS
 // =====================================================
 
-app.post(
-  '/api/driver/dispatches/:id/stops/:stopId/status',
-  requireAuth,
-  async (
-    req: AuthenticatedRequest,
-    res: Response
-  ) => {
-    try {
-      if (!isDriver(req.user?.role)) {
-        return res.status(403).json({
-          ok: false,
-          message: 'Driver account required'
-        })
-      }
+async function updateDispatchStopStatusForRequest({
+  req,
+  res,
+  driverOnly
+}: {
+  req: AuthenticatedRequest
+  res: Response
+  driverOnly: boolean
+}) {
+  try {
+    if (
+      driverOnly &&
+      !isDriver(req.user?.role)
+    ) {
+      return res.status(403).json({
+        ok: false,
+        message: 'Driver account required'
+      })
+    }
 
-      const dispatchId =
-        Number(req.params.id)
+    if (
+      !driverOnly &&
+      !isCompanyAdmin(req.user?.role)
+    ) {
+      return res.status(403).json({
+        ok: false,
+        message: 'Company admin account required'
+      })
+    }
 
-      const stopId =
-        Number(req.params.stopId)
+    const dispatchId =
+      Number(req.params.id)
 
-      const status =
-        String(
-          req.body?.status || ''
-        ).toUpperCase()
+    const stopId =
+      Number(req.params.stopId)
 
-      if (
-        !Number.isInteger(dispatchId) ||
-        !Number.isInteger(stopId) ||
-        ![
-          'PENDING',
-          'EN_ROUTE',
-          'ARRIVED',
-          'COMPLETED'
-        ].includes(status)
-      ) {
-        return res.status(400).json({
-          ok: false,
-          message:
-            'Invalid stop update'
-        })
-      }
+    const status =
+      String(
+        req.body?.status || ''
+      ).toUpperCase()
 
-      const dispatch =
-        await prisma.dispatch.findFirst({
-          where: {
-            id: dispatchId,
-            companyId:
-              req.user!.companyId,
-            driverId:
-              req.user!.userId,
-            assignmentStatus:
-              'ACCEPTED'
-          },
-          include: {
-            stops: {
-              orderBy: {
-                sequence: 'asc'
+    if (
+      !Number.isInteger(dispatchId) ||
+      !Number.isInteger(stopId) ||
+      ![
+        'PENDING',
+        'EN_ROUTE',
+        'ARRIVED',
+        'COMPLETED'
+      ].includes(status)
+    ) {
+      return res.status(400).json({
+        ok: false,
+        message: 'Invalid stop update'
+      })
+    }
+
+    const dispatch =
+      await prisma.dispatch.findFirst({
+        where: {
+          id: dispatchId,
+          companyId:
+            req.user!.companyId,
+          ...(driverOnly
+            ? {
+                driverId:
+                  req.user!.userId,
+                assignmentStatus:
+                  'ACCEPTED' as const
               }
+            : {})
+        },
+        include: {
+          stops: {
+            orderBy: {
+              sequence: 'asc'
             }
           }
-        })
+        }
+      })
 
-      if (!dispatch) {
-        return res.status(404).json({
-          ok: false,
-          message:
-            'Accepted load not found'
-        })
-      }
+    if (!dispatch) {
+      return res.status(404).json({
+        ok: false,
+        message:
+          driverOnly
+            ? 'Accepted load not found'
+            : 'Dispatch not found'
+      })
+    }
 
-      const stop =
-        dispatch.stops.find(
+    const stop =
+      dispatch.stops.find(
+        (item) =>
+          item.id === stopId
+      )
+
+    if (!stop) {
+      return res.status(404).json({
+        ok: false,
+        message: 'Stop not found'
+      })
+    }
+
+    const now = new Date()
+
+    const stopsAfterUpdate =
+      dispatch.stops.map((item) =>
+        item.id === stop.id
+          ? {
+              ...item,
+              status: status as any
+            }
+          : item
+      )
+
+    const allStopsCompleted =
+      stopsAfterUpdate.length > 0 &&
+      stopsAfterUpdate.every(
+        (item) =>
+          item.status === 'COMPLETED'
+      )
+
+    const nextIncompleteStop =
+      [...stopsAfterUpdate]
+        .sort(
+          (a, b) =>
+            a.sequence - b.sequence
+        )
+        .find(
           (item) =>
-            item.id === stopId
+            item.status !== 'COMPLETED'
         )
 
-      if (!stop) {
-        return res.status(404).json({
-          ok: false,
-          message:
-            'Stop not found'
-        })
-      }
-
-      const now =
-        new Date()
-
-      const nextGlobalStatus =
-        status === 'EN_ROUTE'
+    const nextGlobalStatus =
+      allStopsCompleted
+        ? 'DELIVERED'
+        : status === 'EN_ROUTE'
           ? (
               stop.type === 'PICKUP'
                 ? 'EN_ROUTE_TO_PICKUP'
@@ -5159,152 +5207,186 @@ app.post(
               ? (
                   stop.type === 'PICKUP'
                     ? 'LOADED'
-                    : (
-                        dispatch.stops
-                          .filter(
-                            (item) =>
-                              item.type === 'DROP' &&
-                              item.id !== stop.id
-                          )
-                          .every(
-                            (item) =>
-                              item.status === 'COMPLETED'
-                          )
-                          ? 'DELIVERED'
-                          : 'IN_TRANSIT'
-                      )
+                    : nextIncompleteStop?.type === 'PICKUP'
+                      ? 'EN_ROUTE_TO_PICKUP'
+                      : 'IN_TRANSIT'
                 )
               : dispatch.status
 
-      const stopTitle =
-        `${stop.type === 'PICKUP' ? 'Pickup' : 'Drop'} ${stop.sequence}: ${
-          status === 'EN_ROUTE'
-            ? 'En route'
-            : status === 'ARRIVED'
-              ? 'Arrived'
-              : status === 'COMPLETED'
-                ? 'Completed'
-                : 'Pending'
-        }`
+    const stopNumber =
+      stop.pairNumber || stop.sequence
 
-      const updated =
-        await prisma.$transaction(
-          async (tx) => {
-            await tx.dispatchStop.update({
-              where: {
-                id: stop.id
-              },
-              data: {
-                status:
-                  status as any,
-                arrivedAt:
-                  status === 'ARRIVED'
-                    ? now
+    const stopTitle =
+      `${stop.type === 'PICKUP' ? 'Pickup' : 'Drop'} ${stopNumber}: ${
+        status === 'EN_ROUTE'
+          ? 'En route'
+          : status === 'ARRIVED'
+            ? 'Arrived'
+            : status === 'COMPLETED'
+              ? 'Completed'
+              : 'Pending'
+      }`
+
+    const updated =
+      await prisma.$transaction(
+        async (tx) => {
+          await tx.dispatchStop.update({
+            where: {
+              id: stop.id
+            },
+            data: {
+              status:
+                status as any,
+              arrivedAt:
+                status === 'ARRIVED'
+                  ? now
+                  : status === 'PENDING' ||
+                      status === 'EN_ROUTE'
+                    ? null
                     : stop.arrivedAt,
-                completedAt:
-                  status === 'COMPLETED'
-                    ? now
+              completedAt:
+                status === 'COMPLETED'
+                  ? now
+                  : status === 'PENDING' ||
+                      status === 'EN_ROUTE' ||
+                      status === 'ARRIVED'
+                    ? null
                     : stop.completedAt
-              }
-            })
+            }
+          })
 
-            await tx.dispatch.update({
-              where: {
-                id: dispatch.id
+          await tx.dispatch.update({
+            where: {
+              id: dispatch.id
+            },
+            data: {
+              status:
+                nextGlobalStatus as any,
+              completedAt:
+                nextGlobalStatus === 'DELIVERED'
+                  ? now
+                  : null
+            }
+          })
+
+          await tx.dispatchStatusEvent.create({
+            data: {
+              dispatchId:
+                dispatch.id,
+              status:
+                nextGlobalStatus as any,
+              eventType:
+                'STOP_STATUS',
+              title:
+                stopTitle,
+              notes:
+                `${stop.name} — ${stop.address}`
+            }
+          })
+
+          return tx.dispatch.findUnique({
+            where: {
+              id:
+                dispatch.id
+            },
+            include: {
+              asset: true,
+              driver: {
+                select: {
+                  id: true,
+                  email: true,
+                  name: true,
+                  driverProfile: true
+                }
               },
-              data: {
-                status:
-                  nextGlobalStatus as any,
-                completedAt:
-                  nextGlobalStatus === 'DELIVERED'
-                    ? now
-                    : null
-              }
-            })
-
-            await tx.dispatchStatusEvent.create({
-              data: {
-                dispatchId:
-                  dispatch.id,
-                status:
-                  nextGlobalStatus as any,
-                eventType:
-                  'STOP_STATUS',
-                title:
-                  stopTitle,
-                notes:
-                  `${stop.name} — ${stop.address}`
-              }
-            })
-
-            return tx.dispatch.findUnique({
-              where: {
-                id:
-                  dispatch.id
+              statusEvents: {
+                orderBy: {
+                  createdAt: 'desc'
+                }
               },
-              include: {
-                asset: true,
-                driver: {
-                  select: {
-                    id: true,
-                    email: true,
-                    name: true,
-                    driverProfile: true
-                  }
+              stops: {
+                orderBy: {
+                  sequence: 'asc'
+                }
+              },
+              documents: {
+                select: {
+                  id: true,
+                  dispatchId: true,
+                  originalName: true,
+                  mimeType: true,
+                  sizeBytes: true,
+                  category: true,
+                  uploadedByRole: true,
+                  uploadedByName: true,
+                  customerVisible: true,
+                  isSignature: true,
+                  signedBy: true,
+                  signedAt: true,
+                  description: true,
+                  createdAt: true
                 },
-                statusEvents: {
-                  orderBy: {
-                    createdAt: 'desc'
-                  }
+                orderBy: {
+                  createdAt: 'desc'
+                }
+              },
+              shares: {
+                where: {
+                  revokedAt: null
                 },
-                stops: {
-                  orderBy: {
-                    sequence: 'asc'
-                  }
-                },
-                documents: {
-                  select: {
-                    id: true,
-                    dispatchId: true,
-                    originalName: true,
-                    mimeType: true,
-                    sizeBytes: true,
-                    category: true,
-                    uploadedByRole: true,
-                    uploadedByName: true,
-                    customerVisible: true,
-                    isSignature: true,
-                    signedBy: true,
-                    signedAt: true,
-                    description: true,
-                    createdAt: true
-                  },
-                  orderBy: {
-                    createdAt: 'desc'
-                  }
+                orderBy: {
+                  createdAt: 'desc'
                 }
               }
-            })
-          }
-        )
-
-      return res.json({
-        ok: true,
-        dispatch: updated
-      })
-    } catch (error) {
-      console.error(
-        'Driver stop status error:',
-        error
+            }
+          })
+        }
       )
 
-      return res.status(500).json({
-        ok: false,
-        message:
-          'Unable to update stop'
-      })
-    }
+    return res.json({
+      ok: true,
+      dispatch: updated
+    })
+  } catch (error) {
+    console.error(
+      'Stop status update error:',
+      error
+    )
+
+    return res.status(500).json({
+      ok: false,
+      message:
+        'Unable to update stop'
+    })
   }
+}
+
+app.post(
+  '/api/driver/dispatches/:id/stops/:stopId/status',
+  requireAuth,
+  async (
+    req: AuthenticatedRequest,
+    res: Response
+  ) =>
+    updateDispatchStopStatusForRequest({
+      req,
+      res,
+      driverOnly: true
+    })
+)
+
+app.post(
+  '/api/dispatches/:id/stops/:stopId/status',
+  requireAuth,
+  async (
+    req: AuthenticatedRequest,
+    res: Response
+  ) =>
+    updateDispatchStopStatusForRequest({
+      req,
+      res,
+      driverOnly: false
+    })
 )
 
 app.post(

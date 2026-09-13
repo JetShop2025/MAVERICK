@@ -8,7 +8,7 @@ import cors from 'cors'
 import dotenv from 'dotenv'
 import bcrypt from 'bcryptjs'
 import jwt from 'jsonwebtoken'
-import { randomBytes } from 'node:crypto'
+import { createHash, randomBytes } from 'node:crypto'
 
 import { PrismaClient } from './generated/prisma/client.js'
 import { PrismaPg } from '@prisma/adapter-pg'
@@ -73,9 +73,6 @@ const PUBLIC_FRONTEND_URL =
 
 const MOBILE_TELEMETRY_KEY =
   process.env.MOBILE_TELEMETRY_KEY?.trim() || ''
-
-const GEOAPIFY_API_KEY =
-  process.env.GEOAPIFY_API_KEY?.trim() || ''
 
 const DEFAULT_NOTIFICATION_EMAIL =
   process.env.NOTIFICATION_EMAIL
@@ -3071,17 +3068,90 @@ app.patch(
 )
 
 
+function normalizeRememberedAddress(value: string) {
+  return value
+    .trim()
+    .replace(/\s+/g, ' ')
+    .toUpperCase()
+}
+
+function internalAddressCode(address: string) {
+  const normalized = normalizeRememberedAddress(address)
+  const digest = createHash('sha1')
+    .update(normalized)
+    .digest('hex')
+    .slice(0, 16)
+    .toUpperCase()
+
+  return `ADDR_${digest}`
+}
+
 async function rememberCustomerLocations(
   companyId: number,
   stops: DispatchStopInput[]
 ) {
   for (const stop of stops) {
-    const code = normalizeCustomerCode(stop.customerCode)
-    if (!code || !stop.name || !stop.address) continue
+    if (!stop.name || !stop.address) continue
+
+    const requestedCode = normalizeCustomerCode(stop.customerCode)
+    const normalizedAddress = normalizeRememberedAddress(stop.address)
+
+    const existingByAddress =
+      await prisma.customerLocation.findFirst({
+        where: {
+          companyId,
+          address: {
+            equals: stop.address,
+            mode: 'insensitive'
+          }
+        },
+        orderBy: {
+          lastUsedAt: 'desc'
+        }
+      })
+
+    const storageCode =
+      requestedCode ||
+      existingByAddress?.code ||
+      internalAddressCode(normalizedAddress)
+
+    if (
+      existingByAddress &&
+      existingByAddress.code !== storageCode
+    ) {
+      const codeOwner =
+        await prisma.customerLocation.findUnique({
+          where: {
+            companyId_code: {
+              companyId,
+              code: storageCode
+            }
+          }
+        })
+
+      if (!codeOwner) {
+        await prisma.customerLocation.update({
+          where: { id: existingByAddress.id },
+          data: {
+            code: storageCode,
+            customerName: stop.name,
+            address: stop.address,
+            phone: stop.phone,
+            latitude: stop.latitude,
+            longitude: stop.longitude,
+            lastUsedAt: new Date()
+          }
+        })
+        continue
+      }
+    }
 
     await prisma.customerLocation.upsert({
       where: {
-        companyId_code: { companyId, code }
+        companyId_code: {
+          companyId,
+          code: storageCode
+        }
       },
       update: {
         customerName: stop.name,
@@ -3093,7 +3163,7 @@ async function rememberCustomerLocations(
       },
       create: {
         companyId,
-        code,
+        code: storageCode,
         customerName: stop.name,
         address: stop.address,
         phone: stop.phone,
@@ -3120,10 +3190,19 @@ app.get(
         companyId,
         ...(q
           ? {
-              OR: [
-                { code: { contains: q.toUpperCase() } },
-                { customerName: { contains: q, mode: 'insensitive' } },
-                { address: { contains: q, mode: 'insensitive' } }
+              AND: [
+                {
+                  NOT: {
+                    code: { startsWith: 'ADDR_' }
+                  }
+                },
+                {
+                  OR: [
+                    { code: { contains: q.toUpperCase() } },
+                    { customerName: { contains: q, mode: 'insensitive' } },
+                    { address: { contains: q, mode: 'insensitive' } }
+                  ]
+                }
               ]
             }
           : {})
@@ -3140,44 +3219,95 @@ app.get(
   '/api/address-autocomplete',
   requireAuth,
   async (req: AuthenticatedRequest, res: Response) => {
-    const q = String(req.query.q || '').trim()
-    if (q.length < 3) return res.json({ ok: true, results: [] })
+    const companyId = req.user?.companyId
+    if (!companyId) {
+      return res.status(401).json({
+        ok: false,
+        message: 'Invalid session'
+      })
+    }
 
-    if (!GEOAPIFY_API_KEY) {
-      return res.json({ ok: true, results: [], configured: false })
+    const q = String(req.query.q || '').trim()
+
+    if (q.length < 2) {
+      return res.json({
+        ok: true,
+        results: []
+      })
     }
 
     try {
-      const params = new URLSearchParams({
-        text: q,
-        format: 'json',
-        limit: '6',
-        filter: 'countrycode:us',
-        apiKey: GEOAPIFY_API_KEY
-      })
+      const locations =
+        await prisma.customerLocation.findMany({
+          where: {
+            companyId,
+            OR: [
+              {
+                address: {
+                  contains: q,
+                  mode: 'insensitive'
+                }
+              },
+              {
+                customerName: {
+                  contains: q,
+                  mode: 'insensitive'
+                }
+              },
+              {
+                code: {
+                  contains: q.toUpperCase()
+                }
+              }
+            ]
+          },
+          orderBy: [
+            { lastUsedAt: 'desc' },
+            { updatedAt: 'desc' }
+          ],
+          take: 8
+        })
 
-      const response = await fetch(
-        `https://api.geoapify.com/v1/geocode/autocomplete?${params}`
+      const seen = new Set<string>()
+      const results = locations
+        .filter((location) => {
+          const key = normalizeRememberedAddress(
+            location.address
+          )
+          if (seen.has(key)) return false
+          seen.add(key)
+          return true
+        })
+        .map((location) => ({
+          id: location.id,
+          formatted: location.address,
+          code: location.code.startsWith('ADDR_')
+            ? null
+            : location.code,
+          customerName: location.customerName,
+          phone: location.phone,
+          city: location.city,
+          state: null,
+          postcode: null,
+          latitude: location.latitude,
+          longitude: location.longitude
+        }))
+
+      return res.json({
+        ok: true,
+        results,
+        source: 'mavtrack-history'
+      })
+    } catch (error) {
+      console.error(
+        'Saved address autocomplete error:',
+        error
       )
 
-      if (!response.ok) {
-        return res.status(502).json({ ok: false, message: 'Address search unavailable' })
-      }
-
-      const payload: any = await response.json()
-      const results = (payload.results || []).map((item: any) => ({
-        formatted: item.formatted,
-        city: item.city || item.town || item.village || null,
-        state: item.state || null,
-        postcode: item.postcode || null,
-        latitude: item.lat,
-        longitude: item.lon
-      }))
-
-      return res.json({ ok: true, results, configured: true })
-    } catch (error) {
-      console.error('Address autocomplete error:', error)
-      return res.status(502).json({ ok: false, message: 'Address search unavailable' })
+      return res.status(500).json({
+        ok: false,
+        message: 'Unable to search saved addresses'
+      })
     }
   }
 )
@@ -5583,9 +5713,11 @@ app.post(
               ),
             customerEmail,
             allowLocation:
-              true,
+              req.body?.allowLocation !== false,
             allowTemperature:
               req.body?.allowTemperature !== false,
+            allowDriverInfo:
+              req.body?.allowDriverInfo !== false,
             allowEta:
               req.body?.allowEta !== false,
             expiresAt:
@@ -6356,9 +6488,11 @@ app.get(
           customerName:
             share.customerName,
           allowLocation:
-            true,
+            share.allowLocation,
           allowTemperature:
             share.allowTemperature,
+          allowDriverInfo:
+            share.allowDriverInfo,
           allowEta:
             share.allowEta,
           expiresAt:
@@ -6436,7 +6570,9 @@ app.get(
           assignmentStatus:
             share.dispatch.assignmentStatus,
           manualDriverName:
-            share.dispatch.manualDriverName,
+            share.allowDriverInfo
+              ? share.dispatch.manualDriverName
+              : null,
 
           asset:
             share.dispatch.asset
@@ -6453,7 +6589,7 @@ app.get(
               : null,
 
           driver:
-            driver
+            share.allowDriverInfo && driver
               ? {
                   id:
                     driver.id,
@@ -6485,7 +6621,13 @@ app.get(
             share.dispatch.stops,
 
           documents:
-            share.dispatch.documents.map(
+            share.dispatch.documents
+              .filter(
+                (document) =>
+                  share.allowDriverInfo ||
+                  !document.isSignature
+              )
+              .map(
               (document) => ({
                 ...document,
                 fileUrl:
@@ -6519,38 +6661,54 @@ app.get(
                     : null,
 
                 latitude:
-                  locationSource?.latitude ?? null,
+                  share.allowLocation
+                    ? locationSource?.latitude ?? null
+                    : null,
 
                 longitude:
-                  locationSource?.longitude ?? null,
+                  share.allowLocation
+                    ? locationSource?.longitude ?? null
+                    : null,
 
                 altitude:
-                  locationSource?.altitude ?? null,
+                  share.allowLocation
+                    ? locationSource?.altitude ?? null
+                    : null,
 
                 speedKph:
-                  latestTelemetry?.speedKph ??
-                  locationSource?.speedKph ??
-                  null,
+                  share.allowLocation
+                    ? latestTelemetry?.speedKph ??
+                      locationSource?.speedKph ??
+                      null
+                    : null,
 
                 movementStatus:
-                  latestTelemetry?.movementStatus ??
-                  locationSource?.movementStatus ??
-                  null,
+                  share.allowLocation
+                    ? latestTelemetry?.movementStatus ??
+                      locationSource?.movementStatus ??
+                      null
+                    : null,
 
                 source:
-                  latestTelemetry?.source ??
-                  locationSource?.source ??
-                  null,
+                  share.allowLocation
+                    ? latestTelemetry?.source ??
+                      locationSource?.source ??
+                      null
+                    : null,
 
                 accuracyMeters:
-                  latestTelemetry?.accuracyMeters ??
-                  locationSource?.accuracyMeters ??
-                  null,
+                  share.allowLocation
+                    ? latestTelemetry?.accuracyMeters ??
+                      locationSource?.accuracyMeters ??
+                      null
+                    : null,
 
                 headingDegrees:
-                  latestTelemetry?.headingDegrees ??
-                  locationSource?.headingDegrees ??
-                  null
+                  share.allowLocation
+                    ? latestTelemetry?.headingDegrees ??
+                      locationSource?.headingDegrees ??
+                      null
+                    : null
               }
             : null
       })
@@ -6620,7 +6778,10 @@ app.get(
           }
         })
 
-      if (!document) {
+      if (
+        !document ||
+        (!share.allowDriverInfo && document.isSignature)
+      ) {
         return res.status(404).send(
           'Document not available'
         )
@@ -7098,12 +7259,72 @@ app.post(
         }
       }
 
+      // iOS can occasionally report speed as null/0 even while the
+      // coordinates are clearly changing. Derive a second speed estimate
+      // from the previous PHONE GPS point so movement is not lost.
+      const previousPhonePoint =
+        await prisma.telemetry.findFirst({
+          where: {
+            deviceId: normalizedDeviceId,
+            source: 'PHONE',
+            latitude: { not: null },
+            longitude: { not: null }
+          },
+          orderBy: { recordedAt: 'desc' },
+          select: {
+            latitude: true,
+            longitude: true,
+            accuracyMeters: true,
+            recordedAt: true
+          }
+        })
+
+      let derivedSpeedKph: number | null = null
+
+      if (
+        previousPhonePoint?.latitude != null &&
+        previousPhonePoint?.longitude != null
+      ) {
+        const elapsedSeconds =
+          (
+            safeRecordedAt.getTime() -
+            previousPhonePoint.recordedAt.getTime()
+          ) / 1000
+
+        if (
+          elapsedSeconds > 0 &&
+          elapsedSeconds <= 120
+        ) {
+          const distanceMeters = metersBetween(
+            {
+              latitude: previousPhonePoint.latitude,
+              longitude: previousPhonePoint.longitude
+            },
+            { latitude, longitude }
+          )
+
+          const noiseFloorMeters = Math.max(
+            8,
+            safeAccuracy ?? 0,
+            previousPhonePoint.accuracyMeters ?? 0
+          )
+
+          if (distanceMeters > noiseFloorMeters) {
+            derivedSpeedKph =
+              distanceMeters / elapsedSeconds * 3.6
+          }
+        }
+      }
+
+      const effectiveSpeedKph = Math.max(
+        safeSpeedKph ?? 0,
+        derivedSpeedKph ?? 0
+      )
+
       const movementStatus =
-        safeSpeedKph === null
-          ? null
-          : safeSpeedKph >= 5
-            ? 'MOVING'
-            : 'STOPPED'
+        effectiveSpeedKph >= 5
+          ? 'MOVING'
+          : 'STOPPED'
 
       const telemetry =
         await prisma.telemetry.create({
@@ -7121,7 +7342,7 @@ app.post(
               safeAltitude,
 
             speedKph:
-              safeSpeedKph,
+              effectiveSpeedKph,
 
             movementStatus,
 

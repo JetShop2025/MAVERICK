@@ -391,6 +391,7 @@ model DispatchShare {
 
   allowLocation    Boolean @default(true)
   allowTemperature Boolean @default(true)
+  allowDriverInfo  Boolean @default(true)
   allowEta         Boolean @default(true)
 
   expiresAt DateTime?

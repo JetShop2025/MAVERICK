@@ -122,6 +122,7 @@ type DispatchShareRecord = {
   customerEmail: string
   allowLocation: boolean
   allowTemperature: boolean
+  allowDriverInfo: boolean
   allowEta: boolean
   expiresAt: string | null
   revokedAt: string | null
@@ -2072,40 +2073,44 @@ function PublicLoadTrackingPage({
 
             <article className="public-track-card public-track-info-card">
               <div className="public-track-card-heading">
-                Driver & Equipment
+                {share?.allowDriverInfo !== false ? 'Driver & Equipment' : 'Equipment'}
               </div>
 
               <dl className="public-track-data-grid">
-                <div>
-                  <dt>
-                    Driver
-                  </dt>
-                  <dd>
-                    {valueOrDash(
-                      driver?.name || dispatch.manualDriverName
-                    )}
-                  </dd>
-                </div>
+                {share?.allowDriverInfo !== false && (
+                  <>
+                    <div>
+                      <dt>
+                        Driver
+                      </dt>
+                      <dd>
+                        {valueOrDash(
+                          driver?.name || dispatch.manualDriverName
+                        )}
+                      </dd>
+                    </div>
 
-                <div>
-                  <dt>
-                    Driver Phone
-                  </dt>
-                  <dd>
-                    {valueOrDash(
-                      driver?.phone
-                    )}
-                  </dd>
-                </div>
+                    <div>
+                      <dt>
+                        Driver Phone
+                      </dt>
+                      <dd>
+                        {valueOrDash(
+                          driver?.phone
+                        )}
+                      </dd>
+                    </div>
 
-                <div>
-                  <dt>
-                    Driver License
-                  </dt>
-                  <dd>
-                    {driverLicense}
-                  </dd>
-                </div>
+                    <div>
+                      <dt>
+                        Driver License
+                      </dt>
+                      <dd>
+                        {driverLicense}
+                      </dd>
+                    </div>
+                  </>
+                )}
 
                 <div>
                   <dt>
@@ -2136,7 +2141,7 @@ function PublicLoadTrackingPage({
               </dl>
             </article>
 
-            {dispatch.asset?.trackingSource !== 'PHONE' && (
+            {share?.allowTemperature !== false && dispatch.asset?.trackingSource !== 'PHONE' && (
 <article className="public-track-card public-track-info-card">
               <div className="public-track-card-heading">
                 Temperature
@@ -2590,6 +2595,7 @@ function App() {
     expirationDays: '7',
     allowLocation: true,
     allowTemperature: true,
+    allowDriverInfo: true,
     allowEta: true
   })
 
@@ -3488,6 +3494,7 @@ function App() {
       expirationDays: '7',
       allowLocation: true,
       allowTemperature: true,
+      allowDriverInfo: true,
       allowEta: true
     })
     setShareDispatchOpen(true)
@@ -3549,6 +3556,8 @@ function App() {
                   shareDispatchForm.allowLocation,
                 allowTemperature:
                   shareDispatchForm.allowTemperature,
+                allowDriverInfo:
+                  shareDispatchForm.allowDriverInfo,
                 allowEta:
                   shareDispatchForm.allowEta
               })
@@ -11380,6 +11389,22 @@ function App() {
                                     : null
                               }
                             </label>
+                            {selectedNewDispatchAsset && !selectedNewIsPhone && (
+                              <label className="dispatch-manual-driver-field">
+                                <span>Driver Name *</span>
+                                <input
+                                  value={newDispatchForm.manualDriverName}
+                                  onChange={(event) =>
+                                    setNewDispatchForm((current) => ({
+                                      ...current,
+                                      manualDriverName: event.target.value
+                                    }))
+                                  }
+                                  placeholder="Driver name"
+                                  autoComplete="off"
+                                />
+                              </label>
+                            )}
                             <label>
                               <span>Truck #</span>
                               <input
@@ -11668,7 +11693,7 @@ function App() {
                           />
                         </section>
                         {!selectedNewIsPhone && (
-<section className="dispatch-form-group dispatch-form-group-wide">
+<section className="dispatch-form-group dispatch-form-group-wide dispatch-temperature-group">
                           <div className="dispatch-form-section-title">
                             TEMPERATURE
                           </div>
@@ -11715,7 +11740,7 @@ function App() {
                           </div>
                         </section>
 )}
-                        <section className="dispatch-form-group dispatch-form-group-wide">
+                        <section className="dispatch-form-group dispatch-form-group-wide dispatch-notes-group">
                           <div className="dispatch-form-section-title">
                             INTERNAL NOTES
                           </div>
@@ -12008,6 +12033,22 @@ function App() {
                                     : null
                               }
                             </label>
+                            {selectedEditDispatchAsset && !selectedEditIsPhone && (
+                              <label className="dispatch-manual-driver-field">
+                                <span>Driver Name *</span>
+                                <input
+                                  value={editDispatchForm.manualDriverName}
+                                  onChange={(event) =>
+                                    setEditDispatchForm((current) => ({
+                                      ...current,
+                                      manualDriverName: event.target.value
+                                    }))
+                                  }
+                                  placeholder="Driver name"
+                                  autoComplete="off"
+                                />
+                              </label>
+                            )}
                             <label>
                               <span>Truck #</span>
                               <input
@@ -12296,7 +12337,7 @@ function App() {
                           />
                         </section>
                         {!selectedEditIsPhone && (
-<section className="dispatch-form-group dispatch-form-group-wide">
+<section className="dispatch-form-group dispatch-form-group-wide dispatch-temperature-group">
                           <div className="dispatch-form-section-title">
                             TEMPERATURE
                           </div>
@@ -12343,7 +12384,7 @@ function App() {
                           </div>
                         </section>
 )}
-                        <section className="dispatch-form-group dispatch-form-group-wide">
+                        <section className="dispatch-form-group dispatch-form-group-wide dispatch-notes-group">
                           <div className="dispatch-form-section-title">
                             INTERNAL NOTES
                           </div>
@@ -14682,6 +14723,30 @@ function App() {
 
                   <label className="toggle-row">
                     <span>
+                      Driver information
+                    </span>
+                    <input
+                      type="checkbox"
+                      checked={
+                        shareDispatchForm
+                          .allowDriverInfo
+                      }
+                      onChange={
+                        (event) =>
+                          setShareDispatchForm(
+                            (current) => ({
+                              ...current,
+                              allowDriverInfo:
+                                event.target.checked
+                            })
+                          )
+                      }
+                    />
+                    <i className="toggle" />
+                  </label>
+
+                  <label className="toggle-row">
+                    <span>
                       ETA / schedule
                     </span>
                     <input
@@ -14785,6 +14850,18 @@ function App() {
                                             share.expiresAt
                                           ).toLocaleDateString()}`
                                         : 'No expiration'
+                                  }
+                                </small>
+                                <small>
+                                  Shared: {
+                                    [
+                                      share.allowLocation ? 'Location' : null,
+                                      share.allowTemperature ? 'Temperature' : null,
+                                      share.allowDriverInfo !== false ? 'Driver info' : null,
+                                      share.allowEta ? 'ETA' : null
+                                    ]
+                                      .filter(Boolean)
+                                      .join(' · ') || 'Basic load status only'
                                   }
                                 </small>
                               </div>

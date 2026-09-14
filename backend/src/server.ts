@@ -4452,6 +4452,13 @@ app.patch(
           where: {
             id: dispatchId,
             companyId
+          },
+          include: {
+            stops: {
+              orderBy: {
+                sequence: 'asc'
+              }
+            }
           }
         })
 
@@ -4897,6 +4904,17 @@ app.post(
         })
       }
 
+      if (
+        existing.stops.length > 2 &&
+        status !== 'CANCELLED'
+      ) {
+        return res.status(400).json({
+          ok: false,
+          message:
+            'Multi-stop load status is calculated from the individual pickup/drop statuses. Update the route stops instead.'
+        })
+      }
+
       const updated =
         await prisma.dispatch.update({
           where: {
@@ -4921,6 +4939,11 @@ app.post(
           },
           include: {
             asset: true,
+            stops: {
+              orderBy: {
+                sequence: 'asc'
+              }
+            },
             statusEvents: {
               orderBy: {
                 createdAt: 'desc'
@@ -5170,48 +5193,59 @@ async function updateDispatchStopStatusForRequest({
           : item
       )
 
+    const orderedStops =
+      [...stopsAfterUpdate].sort(
+        (a, b) =>
+          a.sequence - b.sequence
+      )
+
     const allStopsCompleted =
-      stopsAfterUpdate.length > 0 &&
-      stopsAfterUpdate.every(
+      orderedStops.length > 0 &&
+      orderedStops.every(
         (item) =>
           item.status === 'COMPLETED'
       )
 
+    const nextIncompleteIndex =
+      orderedStops.findIndex(
+        (item) =>
+          item.status !== 'COMPLETED'
+      )
+
     const nextIncompleteStop =
-      [...stopsAfterUpdate]
-        .sort(
-          (a, b) =>
-            a.sequence - b.sequence
-        )
-        .find(
-          (item) =>
-            item.status !== 'COMPLETED'
-        )
+      nextIncompleteIndex >= 0
+        ? orderedStops[nextIncompleteIndex]
+        : null
+
+    const previousCompletedStop =
+      nextIncompleteIndex > 0
+        ? orderedStops[nextIncompleteIndex - 1]
+        : null
 
     const nextGlobalStatus =
       allStopsCompleted
         ? 'DELIVERED'
-        : status === 'EN_ROUTE'
-          ? (
-              stop.type === 'PICKUP'
-                ? 'EN_ROUTE_TO_PICKUP'
-                : 'IN_TRANSIT'
-            )
-          : status === 'ARRIVED'
+        : !nextIncompleteStop
+          ? dispatch.status
+          : nextIncompleteStop.status === 'EN_ROUTE'
             ? (
-                stop.type === 'PICKUP'
-                  ? 'AT_PICKUP'
-                  : 'AT_DELIVERY'
+                nextIncompleteStop.type === 'PICKUP'
+                  ? 'EN_ROUTE_TO_PICKUP'
+                  : 'IN_TRANSIT'
               )
-            : status === 'COMPLETED'
+            : nextIncompleteStop.status === 'ARRIVED'
               ? (
-                  stop.type === 'PICKUP'
-                    ? 'LOADED'
-                    : nextIncompleteStop?.type === 'PICKUP'
-                      ? 'EN_ROUTE_TO_PICKUP'
-                      : 'IN_TRANSIT'
+                  nextIncompleteStop.type === 'PICKUP'
+                    ? 'AT_PICKUP'
+                    : 'AT_DELIVERY'
                 )
-              : dispatch.status
+              : previousCompletedStop == null
+                ? 'ASSIGNED'
+                : nextIncompleteStop.type === 'PICKUP'
+                  ? 'EN_ROUTE_TO_PICKUP'
+                  : previousCompletedStop.type === 'PICKUP'
+                    ? 'LOADED'
+                    : 'IN_TRANSIT'
 
     const stopNumber =
       stop.pairNumber || stop.sequence

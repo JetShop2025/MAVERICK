@@ -9746,3 +9746,162 @@ button:disabled {
     text-align: left;
   }
 }
+
+/* =====================================================
+   MAVTRACK — EDIT AUTOCOMPLETE + MULTISTOP QUICK STATUS
+   ===================================================== */
+
+/* Autocomplete menus only appear after a focused user interaction.
+   Keep them above the active field without affecting neighboring cards. */
+.details-modal.dispatch-modal .dispatch-autocomplete {
+  position: relative;
+  min-width: 0;
+}
+
+.details-modal.dispatch-modal .dispatch-autocomplete-menu {
+  z-index: 80;
+  max-height: 220px;
+  overflow-y: auto;
+  box-shadow: 0 16px 36px rgba(0, 0, 0, 0.34);
+}
+
+/* Multi-stop status editing lives directly in Quick Actions.
+   Overall Status stays visible, while each pickup/drop keeps its own progress. */
+.operations-quick-route-status {
+  display: grid;
+  gap: 9px;
+  margin-top: 2px;
+  padding-top: 8px;
+  border-top: 1px solid rgba(148, 163, 184, 0.1);
+}
+
+.operations-quick-route-summary {
+  display: grid;
+  gap: 5px;
+  padding: 9px 10px;
+  border: 1px solid rgba(96, 165, 250, 0.16);
+  border-radius: 8px;
+  background: rgba(37, 99, 235, 0.055);
+}
+
+.operations-quick-route-summary-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.operations-quick-route-summary-top > span {
+  color: #75879d;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  font-size: 0.52rem;
+}
+
+.operations-quick-route-summary .dispatch-status-pill {
+  min-height: 22px;
+  padding: 0 8px;
+  font-size: 0.5rem;
+}
+
+.operations-quick-route-summary > small {
+  color: #7f90a6;
+  font-size: 0.52rem;
+  line-height: 1.4;
+}
+
+.operations-quick-stop-list {
+  display: grid;
+  gap: 7px;
+}
+
+.operations-quick-stop-control {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(112px, 0.72fr);
+  align-items: center;
+  gap: 9px;
+  padding: 8px 9px;
+  border: 1px solid rgba(148, 163, 184, 0.12);
+  border-left: 3px solid rgba(148, 163, 184, 0.35);
+  border-radius: 7px;
+  background: rgba(15, 29, 48, 0.62);
+}
+
+.operations-quick-stop-control.en_route {
+  border-left-color: #60a5fa;
+}
+
+.operations-quick-stop-control.arrived {
+  border-left-color: #f59e0b;
+}
+
+.operations-quick-stop-control.completed {
+  border-left-color: #34d399;
+}
+
+.operations-quick-stop-copy {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.operations-quick-stop-copy strong {
+  color: #e8f1fb;
+  font-size: 0.59rem;
+}
+
+.operations-quick-stop-copy span,
+.operations-quick-stop-copy small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.operations-quick-stop-copy span {
+  color: #a8b7c9;
+  font-size: 0.55rem;
+}
+
+.operations-quick-stop-copy small {
+  color: #74869d;
+  font-size: 0.5rem;
+}
+
+.operations-quick-stop-control select {
+  width: 100%;
+  min-width: 0;
+  height: 31px;
+  padding: 0 7px;
+  font-size: 0.57rem;
+}
+
+.operations-quick-route-footer {
+  display: grid;
+  gap: 7px;
+}
+
+.operations-quick-route-footer > small {
+  color: #71839a;
+  font-size: 0.5rem;
+  line-height: 1.35;
+}
+
+.operations-cancel-load-button {
+  min-height: 30px !important;
+  border-color: rgba(248, 113, 113, 0.2) !important;
+  background: rgba(127, 29, 29, 0.13) !important;
+  color: #fca5a5 !important;
+  text-align: center !important;
+  font-size: 0.56rem !important;
+  font-weight: 700;
+}
+
+.operations-cancel-load-button:hover {
+  background: rgba(127, 29, 29, 0.24) !important;
+}
+
+@media (max-width: 760px) {
+  .operations-quick-stop-control {
+    grid-template-columns: 1fr;
+  }
+}

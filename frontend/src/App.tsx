@@ -499,11 +499,17 @@ function CustomerLocationInput({
 }) {
   const [items, setItems] = useState<CustomerLocationSuggestion[]>([])
   const [open, setOpen] = useState(false)
+  const [active, setActive] = useState(false)
 
   useEffect(() => {
     const query = code.trim()
-    if (!query) {
-      setItems([])
+
+    // Do not automatically open autocomplete when an existing dispatch is
+    // loaded into Edit. Suggestions are only requested after the user
+    // focuses/edits this field.
+    if (!active || !query) {
+      setOpen(false)
+      if (!query) setItems([])
       return
     }
 
@@ -517,33 +523,43 @@ function CustomerLocationInput({
         )
         const payload = await response.json()
         if (response.ok && payload.ok) {
-          setItems(payload.locations || [])
-          setOpen(true)
+          const nextItems = payload.locations || []
+          setItems(nextItems)
+          setOpen(nextItems.length > 0)
         }
       } catch {
         setItems([])
+        setOpen(false)
       }
     }, 180)
 
     return () => window.clearTimeout(token)
-  }, [code])
+  }, [code, active])
 
   return (
     <div className="dispatch-autocomplete">
       <input
         value={code}
-        onFocus={() => items.length > 0 && setOpen(true)}
+        onFocus={() => {
+          setActive(true)
+          if (items.length > 0) setOpen(true)
+        }}
+        onBlur={() => {
+          setActive(false)
+          setOpen(false)
+        }}
         onChange={(event) => {
           const next = event.target.value
             .toUpperCase()
             .replace(/[^A-Z0-9]/g, '')
             .slice(0, 12)
+          setActive(true)
           onCodeChange(next)
         }}
         placeholder="TAYGUA"
         autoComplete="off"
       />
-      {open && items.length > 0 ? (
+      {open && active && items.length > 0 ? (
         <div className="dispatch-autocomplete-menu">
           {items.map((item) => (
             <button
@@ -552,6 +568,7 @@ function CustomerLocationInput({
               onMouseDown={(event) => event.preventDefault()}
               onClick={() => {
                 onSelect(item)
+                setActive(false)
                 setOpen(false)
               }}
             >
@@ -577,11 +594,16 @@ function AddressAutocompleteInput({
 }) {
   const [items, setItems] = useState<AddressSuggestion[]>([])
   const [open, setOpen] = useState(false)
+  const [active, setActive] = useState(false)
 
   useEffect(() => {
     const query = value.trim()
-    if (query.length < 3) {
-      setItems([])
+
+    // Existing saved addresses must not trigger a dropdown just because
+    // Edit Dispatch populated the input. Wait for real user interaction.
+    if (!active || query.length < 3) {
+      setOpen(false)
+      if (query.length < 3) setItems([])
       return
     }
 
@@ -595,27 +617,39 @@ function AddressAutocompleteInput({
         )
         const payload = await response.json()
         if (response.ok && payload.ok) {
-          setItems(payload.results || [])
-          setOpen((payload.results || []).length > 0)
+          const nextItems = payload.results || []
+          setItems(nextItems)
+          setOpen(nextItems.length > 0)
         }
       } catch {
         setItems([])
+        setOpen(false)
       }
     }, 350)
 
     return () => window.clearTimeout(token)
-  }, [value])
+  }, [value, active])
 
   return (
     <div className="dispatch-autocomplete">
       <input
         value={value}
-        onFocus={() => items.length > 0 && setOpen(true)}
-        onChange={(event) => onChange(event.target.value)}
+        onFocus={() => {
+          setActive(true)
+          if (items.length > 0) setOpen(true)
+        }}
+        onBlur={() => {
+          setActive(false)
+          setOpen(false)
+        }}
+        onChange={(event) => {
+          setActive(true)
+          onChange(event.target.value)
+        }}
         placeholder="Start typing an address..."
         autoComplete="off"
       />
-      {open && items.length > 0 ? (
+      {open && active && items.length > 0 ? (
         <div className="dispatch-autocomplete-menu address-menu">
           {items.map((item, index) => (
             <button
@@ -624,6 +658,7 @@ function AddressAutocompleteInput({
               onMouseDown={(event) => event.preventDefault()}
               onClick={() => {
                 onSelect(item)
+                setActive(false)
                 setOpen(false)
               }}
             >
@@ -1776,13 +1811,9 @@ function PublicLoadTrackingPage({
                               </strong>
                               <span>
                                 {
-                                  String(
-                                    stop.status
-                                  )
-                                    .replaceAll(
-                                      '_',
-                                      ' '
-                                    )
+                                  stop.status === 'COMPLETED'
+                                    ? (stop.type === 'PICKUP' ? 'PICKED UP' : 'DELIVERED')
+                                    : String(stop.status).replaceAll('_', ' ')
                                 }
                               </span>
                             </div>
@@ -1793,9 +1824,11 @@ function PublicLoadTrackingPage({
 
                             <small>
                               {
-                                formatPublicTime(
-                                  stop.scheduledAt
-                                )
+                                stop.status === 'COMPLETED' && stop.completedAt
+                                  ? `Completed ${formatPublicTime(stop.completedAt)}`
+                                  : stop.status === 'ARRIVED' && stop.arrivedAt
+                                    ? `Arrived ${formatPublicTime(stop.arrivedAt)}`
+                                    : formatPublicTime(stop.scheduledAt)
                               }
                               {
                                 stop.reference
@@ -11235,35 +11268,108 @@ function App() {
                                           </button>
                                         )
                                         : (
-                                          <label>
-                                            <span>Overall Status</span>
-                                            <select
-                                              value={dispatch.status}
-                                              disabled={(dispatch.stops || []).length > 2}
-                                              onChange={(event) =>
-                                                updateDispatchStatus(
-                                                  dispatch.id,
-                                                  event.target.value as DispatchStatus
-                                                )
-                                              }
-                                              aria-label={
-                                                `Status for ${dispatch.loadNumber}`
-                                              }
-                                            >
-                                              {
-                                                dispatchStatusOptions.map(
-                                                  (status) => (
-                                                    <option
-                                                      key={status}
-                                                      value={status}
+                                          (dispatch.stops || []).length > 2
+                                            ? (
+                                              <div className="operations-quick-route-status">
+                                                <div className="operations-quick-route-summary">
+                                                  <div className="operations-quick-route-summary-top">
+                                                    <span>Overall Status</span>
+                                                    <strong className={`dispatch-status-pill ${dispatch.status.toLowerCase()}`}>
+                                                      {dispatchStatusLabel(dispatch.status)}
+                                                    </strong>
+                                                  </div>
+                                                  <small>For multi-stop loads, update each pickup/drop below. MAVTRACK calculates the overall load status automatically.</small>
+                                                </div>
+
+                                                <div className="operations-quick-stop-list">
+                                                  {[...(dispatch.stops || [])]
+                                                    .sort((a, b) => a.sequence - b.sequence)
+                                                    .map((stop) => (
+                                                      <div
+                                                        className={`operations-quick-stop-control ${String(stop.status).toLowerCase()}`}
+                                                        key={`quick-${stop.id ?? `${stop.sequence}-${stop.type}`}`}
+                                                      >
+                                                        <div className="operations-quick-stop-copy">
+                                                          <strong>
+                                                            {stop.type === 'PICKUP' ? 'Pickup' : 'Drop'} {stop.pairNumber || stop.sequence}
+                                                          </strong>
+                                                          <span>{stop.name}</span>
+                                                          <small>{stop.address}</small>
+                                                        </div>
+
+                                                        <select
+                                                          value={stop.status}
+                                                          disabled={!stop.id || dispatch.status === 'CANCELLED'}
+                                                          onChange={(event) => {
+                                                            if (stop.id) {
+                                                              void updateDispatchStopStatus(
+                                                                dispatch.id,
+                                                                stop.id,
+                                                                event.target.value as DispatchStopRecord['status']
+                                                              )
+                                                            }
+                                                          }}
+                                                          aria-label={`${stop.type === 'PICKUP' ? 'Pickup' : 'Drop'} ${stop.pairNumber || stop.sequence} status`}
+                                                        >
+                                                          <option value="PENDING">Pending</option>
+                                                          <option value="EN_ROUTE">En route</option>
+                                                          <option value="ARRIVED">Arrived</option>
+                                                          <option value="COMPLETED">
+                                                            {stop.type === 'PICKUP' ? 'Picked up / Completed' : 'Delivered / Completed'}
+                                                          </option>
+                                                        </select>
+                                                      </div>
+                                                    ))}
+                                                </div>
+
+                                                <div className="operations-quick-route-footer">
+                                                  <small>Completed pickups/drops stay recorded individually and are shown on the customer tracking page.</small>
+                                                  {dispatch.status !== 'CANCELLED' && (
+                                                    <button
+                                                      className="operations-cancel-load-button"
+                                                      type="button"
+                                                      onClick={() => {
+                                                        if (window.confirm(`Cancel load ${dispatch.loadNumber}?`)) {
+                                                          void updateDispatchStatus(dispatch.id, 'CANCELLED')
+                                                        }
+                                                      }}
                                                     >
-                                                      {dispatchStatusLabel(status)}
-                                                    </option>
-                                                  )
-                                                )
-                                              }
-                                            </select>
-                                          </label>
+                                                      Cancel Entire Load
+                                                    </button>
+                                                  )}
+                                                </div>
+                                              </div>
+                                            )
+                                            : (
+                                              <label>
+                                                <span>Overall Status</span>
+                                                <select
+                                                  value={dispatch.status}
+                                                  onChange={(event) =>
+                                                    updateDispatchStatus(
+                                                      dispatch.id,
+                                                      event.target.value as DispatchStatus
+                                                    )
+                                                  }
+                                                  aria-label={
+                                                    `Status for ${dispatch.loadNumber}`
+                                                  }
+                                                >
+                                                  {
+                                                    dispatchStatusOptions.map(
+                                                      (status) => (
+                                                        <option
+                                                          key={status}
+                                                          value={status}
+                                                        >
+                                                          {dispatchStatusLabel(status)}
+                                                        </option>
+                                                      )
+                                                    )
+                                                  }
+                                                </select>
+                                              </label>
+                                            )
                                         )
                                     }
                                   </section>

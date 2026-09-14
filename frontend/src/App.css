@@ -9973,3 +9973,198 @@ button:disabled {
     justify-items: start;
   }
 }
+
+
+/* =====================================================
+   CUSTOMER LOAD TIMELINE - STOP EVENTS ONLY
+   ===================================================== */
+
+.public-track-progress-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 10px;
+}
+
+.public-track-progress-heading h3 {
+  margin: 3px 0 0;
+  font-size: 0.92rem;
+}
+
+.public-track-progress-heading > strong {
+  color: #60a5fa;
+  font-size: 0.78rem;
+}
+
+.public-track-progress-bar {
+  height: 4px;
+  margin: 0 0 16px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgba(148, 163, 184, 0.18);
+}
+
+.public-track-progress-bar > i {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: #3b82f6;
+  transition: width 220ms ease;
+}
+
+.public-track-stop-timeline {
+  position: relative;
+  gap: 0;
+}
+
+.public-track-stop-timeline::before {
+  content: \"\";
+  position: absolute;
+  top: 7px;
+  bottom: 7px;
+  left: 4px;
+  width: 1px;
+  background: rgba(148, 163, 184, 0.2);
+}
+
+.public-track-stop-timeline .public-track-timeline-item {
+  position: relative;
+  grid-template-columns: 14px minmax(0, 1fr);
+  min-height: 62px;
+  padding-bottom: 13px;
+}
+
+.public-track-stop-timeline .public-track-timeline-item:last-child {
+  min-height: 0;
+  padding-bottom: 0;
+}
+
+.public-track-stop-timeline .public-track-timeline-item i {
+  position: relative;
+  z-index: 1;
+  width: 9px;
+  height: 9px;
+  margin-top: 4px;
+  border: 1px solid rgba(255, 255, 255, 0.28);
+  background: #64748b;
+}
+
+.public-track-stop-timeline .public-track-timeline-item.complete i {
+  background: #36a269;
+}
+
+.public-track-stop-timeline .public-track-timeline-item.current i {
+  background: #3b82f6;
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.18);
+}
+
+.public-track-stop-timeline .public-track-timeline-item strong {
+  color: #f8fafc;
+  font-size: 0.78rem;
+}
+
+.public-track-stop-timeline .public-track-timeline-item span {
+  margin-top: 2px;
+}
+
+.public-track-stop-timeline .public-track-timeline-item small {
+  margin-top: 2px;
+  color: #8091a8;
+  font-size: 0.64rem;
+  line-height: 1.35;
+}
+
+
+/* Fleet asset deletion */
+.row-actions .asset-delete-button {
+  border-color: rgba(239, 68, 68, 0.45);
+  background: rgba(127, 29, 29, 0.28);
+  color: #fca5a5;
+}
+
+.row-actions .asset-delete-button:hover:not(:disabled) {
+  border-color: rgba(248, 113, 113, 0.75);
+  background: rgba(153, 27, 27, 0.46);
+  color: #fff;
+}
+
+.row-actions .asset-delete-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.42;
+}
+
+.fleet-table-card .table-header,
+.fleet-table-card .fleet-row {
+  grid-template-columns:
+    minmax(190px, 1.25fr)
+    92px
+    minmax(185px, 1.25fr)
+    105px
+    minmax(165px, 0.95fr)
+    minmax(395px, 1.8fr);
+}
+
+
+/* =====================================================
+   OPERATIONS — LOADS / DRIVERS INTERNAL NAVIGATION
+   Drivers now live inside Operations instead of the top nav.
+   ===================================================== */
+.operations-section-tabs {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  width: fit-content;
+  padding: 4px;
+  margin-bottom: 8px;
+  border: 1px solid rgba(148, 163, 184, 0.16);
+  border-radius: 9px;
+  background: rgba(15, 29, 47, 0.72);
+}
+
+.operations-section-tabs button {
+  min-width: 78px;
+  height: 30px;
+  padding: 0 13px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: #94a3b8;
+  font-size: 0.72rem;
+  font-weight: 800;
+}
+
+.operations-section-tabs button:hover {
+  color: #e5edf7;
+  background: rgba(51, 65, 85, 0.48);
+}
+
+.operations-section-tabs button.active {
+  background: #2563eb;
+  color: #fff;
+}
+
+.operations-drivers-header {
+  align-items: flex-end;
+}
+
+/* KPI cards were intentionally removed from Operations. With that row gone,
+   keep the commandbar compact and give more vertical space to actual loads. */
+.workspace-page.operations-master-detail .operations-commandbar {
+  grid-template-areas: "title actions" !important;
+  grid-template-columns: minmax(300px, 1fr) auto !important;
+  padding-bottom: 10px !important;
+}
+
+@media (max-width: 900px) {
+  .workspace-page.operations-master-detail .operations-commandbar {
+    grid-template-areas:
+      "title"
+      "actions" !important;
+    grid-template-columns: 1fr !important;
+  }
+
+  .operations-drivers-header {
+    align-items: stretch;
+  }
+}

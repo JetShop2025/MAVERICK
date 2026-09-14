@@ -917,48 +917,67 @@ function MapController({
   latitude,
   longitude,
   fleetPoints,
-  fleetBoundsKey
+  fleetBoundsKey,
+  selectedAssetKey
 }: {
   latitude: number | null
   longitude: number | null
   fleetPoints: [number, number][]
   fleetBoundsKey: string
+  selectedAssetKey: string | null
 }) {
   const map = useMap()
+  const lastFocusedAssetRef = useRef<string | null>(null)
 
   useEffect(() => {
+    // Focus a selected asset only once when the selection changes.
+    // Keep the user's current zoom instead of forcing zoom 13, and
+    // do not keep re-centering as new GPS packets arrive.
     if (
+      selectedAssetKey &&
       latitude != null &&
-      longitude != null
+      longitude != null &&
+      lastFocusedAssetRef.current !== selectedAssetKey
     ) {
+      lastFocusedAssetRef.current = selectedAssetKey
       map.setView(
         [latitude, longitude],
-        13
+        map.getZoom(),
+        { animate: false }
       )
       return
     }
 
-    if (fleetPoints.length === 1) {
-      map.setView(
-        fleetPoints[0],
-        10
-      )
-      return
-    }
+    // Once the asset is deselected, allow the fleet view to auto-fit again.
+    if (!selectedAssetKey) {
+      lastFocusedAssetRef.current = null
 
-    if (fleetPoints.length > 1) {
-      map.fitBounds(
-        L.latLngBounds(fleetPoints),
-        {
-          padding: [70, 70],
-          maxZoom: 9
-        }
-      )
+      if (fleetPoints.length === 1) {
+        map.setView(
+          fleetPoints[0],
+          map.getZoom(),
+          { animate: false }
+        )
+        return
+      }
+
+      if (fleetPoints.length > 1) {
+        map.fitBounds(
+          L.latLngBounds(fleetPoints),
+          {
+            padding: [70, 70],
+            maxZoom: 9,
+            animate: false
+          }
+        )
+      }
     }
   }, [
+    selectedAssetKey,
     latitude,
     longitude,
     fleetBoundsKey,
+    fleetPoints,
     map
   ])
 
@@ -1451,6 +1470,81 @@ function PublicLoadTrackingPage({
     dispatch?.trailerLicense ||
     driver?.currentTrailerLicense ||
     '—'
+
+  // Customer-facing timeline: when stop-level events exist, show only those
+  // so derived global statuses (Loaded, In Transit, etc.) do not repeat.
+  // Keep oldest -> newest so the customer reads the trip in route order.
+  const publicStatusEvents =
+    Array.isArray(dispatch?.statusEvents)
+      ? dispatch.statusEvents
+      : []
+
+  const publicStopStatusEvents =
+    publicStatusEvents.filter(
+      (event: any) =>
+        String(
+          event?.eventType || ''
+        ).toUpperCase() === 'STOP_STATUS'
+    )
+
+  const publicTimelineEvents =
+    [
+      ...(publicStopStatusEvents.length > 0
+        ? publicStopStatusEvents
+        : publicStatusEvents)
+    ]
+      .sort(
+        (a: any, b: any) =>
+          new Date(a?.createdAt || 0).getTime() -
+          new Date(b?.createdAt || 0).getTime()
+      )
+      .filter(
+        (event: any, index: number, items: any[]) => {
+          if (index === 0) return true
+
+          const previous = items[index - 1]
+
+          return !(
+            String(previous?.eventType || '') === String(event?.eventType || '') &&
+            String(previous?.title || '') === String(event?.title || '') &&
+            String(previous?.notes || '') === String(event?.notes || '') &&
+            String(previous?.createdAt || '') === String(event?.createdAt || '')
+          )
+        }
+      )
+
+  const publicStops =
+    Array.isArray(dispatch?.stops)
+      ? dispatch.stops
+      : []
+
+  const publicProgressPoints =
+    publicStops.reduce(
+      (total: number, stop: DispatchStopRecord) => {
+        const value =
+          stop.status === 'COMPLETED'
+            ? 3
+            : stop.status === 'ARRIVED'
+              ? 2
+              : stop.status === 'EN_ROUTE'
+                ? 1
+                : 0
+
+        return total + value
+      },
+      0
+    )
+
+  const publicProgressPercent =
+    publicStops.length > 0
+      ? Math.round(
+          (publicProgressPoints /
+            (publicStops.length * 3)) *
+            100
+        )
+      : dispatch?.status === 'DELIVERED'
+        ? 100
+        : 0
 
   if (loading) {
     return (
@@ -2290,61 +2384,88 @@ function PublicLoadTrackingPage({
           </div>
 
           <article className="public-track-card public-track-history-card public-track-progress-panel">
-            <div className="public-track-card-heading">
-              Load Progress
+            <div className="public-track-progress-heading">
+              <div>
+                <span className="page-kicker">
+                  Load Timeline
+                </span>
+                <h3>
+                  Progress
+                </h3>
+              </div>
+
+              <strong>
+                {publicProgressPercent}%
+              </strong>
             </div>
 
-            <div className="public-track-timeline">
+            <div className="public-track-progress-bar">
+              <i
+                style={{
+                  width: `${publicProgressPercent}%`
+                }}
+              />
+            </div>
+
+            <div className="public-track-timeline public-track-stop-timeline">
               {
-                (
-                  dispatch.statusEvents ||
-                  []
-                ).map(
-                  (event: any) => (
-                    <div
-                      key={event.id}
-                      className="public-track-timeline-item"
-                    >
-                      <i />
-                      <div>
-                        <strong>
-                          {
-                            publicDispatchStatusLabel(
-                              event.status
-                            )
-                          }
-                        </strong>
+                publicTimelineEvents.length > 0
+                  ? publicTimelineEvents.map(
+                      (event: any, index: number) => {
+                        const isLatest =
+                          index ===
+                          publicTimelineEvents.length - 1
 
-                        <span>
-                          {
-                            formatPublicTime(
-                              event.createdAt
-                            )
-                          }
-                        </span>
+                        return (
+                          <div
+                            key={
+                              event.id ??
+                              `${event.createdAt}-${index}`
+                            }
+                            className={
+                              `public-track-timeline-item ${
+                                isLatest
+                                  ? 'current'
+                                  : 'complete'
+                              }`
+                            }
+                          >
+                            <i />
+                            <div>
+                              <strong>
+                                {
+                                  event.title ||
+                                  publicDispatchStatusLabel(
+                                    event.status
+                                  )
+                                }
+                              </strong>
 
-                        {
-                          event.notes && (
-                            <small>
-                              {event.notes}
-                            </small>
-                          )
-                        }
-                      </div>
+                              <span>
+                                {
+                                  formatPublicTime(
+                                    event.createdAt
+                                  )
+                                }
+                              </span>
+
+                              {
+                                event.notes && (
+                                  <small>
+                                    {event.notes}
+                                  </small>
+                                )
+                              }
+                            </div>
+                          </div>
+                        )
+                      }
+                    )
+                  : (
+                    <div className="public-track-progress-empty">
+                      No pickup or drop updates yet.
                     </div>
                   )
-                )
-              }
-
-              {
-                (
-                  dispatch.statusEvents ||
-                  []
-                ).length === 0 && (
-                  <div className="public-track-progress-empty">
-                    No status updates yet.
-                  </div>
-                )
               }
             </div>
           </article>
@@ -2460,6 +2581,11 @@ function App() {
     assets,
     setAssets
   ] = useState<any[]>([])
+
+  const [
+    assetDeletingId,
+    setAssetDeletingId
+  ] = useState<number | null>(null)
 
   const [
     fleetTelemetry,
@@ -6720,6 +6846,104 @@ function App() {
     setIsLoggedIn(true)
   }
 
+  const deleteAsset =
+    async (asset: any) => {
+      const token =
+        localStorage.getItem(
+          'maverick_token'
+        )
+
+      if (!token || !asset?.id) {
+        return
+      }
+
+      const displayName =
+        String(
+          asset.name ||
+          asset.deviceId ||
+          'this asset'
+        )
+
+      const deviceId =
+        String(
+          asset.deviceId || ''
+        )
+
+      const confirmed =
+        window.confirm(
+          `Delete ${displayName}?\n\nDevice: ${deviceId}\n\nThis removes the asset from Fleet. Historical loads and telemetry records are preserved, but they will no longer be attached to this asset. This cannot be undone.`
+        )
+
+      if (!confirmed) {
+        return
+      }
+
+      setAssetDeletingId(asset.id)
+
+      try {
+        const res =
+          await fetch(
+            `${API_BASE}/api/assets/${asset.id}`,
+            {
+              method: 'DELETE',
+              headers: {
+                Authorization:
+                  `Bearer ${token}`
+              }
+            }
+          )
+
+        const data =
+          await res.json()
+
+        if (res.status === 401) {
+          handleLogout()
+          return
+        }
+
+        if (!res.ok || !data.ok) {
+          window.alert(
+            data.message ||
+            'Unable to delete asset.'
+          )
+          return
+        }
+
+        setAssets(
+          (currentAssets) =>
+            currentAssets.filter(
+              (currentAsset) =>
+                currentAsset.id !== asset.id
+            )
+        )
+
+        setFleetTelemetry(
+          (current) => {
+            const next = { ...current }
+            delete next[deviceId]
+            return next
+          }
+        )
+
+        if (
+          selectedDeviceId ===
+          deviceId
+        ) {
+          setSelectedDeviceId('')
+          setTelemetry(null)
+          setDetailsOpen(false)
+          setRenameOpen(false)
+          setTemperatureLimitsOpen(false)
+        }
+      } catch {
+        window.alert(
+          'Unable to connect to Maverick.'
+        )
+      } finally {
+        setAssetDeletingId(null)
+      }
+    }
+
   const handleRenameAsset =
     async () => {
       const token =
@@ -8685,27 +8909,10 @@ function App() {
             Fleet
           </button>
 
-          {
-            isAdmin && (
-              <button
-                className={
-                  activeView === 'drivers'
-                    ? 'active'
-                    : ''
-                }
-                onClick={() =>
-                  setActiveView('drivers')
-                }
-              >
-                Drivers
-              </button>
-            )
-          }
-
           <button
             className={
-              activeView ===
-                'operations'
+              (activeView ===
+                'operations' || activeView === 'drivers')
                 ? 'active'
                 : ''
             }
@@ -9015,6 +9222,8 @@ function App() {
                   -98.5795
                 ]}
                 zoom={4}
+                minZoom={2}
+                maxZoom={22}
                 zoomControl={true}
                 className="fleet-map"
               >
@@ -9038,6 +9247,9 @@ function App() {
                   fleetBoundsKey={
                     fleetMapBoundsKey
                   }
+                  selectedAssetKey={
+                    selectedDeviceId || null
+                  }
                 />
 
                 <ResponsiveMapSize />
@@ -9049,6 +9261,8 @@ function App() {
                   url={
                     'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png'
                   }
+                  maxNativeZoom={19}
+                  maxZoom={22}
                 />
 
                 {
@@ -10505,6 +10719,29 @@ function App() {
                               >
                                 Details
                               </button>
+
+                              <button
+                                className="asset-delete-button"
+                                disabled={
+                                  assetDeletingId === asset.id ||
+                                  Boolean(rowDispatch)
+                                }
+                                onClick={() =>
+                                  void deleteAsset(asset)
+                                }
+                                type="button"
+                                title={
+                                  rowDispatch
+                                    ? `Finish or cancel load ${rowDispatch.loadNumber} before deleting this asset.`
+                                    : `Delete ${asset.name || asset.deviceId}`
+                                }
+                              >
+                                {
+                                  assetDeletingId === asset.id
+                                    ? 'Deleting…'
+                                    : 'Delete'
+                                }
+                              </button>
                             </div>
                           </div>
                         )
@@ -10530,16 +10767,31 @@ function App() {
           activeView === 'drivers' &&
           isAdmin && (
             <section className="workspace-page">
-              <div className="page-header">
+              <div className="page-header operations-drivers-header">
                 <div>
+                  <div className="operations-section-tabs" role="tablist" aria-label="Operations sections">
+                    <button
+                      type="button"
+                      onClick={() => setActiveView('operations')}
+                    >
+                      Loads
+                    </button>
+                    <button
+                      type="button"
+                      className="active"
+                      aria-selected="true"
+                    >
+                      Drivers
+                    </button>
+                  </div>
                   <span className="page-kicker">
-                    Administration
+                    Operations
                   </span>
                   <h1>
-                    MavDriver Accounts
+                    Driver Management
                   </h1>
                   <p>
-                    Only fleet administrators can create and manage driver sign-in accounts.
+                    Manage MavDriver accounts, truck assignments and driver access.
                   </p>
                 </div>
 
@@ -10971,6 +11223,23 @@ function App() {
 
               <div className="operations-commandbar">
                 <div className="operations-title-block">
+                  <div className="operations-section-tabs" role="tablist" aria-label="Operations sections">
+                    <button
+                      type="button"
+                      className="active"
+                      aria-selected="true"
+                    >
+                      Loads
+                    </button>
+                    {isAdmin && (
+                      <button
+                        type="button"
+                        onClick={() => setActiveView('drivers')}
+                      >
+                        Drivers
+                      </button>
+                    )}
+                  </div>
                   <span className="page-kicker">
                     Operations
                   </span>
@@ -10982,58 +11251,6 @@ function App() {
                   <p>
                     Live view of loads, assets and trailer activity.
                   </p>
-                </div>
-
-                <div className="operations-kpis operations-kpis-compact">
-                  <article className="operations-kpi compact">
-                    <span>Active Loads</span>
-                    <strong>{activeDispatches.length}</strong>
-                    <small>Assigned through delivery</small>
-                  </article>
-
-                  <article className="operations-kpi compact">
-                    <span>In Transit</span>
-                    <strong>
-                      {
-                        dispatches.filter(
-                          (item) => item.status === 'IN_TRANSIT'
-                        ).length
-                      }
-                    </strong>
-                    <small>Moving between facilities</small>
-                  </article>
-
-                  <article className="operations-kpi compact">
-                    <span>At Facility</span>
-                    <strong>
-                      {
-                        dispatches.filter(
-                          (item) =>
-                            item.status === 'AT_PICKUP' ||
-                            item.status === 'AT_DELIVERY'
-                        ).length
-                      }
-                    </strong>
-                    <small>Pickup or delivery</small>
-                  </article>
-
-                  <article className="operations-kpi compact">
-                    <span>Available Assets</span>
-                    <strong>{availableAssets.length}</strong>
-                    <small>Ready for assignment</small>
-                  </article>
-
-                  <article className="operations-kpi compact">
-                    <span>Delivered</span>
-                    <strong>
-                      {
-                        dispatches.filter(
-                          (item) => item.status === 'DELIVERED'
-                        ).length
-                      }
-                    </strong>
-                    <small>Completed loads</small>
-                  </article>
                 </div>
 
                 <div className="operations-command-actions">

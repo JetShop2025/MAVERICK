@@ -54,6 +54,13 @@ const GPS_PING_MIN_GAP_MS = 55_000;
 const LAST_GPS_PING_KEY =
   "mavtrack_last_gps_ping_at";
 
+const LAST_BACKGROUND_FIX_KEY =
+  "mavtrack_last_background_fix";
+const LAST_BACKGROUND_SEND_KEY =
+  "mavtrack_last_background_send";
+const LAST_BACKGROUND_ERROR_KEY =
+  "mavtrack_last_background_error";
+
 const DEFAULT_TRACKING_DEVICE_ID =
   "TRK-TEST-001";
 
@@ -275,7 +282,17 @@ async function postLocationToMavtrack(
 TaskManager.defineTask(
   BACKGROUND_LOCATION_TASK,
   async ({ data, error }) => {
-    if (error || !data) {
+    if (error) {
+      await SecureStore.setItemAsync(
+        LAST_BACKGROUND_ERROR_KEY,
+        `${new Date().toISOString()} · ${String(
+          (error as any)?.message || error
+        )}`
+      );
+      return;
+    }
+
+    if (!data) {
       return;
     }
 
@@ -298,18 +315,45 @@ TaskManager.defineTask(
       return;
     }
 
-    // M2-style telemetry cycle:
-    // use only the freshest fix and send at most one ping per minute.
     const latestLocation =
       locations[locations.length - 1];
 
+    await SecureStore.setItemAsync(
+      LAST_BACKGROUND_FIX_KEY,
+      JSON.stringify({
+        at: new Date().toISOString(),
+        latitude: latestLocation.coords.latitude,
+        longitude: latestLocation.coords.longitude,
+        accuracy: latestLocation.coords.accuracy,
+        timestamp: latestLocation.timestamp,
+      })
+    );
+
     try {
-      await postLocationToMavtrack(
-        latestLocation,
-        deviceId
+      const sent =
+        await postLocationToMavtrack(
+          latestLocation,
+          deviceId
+        );
+
+      if (sent) {
+        await SecureStore.setItemAsync(
+          LAST_BACKGROUND_SEND_KEY,
+          new Date().toISOString()
+        );
+        await SecureStore.deleteItemAsync(
+          LAST_BACKGROUND_ERROR_KEY
+        );
+      }
+    } catch (err) {
+      await SecureStore.setItemAsync(
+        LAST_BACKGROUND_ERROR_KEY,
+        `${new Date().toISOString()} · ${
+          err instanceof Error
+            ? err.message
+            : "Background POST failed"
+        }`
       );
-    } catch {
-      // iOS will deliver another native location update later.
     }
   }
 );
@@ -453,6 +497,15 @@ export default function App() {
   const [gps, setGps] =
     useState<GPSData | null>(null);
 
+  const [backgroundLastFix, setBackgroundLastFix] =
+    useState<string>("—");
+
+  const [backgroundLastSend, setBackgroundLastSend] =
+    useState<string>("—");
+
+  const [backgroundLastError, setBackgroundLastError] =
+    useState<string>("");
+
   const [
     trackingMode,
     setTrackingMode
@@ -503,6 +556,74 @@ export default function App() {
 
   useEffect(() => {
     void checkBackgroundTracking();
+  }, []);
+
+
+  useEffect(() => {
+    const loadBackgroundDiagnostics = async () => {
+      try {
+        const rawFix =
+          await SecureStore.getItemAsync(
+            LAST_BACKGROUND_FIX_KEY
+          );
+        const rawSend =
+          await SecureStore.getItemAsync(
+            LAST_BACKGROUND_SEND_KEY
+          );
+        const rawError =
+          await SecureStore.getItemAsync(
+            LAST_BACKGROUND_ERROR_KEY
+          );
+
+        if (rawFix) {
+          try {
+            const parsed = JSON.parse(rawFix);
+            const at = parsed?.at
+              ? new Date(parsed.at)
+              : null;
+
+            setBackgroundLastFix(
+              at && !Number.isNaN(at.getTime())
+                ? at.toLocaleTimeString()
+                : "—"
+            );
+          } catch {
+            setBackgroundLastFix("—");
+          }
+        } else {
+          setBackgroundLastFix("—");
+        }
+
+        if (rawSend) {
+          const at = new Date(rawSend);
+          setBackgroundLastSend(
+            Number.isNaN(at.getTime())
+              ? "—"
+              : at.toLocaleTimeString()
+          );
+        } else {
+          setBackgroundLastSend("—");
+        }
+
+        setBackgroundLastError(
+          rawError || ""
+        );
+      } catch {
+        // Diagnostics are optional.
+      }
+    };
+
+    void loadBackgroundDiagnostics();
+
+    const interval =
+      setInterval(
+        () =>
+          void loadBackgroundDiagnostics(),
+        5000
+      );
+
+    return () =>
+      clearInterval(interval);
   }, []);
 
   async function restoreSession() {
@@ -1044,7 +1165,7 @@ export default function App() {
         setTracking(true);
         setTrackingMode("background");
         setTrackingStatus(
-          "1-MIN GPS PING ACTIVE"
+          "BACKGROUND GPS ACTIVE"
         );
       }
     } catch {
@@ -1232,7 +1353,7 @@ export default function App() {
     setTracking(true);
     setTrackingMode("foreground");
     setTrackingStatus(
-      "1-MIN GPS PING ACTIVE"
+      "FOREGROUND GPS FALLBACK"
     );
   }
 
@@ -1345,28 +1466,15 @@ export default function App() {
           {
             accuracy:
               Location.Accuracy.BestForNavigation,
-            // Ask the native service for periodic fixes. On iOS the
-            // OS controls exact delivery timing, so outgoing telemetry
-            // is additionally throttled to one fresh point per minute.
-            distanceInterval: 0,
-            timeInterval:
-              GPS_PING_INTERVAL_MS,
+            distanceInterval: 5,
             deferredUpdatesDistance: 0,
-            deferredUpdatesInterval:
-              GPS_PING_INTERVAL_MS,
-            pausesUpdatesAutomatically:
-              false,
+            deferredUpdatesInterval: 0,
+            pausesUpdatesAutomatically: false,
             activityType:
               Location.ActivityType
                 .AutomotiveNavigation,
             showsBackgroundLocationIndicator:
-              true,
-            foregroundService: {
-              notificationTitle:
-                "MavApp tracking active",
-              notificationBody:
-                `Tracking ${trackingDeviceId} for MAVTRACK dispatch.`,
-            },
+              true
           }
         );
 
@@ -1379,7 +1487,7 @@ export default function App() {
         setTracking(true);
         setTrackingMode("background");
         setTrackingStatus(
-          "1-MIN GPS PING ACTIVE"
+          "BACKGROUND GPS ACTIVE"
         );
       } catch {
         // Foreground tracking is already alive.
@@ -1769,6 +1877,9 @@ export default function App() {
           trackingStatus={trackingStatus}
           serverStatus={serverStatus}
           gps={gps}
+          backgroundLastFix={backgroundLastFix}
+          backgroundLastSend={backgroundLastSend}
+          backgroundLastError={backgroundLastError}
           onOpenLoad={(load) =>
             setSelectedLoad(load)
           }
@@ -1835,6 +1946,9 @@ function HomeScreen({
   trackingStatus,
   serverStatus,
   gps,
+  backgroundLastFix,
+  backgroundLastSend,
+  backgroundLastError,
   onOpenLoad,
   onOpenPending,
   onStartTracking,
@@ -1852,6 +1966,9 @@ function HomeScreen({
   trackingStatus: string;
   serverStatus: string;
   gps: GPSData | null;
+  backgroundLastFix: string;
+  backgroundLastSend: string;
+  backgroundLastError: string;
   onOpenLoad: (load: Dispatch) => void;
   onOpenPending: () => void;
   onStartTracking: () => void;
@@ -2102,6 +2219,44 @@ function HomeScreen({
             ? ` · ${serverStatus}`
             : ""}
         </Text>
+      </View>
+
+      <View
+        style={{
+          marginTop: 10,
+          padding: 12,
+          borderRadius: 12,
+          backgroundColor: "#0B1726",
+          borderWidth: 1,
+          borderColor: "#1D2A3A",
+        }}
+      >
+        <Text
+          style={{
+            color: "#E5EEF8",
+            fontWeight: "800",
+            marginBottom: 6,
+          }}
+        >
+          Background GPS
+        </Text>
+        <Text style={{ color: "#9FB0C3", fontSize: 12 }}>
+          Last native fix: {backgroundLastFix}
+        </Text>
+        <Text style={{ color: "#9FB0C3", fontSize: 12 }}>
+          Last server send: {backgroundLastSend}
+        </Text>
+        {backgroundLastError ? (
+          <Text
+            style={{
+              color: "#FCA5A5",
+              fontSize: 12,
+              marginTop: 4,
+            }}
+          >
+            {backgroundLastError}
+          </Text>
+        ) : null}
       </View>
     </ScrollView>
   );

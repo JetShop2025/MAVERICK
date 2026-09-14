@@ -9905,3 +9905,71 @@ button:disabled {
     grid-template-columns: 1fr;
   }
 }
+
+
+/* =========================================================
+   ROUTE PROGRESS READ-ONLY STATUS
+   Keep status editing in Quick Actions only.
+   ========================================================= */
+.operations-stop-progress-state {
+  min-width: 118px;
+  display: grid;
+  justify-items: end;
+  align-content: center;
+  gap: 5px;
+}
+
+.operations-stop-progress-state > span {
+  color: #6f829a;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  font-size: 0.5rem;
+}
+
+.operations-stop-progress-state > small {
+  color: #718198;
+  font-size: 0.5rem;
+  white-space: nowrap;
+}
+
+.operations-stop-status-badge {
+  min-height: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 9px;
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.55);
+  color: #b8c6d8;
+  text-transform: uppercase;
+  letter-spacing: 0.045em;
+  font-size: 0.5rem;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.operations-stop-status-badge.en_route {
+  border-color: rgba(96, 165, 250, 0.26);
+  background: rgba(37, 99, 235, 0.12);
+  color: #8fc4ff;
+}
+
+.operations-stop-status-badge.arrived {
+  border-color: rgba(250, 204, 21, 0.24);
+  background: rgba(234, 179, 8, 0.11);
+  color: #f4d65c;
+}
+
+.operations-stop-status-badge.completed {
+  border-color: rgba(74, 222, 128, 0.24);
+  background: rgba(34, 197, 94, 0.11);
+  color: #70e7a2;
+}
+
+@media (max-width: 760px) {
+  .operations-stop-progress-state {
+    min-width: 0;
+    justify-items: start;
+  }
+}

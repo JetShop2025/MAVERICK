@@ -10829,7 +10829,7 @@ function App() {
                                           <span className="page-kicker">Route Progress</span>
                                           <h3>Pickup & Drop Status</h3>
                                         </div>
-                                        <small>Global load status updates automatically</small>
+                                        <small>Progress overview · Update statuses in Quick Actions</small>
                                       </div>
 
                                       <div className="operations-stop-progress-list">
@@ -10857,28 +10857,32 @@ function App() {
                                                 </small>
                                               </div>
 
-                                              <label className="operations-stop-progress-control">
+                                              <div className="operations-stop-progress-state">
                                                 <span>Status</span>
-                                                <select
-                                                  value={stop.status}
-                                                  disabled={!stop.id || operationsTab === 'history'}
-                                                  onChange={(event) => {
-                                                    if (stop.id) {
-                                                      void updateDispatchStopStatus(
-                                                        dispatch.id,
-                                                        stop.id,
-                                                        event.target.value as DispatchStopRecord['status']
-                                                      )
-                                                    }
-                                                  }}
-                                                  aria-label={`${stop.type === 'PICKUP' ? 'Pickup' : 'Drop'} ${stop.pairNumber || stop.sequence} status`}
+                                                <strong
+                                                  className={`operations-stop-status-badge ${String(
+                                                    stop.status
+                                                  ).toLowerCase()}`}
                                                 >
-                                                  <option value="PENDING">Pending</option>
-                                                  <option value="EN_ROUTE">En route</option>
-                                                  <option value="ARRIVED">Arrived</option>
-                                                  <option value="COMPLETED">Completed</option>
-                                                </select>
-                                              </label>
+                                                  {
+                                                    stop.status === 'COMPLETED'
+                                                      ? (
+                                                        stop.type === 'PICKUP'
+                                                          ? 'Picked up'
+                                                          : 'Delivered'
+                                                      )
+                                                      : String(stop.status)
+                                                        .replaceAll('_', ' ')
+                                                  }
+                                                </strong>
+                                                {stop.completedAt && (
+                                                  <small>
+                                                    {formatDateTime(
+                                                      stop.completedAt
+                                                    )}
+                                                  </small>
+                                                )}
+                                              </div>
                                             </article>
                                           ))}
                                       </div>

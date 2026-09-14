@@ -1076,6 +1076,143 @@ async function validateDriverEquipment(
   return truck.deviceId
 }
 
+async function ensurePhoneTruckAssetForDriver(
+  companyId: number,
+  currentTruckNumber: unknown
+) {
+  const truckNumber =
+    optionalString(currentTruckNumber)
+      ?.toUpperCase()
+
+  if (!truckNumber) {
+    return null
+  }
+
+  const existing =
+    await prisma.asset.findUnique({
+      where: {
+        deviceId: truckNumber
+      }
+    })
+
+  if (existing) {
+    if (
+      existing.companyId !== companyId ||
+      String(existing.assetType).toUpperCase() !== 'TRK'
+    ) {
+      throw new Error(
+        'INVALID_DRIVER_TRUCK'
+      )
+    }
+
+    if (
+      !existing.active ||
+      String(existing.trackingSource).toUpperCase() !== 'PHONE'
+    ) {
+      await prisma.asset.update({
+        where: {
+          id: existing.id
+        },
+        data: {
+          active: true,
+          assetType: 'TRK',
+          trackingSource: 'PHONE'
+        }
+      })
+    }
+
+    return existing.deviceId
+  }
+
+  const created =
+    await prisma.asset.create({
+      data: {
+        deviceId: truckNumber,
+        name: truckNumber,
+        description:
+          'MAVTRACK Driver phone tracking',
+        companyId,
+        assetType: 'TRK',
+        trackingSource: 'PHONE',
+        active: true
+      }
+    })
+
+  return created.deviceId
+}
+
+
+app.get(
+  '/api/drivers/manage',
+  requireAuth,
+  async (
+    req: AuthenticatedRequest,
+    res: Response
+  ) => {
+    try {
+      const companyId =
+        req.user?.companyId
+
+      if (!companyId) {
+        return res.status(401).json({
+          ok: false,
+          message: 'Invalid session'
+        })
+      }
+
+      if (!isCompanyAdmin(req.user?.role)) {
+        return res.status(403).json({
+          ok: false,
+          message:
+            'You do not have permission to manage drivers'
+        })
+      }
+
+      const drivers =
+        await prisma.user.findMany({
+          where: {
+            companyId,
+            role: 'driver'
+          },
+          include: driverInclude,
+          orderBy: [
+            {
+              active: 'desc'
+            },
+            {
+              name: 'asc'
+            }
+          ]
+        })
+
+      return res.json({
+        ok: true,
+        drivers: drivers.map((driver) => ({
+          id: driver.id,
+          email: driver.email,
+          name: driver.name,
+          role: driver.role,
+          active: driver.active,
+          companyId: driver.companyId,
+          profile: driver.driverProfile
+        }))
+      })
+    } catch (error) {
+      console.error(
+        'Manage drivers error:',
+        error
+      )
+
+      return res.status(500).json({
+        ok: false,
+        message:
+          'Unable to load driver accounts'
+      })
+    }
+  }
+)
+
+
 app.get(
   '/api/drivers',
   requireAuth,
@@ -1241,7 +1378,7 @@ app.post(
         )
 
       const currentTruckNumber =
-        await validateDriverEquipment(
+        await ensurePhoneTruckAssetForDriver(
           companyId,
           req.body?.currentTruckNumber
         )
@@ -1277,6 +1414,10 @@ app.post(
                     req.body?.profilePhotoUrl
                   ),
                 currentTruckNumber,
+                physicalTruckNumber:
+                  optionalString(
+                    req.body?.physicalTruckNumber
+                  ),
                 currentTrailerNumber:
                   optionalString(
                     req.body?.currentTrailerNumber
@@ -1416,7 +1557,7 @@ app.patch(
         undefined
       ) {
         profileData.currentTruckNumber =
-          await validateDriverEquipment(
+          await ensurePhoneTruckAssetForDriver(
             companyId,
             req.body.currentTruckNumber
           )
@@ -4894,6 +5035,13 @@ app.post(
           where: {
             id: dispatchId,
             companyId
+          },
+          include: {
+            stops: {
+              select: {
+                id: true
+              }
+            }
           }
         })
 
@@ -5376,6 +5524,149 @@ async function updateDispatchStopStatusForRequest({
           })
         }
       )
+
+    if (updated) {
+      const activeShares =
+        await prisma.dispatchShare.findMany({
+          where: {
+            dispatchId: updated.id,
+            revokedAt: null,
+            OR: [
+              { expiresAt: null },
+              {
+                expiresAt: {
+                  gt: new Date()
+                }
+              }
+            ]
+          },
+          orderBy: {
+            createdAt: 'desc'
+          }
+        })
+
+      // A customer can have more than one historical share link.
+      // Send one update per email address, using the newest active link.
+      const shareByEmail =
+        new Map<string, (typeof activeShares)[number]>()
+
+      for (const share of activeShares) {
+        const email =
+          String(share.customerEmail || '')
+            .trim()
+            .toLowerCase()
+
+        if (email && !shareByEmail.has(email)) {
+          shareByEmail.set(email, share)
+        }
+      }
+
+      const emailRecipients: string[] = []
+      let anyEmailSent = false
+
+      const customerStatusLabel =
+        status === 'EN_ROUTE'
+          ? 'En route'
+          : status === 'ARRIVED'
+            ? 'Arrived'
+            : status === 'COMPLETED'
+              ? (
+                  stop.type === 'PICKUP'
+                    ? 'Picked up / Completed'
+                    : 'Delivered / Completed'
+                )
+              : 'Pending'
+
+      const updateTitle =
+        `Load ${updated.loadNumber}: ${stop.type === 'PICKUP' ? 'Pickup' : 'Drop'} ${stopNumber} — ${customerStatusLabel}`
+
+      const updateMessage =
+        `${stop.type === 'PICKUP' ? 'Pickup' : 'Drop'} ${stopNumber} at ${stop.name} was updated to ${customerStatusLabel}. Overall load status: ${dispatchStatusLabel(nextGlobalStatus)}.`
+
+      for (const share of shareByEmail.values()) {
+        const trackingUrl =
+          `${PUBLIC_FRONTEND_URL}/track/${share.token}`
+
+        const result =
+          await sendMaverickEmail({
+            to: [share.customerEmail],
+            subject:
+              `MAVTRACK LLC | ${updateTitle}`,
+            html: `
+              <!DOCTYPE html>
+              <html>
+                <body style="margin:0;padding:0;background:#f3f6fa;font-family:Arial,Helvetica,sans-serif;color:#0f172a;">
+                  <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="background:#f3f6fa;padding:28px 12px;">
+                    <tr>
+                      <td align="center">
+                        <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="max-width:680px;background:#ffffff;border-radius:16px;overflow:hidden;box-shadow:0 8px 30px rgba(15,23,42,0.08);">
+                          <tr>
+                            <td style="background:#071426;padding:26px 32px;">
+                              <div style="font-size:23px;font-weight:800;letter-spacing:2px;color:#ffffff;">MAVTRACK LLC</div>
+                              <div style="margin-top:7px;font-size:13px;color:#94a3b8;">Load ${escapeHtml(updated.loadNumber)} status update</div>
+                            </td>
+                          </tr>
+                          <tr>
+                            <td style="padding:30px 32px;">
+                              <div style="font-size:12px;font-weight:800;letter-spacing:1.2px;color:#2563eb;text-transform:uppercase;">${escapeHtml(stop.type === 'PICKUP' ? 'Pickup update' : 'Delivery update')}</div>
+                              <h2 style="margin:8px 0 8px;font-size:24px;color:#0f172a;">${escapeHtml(stopTitle)}</h2>
+                              <p style="margin:0 0 22px;color:#475569;line-height:1.6;">${escapeHtml(updateMessage)}</p>
+
+                              <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="border-collapse:collapse;margin:8px 0 24px;">
+                                <tr>
+                                  <td style="padding:10px 0;border-bottom:1px solid #e2e8f0;color:#64748b;">Location</td>
+                                  <td style="padding:10px 0;border-bottom:1px solid #e2e8f0;text-align:right;font-weight:700;">${escapeHtml(stop.name)}</td>
+                                </tr>
+                                <tr>
+                                  <td style="padding:10px 0;border-bottom:1px solid #e2e8f0;color:#64748b;">Address</td>
+                                  <td style="padding:10px 0;border-bottom:1px solid #e2e8f0;text-align:right;font-weight:700;">${escapeHtml(stop.address)}</td>
+                                </tr>
+                                <tr>
+                                  <td style="padding:10px 0;border-bottom:1px solid #e2e8f0;color:#64748b;">Stop status</td>
+                                  <td style="padding:10px 0;border-bottom:1px solid #e2e8f0;text-align:right;font-weight:700;">${escapeHtml(customerStatusLabel)}</td>
+                                </tr>
+                                <tr>
+                                  <td style="padding:10px 0;color:#64748b;">Overall load status</td>
+                                  <td style="padding:10px 0;text-align:right;font-weight:700;">${escapeHtml(dispatchStatusLabel(nextGlobalStatus))}</td>
+                                </tr>
+                              </table>
+
+                              <a href="${trackingUrl}" style="display:inline-block;background:#2563eb;color:#ffffff;text-decoration:none;padding:12px 18px;border-radius:8px;font-weight:700;">View Live Load</a>
+                            </td>
+                          </tr>
+                        </table>
+                      </td>
+                    </tr>
+                  </table>
+                </body>
+              </html>
+            `
+          })
+
+        anyEmailSent =
+          anyEmailSent || result.ok
+
+        emailRecipients.push(
+          ...result.recipients
+        )
+      }
+
+      await createNotificationEvent({
+        companyId: dispatch.companyId,
+        assetId: updated.assetId,
+        dispatchId: updated.id,
+        type: 'DISPATCH_STOP_STATUS',
+        severity:
+          status === 'COMPLETED'
+            ? 'success'
+            : 'info',
+        title: updateTitle,
+        message: updateMessage,
+        recipients:
+          uniqueEmails(emailRecipients),
+        emailSent: anyEmailSent
+      })
+    }
 
     return res.json({
       ok: true,
@@ -7399,7 +7690,8 @@ app.post(
 
       if (
         previousPhonePoint?.latitude != null &&
-        previousPhonePoint?.longitude != null
+        previousPhonePoint?.longitude != null &&
+        previousPhonePoint.recordedAt != null
       ) {
         const elapsedSeconds =
           (

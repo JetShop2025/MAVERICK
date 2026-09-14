@@ -26,6 +26,7 @@ import Login from './Login'
 type ViewName =
   | 'map'
   | 'fleet'
+  | 'drivers'
   | 'operations'
   | 'monitors'
   | 'reports'
@@ -2527,6 +2528,53 @@ function App() {
   ] = useState<DriverRecord[]>([])
 
   const [
+    managedDrivers,
+    setManagedDrivers
+  ] = useState<DriverRecord[]>([])
+
+  const [
+    driverManagerLoading,
+    setDriverManagerLoading
+  ] = useState(false)
+
+  const [
+    driverManagerError,
+    setDriverManagerError
+  ] = useState('')
+
+  const [
+    driverModalOpen,
+    setDriverModalOpen
+  ] = useState(false)
+
+  const [
+    editingDriverId,
+    setEditingDriverId
+  ] = useState<number | null>(null)
+
+  const [
+    driverSaving,
+    setDriverSaving
+  ] = useState(false)
+
+  const [
+    driverForm,
+    setDriverForm
+  ] = useState({
+    firstName: '',
+    lastName: '',
+    email: '',
+    password: '',
+    phone: '',
+    currentTruckNumber: '',
+    physicalTruckNumber: '',
+    licenseNumber: '',
+    licenseState: '',
+    currentTrailerNumber: '',
+    currentTrailerLicense: ''
+  })
+
+  const [
     newDispatchForm,
     setNewDispatchForm
   ] = useState({
@@ -3451,6 +3499,321 @@ function App() {
     isLoggedIn,
     loadDrivers
   ])
+
+
+  const loadManagedDrivers =
+    useCallback(
+      async () => {
+        const token =
+          localStorage.getItem(
+            'maverick_token'
+          )
+
+        if (!token) {
+          return
+        }
+
+        setDriverManagerLoading(true)
+        setDriverManagerError('')
+
+        try {
+          const response =
+            await fetch(
+              `${API_BASE}/api/drivers/manage`,
+              {
+                headers: {
+                  Authorization:
+                    `Bearer ${token}`
+                }
+              }
+            )
+
+          const payload =
+            await response.json()
+
+          if (!response.ok || !payload.ok) {
+            setDriverManagerError(
+              payload.message ||
+              'Unable to load driver accounts.'
+            )
+            return
+          }
+
+          setManagedDrivers(
+            payload.drivers || []
+          )
+        } catch {
+          setDriverManagerError(
+            'Unable to connect to Maverick.'
+          )
+        } finally {
+          setDriverManagerLoading(false)
+        }
+      },
+      []
+    )
+
+  useEffect(() => {
+    if (
+      !isLoggedIn ||
+      activeView !== 'drivers'
+    ) {
+      return
+    }
+
+    void loadManagedDrivers()
+  }, [
+    isLoggedIn,
+    activeView,
+    loadManagedDrivers
+  ])
+
+  const blankDriverForm = () => ({
+    firstName: '',
+    lastName: '',
+    email: '',
+    password: '',
+    phone: '',
+    currentTruckNumber: '',
+    physicalTruckNumber: '',
+    licenseNumber: '',
+    licenseState: '',
+    currentTrailerNumber: '',
+    currentTrailerLicense: ''
+  })
+
+  const openCreateDriver = () => {
+    setEditingDriverId(null)
+    setDriverManagerError('')
+    setDriverForm(blankDriverForm())
+    setDriverModalOpen(true)
+  }
+
+  const openEditDriver = (
+    driver: DriverRecord
+  ) => {
+    setEditingDriverId(driver.id)
+    setDriverManagerError('')
+    setDriverForm({
+      firstName:
+        driver.profile?.firstName || '',
+      lastName:
+        driver.profile?.lastName || '',
+      email:
+        driver.email || '',
+      password: '',
+      phone:
+        driver.profile?.phone || '',
+      currentTruckNumber:
+        driver.profile?.currentTruckNumber || '',
+      physicalTruckNumber:
+        driver.profile?.physicalTruckNumber || '',
+      licenseNumber:
+        driver.profile?.licenseNumber || '',
+      licenseState:
+        driver.profile?.licenseState || '',
+      currentTrailerNumber:
+        driver.profile?.currentTrailerNumber || '',
+      currentTrailerLicense:
+        driver.profile?.currentTrailerLicense || ''
+    })
+    setDriverModalOpen(true)
+  }
+
+  const saveDriverAccount =
+    async () => {
+      const token =
+        localStorage.getItem(
+          'maverick_token'
+        )
+
+      if (!token) {
+        return
+      }
+
+      if (
+        !driverForm.firstName.trim() ||
+        !driverForm.lastName.trim() ||
+        !driverForm.email.trim()
+      ) {
+        setDriverManagerError(
+          'First name, last name and email are required.'
+        )
+        return
+      }
+
+      if (
+        editingDriverId == null &&
+        driverForm.password.length < 8
+      ) {
+        setDriverManagerError(
+          'New drivers need a password of at least 8 characters.'
+        )
+        return
+      }
+
+      setDriverSaving(true)
+      setDriverManagerError('')
+
+      try {
+        const isEditing =
+          editingDriverId != null
+
+        const body: Record<string, unknown> = {
+          firstName:
+            driverForm.firstName.trim(),
+          lastName:
+            driverForm.lastName.trim(),
+          email:
+            driverForm.email.trim().toLowerCase(),
+          phone:
+            formatDispatchPhone(
+              driverForm.phone
+            ),
+          currentTruckNumber:
+            driverForm.currentTruckNumber
+              .trim()
+              .toUpperCase(),
+          physicalTruckNumber:
+            driverForm.physicalTruckNumber
+              .trim(),
+          licenseNumber:
+            driverForm.licenseNumber.trim(),
+          licenseState:
+            driverForm.licenseState
+              .trim()
+              .toUpperCase(),
+          currentTrailerNumber:
+            driverForm.currentTrailerNumber
+              .trim(),
+          currentTrailerLicense:
+            driverForm.currentTrailerLicense
+              .trim()
+        }
+
+        if (
+          driverForm.password.trim()
+        ) {
+          body.password =
+            driverForm.password
+        }
+
+        const response =
+          await fetch(
+            isEditing
+              ? `${API_BASE}/api/drivers/${editingDriverId}`
+              : `${API_BASE}/api/drivers`,
+            {
+              method:
+                isEditing
+                  ? 'PATCH'
+                  : 'POST',
+              headers: {
+                'Content-Type':
+                  'application/json',
+                Authorization:
+                  `Bearer ${token}`
+              },
+              body:
+                JSON.stringify(body)
+            }
+          )
+
+        const payload =
+          await response.json()
+
+        if (!response.ok || !payload.ok) {
+          setDriverManagerError(
+            payload.message ||
+            'Unable to save driver.'
+          )
+          return
+        }
+
+        setDriverModalOpen(false)
+        setEditingDriverId(null)
+        setDriverForm(blankDriverForm())
+
+        await Promise.all([
+          loadManagedDrivers(),
+          loadDrivers(),
+          loadAssets()
+        ])
+      } catch {
+        setDriverManagerError(
+          'Unable to connect to Maverick.'
+        )
+      } finally {
+        setDriverSaving(false)
+      }
+    }
+
+  const setDriverActiveState =
+    async (
+      driver: DriverRecord,
+      active: boolean
+    ) => {
+      const token =
+        localStorage.getItem(
+          'maverick_token'
+        )
+
+      if (!token) {
+        return
+      }
+
+      if (
+        !window.confirm(
+          active
+            ? `Reactivate ${driver.name}?`
+            : `Disable ${driver.name}? The driver will no longer be able to sign in.`
+        )
+      ) {
+        return
+      }
+
+      setDriverManagerError('')
+
+      try {
+        const response =
+          await fetch(
+            `${API_BASE}/api/drivers/${driver.id}`,
+            {
+              method: 'PATCH',
+              headers: {
+                'Content-Type':
+                  'application/json',
+                Authorization:
+                  `Bearer ${token}`
+              },
+              body:
+                JSON.stringify({
+                  active
+                })
+            }
+          )
+
+        const payload =
+          await response.json()
+
+        if (!response.ok || !payload.ok) {
+          setDriverManagerError(
+            payload.message ||
+            'Unable to update driver.'
+          )
+          return
+        }
+
+        await Promise.all([
+          loadManagedDrivers(),
+          loadDrivers()
+        ])
+      } catch {
+        setDriverManagerError(
+          'Unable to connect to Maverick.'
+        )
+      }
+    }
 
 
   const loadBackendNotifications =
@@ -5719,6 +6082,14 @@ function App() {
     currentUser?.name ||
     currentUser?.email ||
     'Maverick User'
+
+  const isAdmin =
+    ['company_admin', 'superadmin']
+      .includes(
+        String(
+          currentUser?.role || ''
+        ).toLowerCase()
+      )
 
   const userRole =
     currentUser?.role
@@ -8314,6 +8685,23 @@ function App() {
             Fleet
           </button>
 
+          {
+            isAdmin && (
+              <button
+                className={
+                  activeView === 'drivers'
+                    ? 'active'
+                    : ''
+                }
+                onClick={() =>
+                  setActiveView('drivers')
+                }
+              >
+                Drivers
+              </button>
+            )
+          }
+
           <button
             className={
               activeView ===
@@ -10130,6 +10518,444 @@ function App() {
 
               </div>
 
+            </section>
+          )
+        }
+
+        {/* ================================= */}
+        {/* DRIVER MANAGEMENT PAGE */}
+        {/* ================================= */}
+
+        {
+          activeView === 'drivers' &&
+          isAdmin && (
+            <section className="workspace-page">
+              <div className="page-header">
+                <div>
+                  <span className="page-kicker">
+                    Administration
+                  </span>
+                  <h1>
+                    MavDriver Accounts
+                  </h1>
+                  <p>
+                    Only fleet administrators can create and manage driver sign-in accounts.
+                  </p>
+                </div>
+
+                <button
+                  className="primary-action"
+                  type="button"
+                  onClick={openCreateDriver}
+                >
+                  + Add Driver
+                </button>
+              </div>
+
+              {
+                driverManagerError && (
+                  <div
+                    style={{
+                      marginBottom: 14,
+                      padding: '11px 14px',
+                      borderRadius: 10,
+                      border: '1px solid rgba(239,68,68,.38)',
+                      background: 'rgba(127,29,29,.18)',
+                      color: '#fecaca',
+                      fontWeight: 700
+                    }}
+                  >
+                    {driverManagerError}
+                  </div>
+                )
+              }
+
+              <div className="page-card">
+                <div
+                  style={{
+                    display: 'grid',
+                    gridTemplateColumns:
+                      'minmax(180px,1.4fr) minmax(190px,1.4fr) minmax(140px,1fr) minmax(130px,1fr) 110px minmax(180px,1fr)',
+                    gap: 12,
+                    alignItems: 'center',
+                    padding: '13px 16px',
+                    borderBottom:
+                      '1px solid rgba(148,163,184,.18)',
+                    color: '#94a3b8',
+                    fontSize: '.72rem',
+                    fontWeight: 850,
+                    letterSpacing: '.08em',
+                    textTransform: 'uppercase'
+                  }}
+                >
+                  <span>Driver</span>
+                  <span>Email</span>
+                  <span>Internal TRK</span>
+                  <span>Physical Truck</span>
+                  <span>Status</span>
+                  <span>Actions</span>
+                </div>
+
+                {
+                  driverManagerLoading
+                    ? (
+                      <div className="page-empty">
+                        Loading driver accounts...
+                      </div>
+                    )
+                    : managedDrivers.length > 0
+                      ? managedDrivers.map(
+                          (driver) => (
+                            <div
+                              key={driver.id}
+                              style={{
+                                display: 'grid',
+                                gridTemplateColumns:
+                                  'minmax(180px,1.4fr) minmax(190px,1.4fr) minmax(140px,1fr) minmax(130px,1fr) 110px minmax(180px,1fr)',
+                                gap: 12,
+                                alignItems: 'center',
+                                padding: '14px 16px',
+                                borderBottom:
+                                  '1px solid rgba(148,163,184,.12)'
+                              }}
+                            >
+                              <div>
+                                <strong
+                                  style={{
+                                    display: 'block',
+                                    color: '#f8fafc'
+                                  }}
+                                >
+                                  {
+                                    driver.profile?.firstName ||
+                                    driver.profile?.lastName
+                                      ? `${driver.profile?.firstName || ''} ${driver.profile?.lastName || ''}`.trim()
+                                      : driver.name
+                                  }
+                                </strong>
+                                <small
+                                  style={{
+                                    color: '#64748b'
+                                  }}
+                                >
+                                  {driver.profile?.phone || 'No phone'}
+                                </small>
+                              </div>
+
+                              <span
+                                style={{
+                                  color: '#cbd5e1',
+                                  overflow: 'hidden',
+                                  textOverflow: 'ellipsis'
+                                }}
+                              >
+                                {driver.email}
+                              </span>
+
+                              <strong
+                                style={{
+                                  color: '#93c5fd'
+                                }}
+                              >
+                                {
+                                  driver.profile
+                                    ?.currentTruckNumber ||
+                                  '—'
+                                }
+                              </strong>
+
+                              <span
+                                style={{
+                                  color: '#cbd5e1'
+                                }}
+                              >
+                                {
+                                  driver.profile
+                                    ?.physicalTruckNumber ||
+                                  '—'
+                                }
+                              </span>
+
+                              <span
+                                className={
+                                  `inline-status ${
+                                    driver.active
+                                      ? 'online'
+                                      : 'offline'
+                                  }`
+                                }
+                              >
+                                {
+                                  driver.active
+                                    ? 'Active'
+                                    : 'Disabled'
+                                }
+                              </span>
+
+                              <div
+                                className="row-actions"
+                                style={{
+                                  flexWrap: 'wrap'
+                                }}
+                              >
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    openEditDriver(driver)
+                                  }
+                                >
+                                  Edit
+                                </button>
+
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    void setDriverActiveState(
+                                      driver,
+                                      !driver.active
+                                    )
+                                  }
+                                >
+                                  {
+                                    driver.active
+                                      ? 'Disable'
+                                      : 'Reactivate'
+                                  }
+                                </button>
+                              </div>
+                            </div>
+                          )
+                        )
+                      : (
+                        <div className="page-empty">
+                          No MavDriver accounts yet.
+                        </div>
+                      )
+                }
+              </div>
+
+              {
+                driverModalOpen && (
+                  <div
+                    style={{
+                      position: 'fixed',
+                      inset: 0,
+                      zIndex: 5000,
+                      background:
+                        'rgba(2,6,23,.78)',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      padding: 20
+                    }}
+                    onMouseDown={(event) => {
+                      if (
+                        event.target ===
+                        event.currentTarget
+                      ) {
+                        setDriverModalOpen(false)
+                      }
+                    }}
+                  >
+                    <div
+                      className="page-card"
+                      style={{
+                        width: 'min(820px,96vw)',
+                        maxHeight: '90vh',
+                        overflowY: 'auto',
+                        padding: 20
+                      }}
+                    >
+                      <div
+                        style={{
+                          display: 'flex',
+                          justifyContent:
+                            'space-between',
+                          gap: 16,
+                          alignItems: 'center',
+                          marginBottom: 18
+                        }}
+                      >
+                        <div>
+                          <span className="page-kicker">
+                            Driver Account
+                          </span>
+                          <h2
+                            style={{
+                              margin:
+                                '4px 0 0'
+                            }}
+                          >
+                            {
+                              editingDriverId != null
+                                ? 'Edit Driver'
+                                : 'Create Driver'
+                            }
+                          </h2>
+                        </div>
+
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setDriverModalOpen(false)
+                          }
+                        >
+                          Close
+                        </button>
+                      </div>
+
+                      <div
+                        style={{
+                          display: 'grid',
+                          gridTemplateColumns:
+                            'repeat(2,minmax(0,1fr))',
+                          gap: 14
+                        }}
+                      >
+                        {
+                          [
+                            ['First Name', 'firstName', 'text'],
+                            ['Last Name', 'lastName', 'text'],
+                            ['Email', 'email', 'email'],
+                            [
+                              editingDriverId != null
+                                ? 'New Password (optional)'
+                                : 'Temporary Password',
+                              'password',
+                              'password'
+                            ],
+                            ['Phone', 'phone', 'tel'],
+                            ['Internal Tracking ID', 'currentTruckNumber', 'text'],
+                            ['Physical Truck #', 'physicalTruckNumber', 'text'],
+                            ['License #', 'licenseNumber', 'text'],
+                            ['License State', 'licenseState', 'text'],
+                            ['Trailer #', 'currentTrailerNumber', 'text'],
+                            ['Trailer License', 'currentTrailerLicense', 'text']
+                          ].map(
+                            ([label, field, type]) => (
+                              <label
+                                key={field}
+                                style={{
+                                  display: 'grid',
+                                  gap: 6
+                                }}
+                              >
+                                <span
+                                  style={{
+                                    color: '#94a3b8',
+                                    fontSize: '.75rem',
+                                    fontWeight: 800
+                                  }}
+                                >
+                                  {label}
+                                </span>
+                                <input
+                                  type={type}
+                                  value={
+                                    driverForm[
+                                      field as keyof typeof driverForm
+                                    ]
+                                  }
+                                  onChange={(event) =>
+                                    setDriverForm(
+                                      (current) => ({
+                                        ...current,
+                                        [field]:
+                                          field === 'phone'
+                                            ? formatDispatchPhone(
+                                                event.target.value
+                                              )
+                                            : field === 'currentTruckNumber' ||
+                                                field === 'licenseState'
+                                              ? event.target.value.toUpperCase()
+                                              : event.target.value
+                                      })
+                                    )
+                                  }
+                                  placeholder={
+                                    field === 'currentTruckNumber'
+                                      ? 'TRK-TEST-002'
+                                      : field === 'physicalTruckNumber'
+                                        ? 'TRK 126'
+                                        : ''
+                                  }
+                                />
+                              </label>
+                            )
+                          )
+                        }
+                      </div>
+
+                      <div
+                        style={{
+                          marginTop: 16,
+                          padding: '12px 14px',
+                          borderRadius: 10,
+                          background:
+                            'rgba(37,99,235,.10)',
+                          border:
+                            '1px solid rgba(96,165,250,.22)',
+                          color: '#bfdbfe',
+                          fontSize: '.78rem',
+                          lineHeight: 1.5
+                        }}
+                      >
+                        The Internal Tracking ID is the PHONE asset used by MAVTRACK for this driver's GPS. If it does not exist yet, MAVTRACK will create it automatically.
+                      </div>
+
+                      {
+                        driverManagerError && (
+                          <div
+                            style={{
+                              marginTop: 14,
+                              color: '#fecaca',
+                              fontWeight: 700
+                            }}
+                          >
+                            {driverManagerError}
+                          </div>
+                        )
+                      }
+
+                      <div
+                        style={{
+                          marginTop: 18,
+                          display: 'flex',
+                          justifyContent: 'flex-end',
+                          gap: 10
+                        }}
+                      >
+                        <button
+                          type="button"
+                          disabled={driverSaving}
+                          onClick={() =>
+                            setDriverModalOpen(false)
+                          }
+                        >
+                          Cancel
+                        </button>
+
+                        <button
+                          className="primary-action"
+                          type="button"
+                          disabled={driverSaving}
+                          onClick={() =>
+                            void saveDriverAccount()
+                          }
+                        >
+                          {
+                            driverSaving
+                              ? 'Saving...'
+                              : editingDriverId != null
+                                ? 'Save Driver'
+                                : 'Create Driver'
+                          }
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                )
+              }
             </section>
           )
         }

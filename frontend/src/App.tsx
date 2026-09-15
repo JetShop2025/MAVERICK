@@ -4465,8 +4465,52 @@ function App() {
           )
         }
 
-        const blob =
+        let blob =
           await response.blob()
+
+        // Repair signature SVG files created by older MavDriver builds.
+        // The legacy Base64 encoder truncated Unicode code points to one
+        // byte, so U+2014 (—) could become illegal XML character U+0014.
+        const contentType =
+          (
+            response.headers.get(
+              'content-type'
+            ) ||
+            blob.type ||
+            ''
+          ).toLowerCase()
+
+        if (
+          contentType.includes(
+            'image/svg+xml'
+          ) ||
+          fileName
+            .toLowerCase()
+            .endsWith('.svg')
+        ) {
+          const svgText =
+            await blob.text()
+
+          const repairedSvg =
+            svgText
+              .replace(
+                /\u0014/g,
+                '—'
+              )
+              .replace(
+                /[\u0000-\u0008\u000B\u000C\u000E-\u0013\u0015-\u001F\u007F]/g,
+                ''
+              )
+
+          blob =
+            new Blob(
+              [repairedSvg],
+              {
+                type:
+                  'image/svg+xml;charset=utf-8'
+              }
+            )
+        }
 
         const url =
           URL.createObjectURL(

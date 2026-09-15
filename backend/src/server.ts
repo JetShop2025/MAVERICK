@@ -3209,6 +3209,170 @@ app.patch(
 )
 
 
+// =====================================================
+// DELETE / ARCHIVE ASSET
+// =====================================================
+//
+// We soft-delete assets instead of physically deleting the database row.
+// This preserves telemetry and historical dispatch relationships while
+// removing the asset from the active Fleet list.
+//
+// For PHONE/TRK assets, any driver profile currently pointing at this
+// internal tracking ID is unlinked so the driver does not keep referencing
+// an archived asset.
+//
+app.delete(
+  '/api/assets/:id',
+  requireAuth,
+  async (
+    req: AuthenticatedRequest,
+    res: Response
+  ) => {
+    try {
+      const companyId =
+        req.user?.companyId
+
+      const role =
+        req.user?.role
+
+      if (!companyId) {
+        return res.status(401).json({
+          ok: false,
+          message: 'Invalid session'
+        })
+      }
+
+      if (
+        role !== 'company_admin' &&
+        role !== 'superadmin'
+      ) {
+        return res.status(403).json({
+          ok: false,
+          message:
+            'You do not have permission to delete assets'
+        })
+      }
+
+      const assetId =
+        Number(req.params.id)
+
+      if (!Number.isInteger(assetId)) {
+        return res.status(400).json({
+          ok: false,
+          message: 'Invalid asset ID'
+        })
+      }
+
+      const asset =
+        await prisma.asset.findFirst({
+          where: {
+            id: assetId,
+            companyId
+          },
+          select: {
+            id: true,
+            deviceId: true,
+            name: true,
+            active: true,
+            assetType: true,
+            trackingSource: true
+          }
+        })
+
+      if (!asset) {
+        return res.status(404).json({
+          ok: false,
+          message: 'Asset not found'
+        })
+      }
+
+      const activeDispatch =
+        await prisma.dispatch.findFirst({
+          where: {
+            companyId,
+            assetId: asset.id,
+            status: {
+              notIn: [
+                'DELIVERED',
+                'CANCELLED'
+              ]
+            }
+          },
+          select: {
+            id: true,
+            loadNumber: true,
+            status: true
+          }
+        })
+
+      if (activeDispatch) {
+        return res.status(409).json({
+          ok: false,
+          message:
+            `Asset is assigned to active load ${activeDispatch.loadNumber}. Close or reassign that load before deleting the asset.`
+        })
+      }
+
+      await prisma.$transaction(
+        async (tx) => {
+          await tx.asset.update({
+            where: {
+              id: asset.id
+            },
+            data: {
+              active: false
+            }
+          })
+
+          await tx.camera.updateMany({
+            where: {
+              assetId: asset.id,
+              active: true
+            },
+            data: {
+              active: false
+            }
+          })
+
+          await tx.driverProfile.updateMany({
+            where: {
+              companyId,
+              currentTruckNumber: {
+                equals: asset.deviceId,
+                mode: 'insensitive'
+              }
+            },
+            data: {
+              currentTruckNumber: null
+            }
+          })
+        }
+      )
+
+      return res.json({
+        ok: true,
+        deleted: {
+          id: asset.id,
+          deviceId: asset.deviceId,
+          name: asset.name
+        }
+      })
+    } catch (error) {
+      console.error(
+        'Delete asset error:',
+        error
+      )
+
+      return res.status(500).json({
+        ok: false,
+        message:
+          'Unable to delete asset'
+      })
+    }
+  }
+)
+
+
 function normalizeRememberedAddress(value: string) {
   return value
     .trim()

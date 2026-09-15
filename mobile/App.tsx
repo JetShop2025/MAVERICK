@@ -213,9 +213,15 @@ async function postLocationToMavtrack(
   location: Location.LocationObject,
   deviceId: string,
   force = false
-) {
+): Promise<{
+  ok: boolean;
+  sent: boolean;
+}> {
   if (!MOBILE_TELEMETRY_KEY || !deviceId) {
-    return false;
+    return {
+      ok: false,
+      sent: false,
+    };
   }
 
   const now = Date.now();
@@ -236,7 +242,10 @@ async function postLocationToMavtrack(
       now - lastPingAt <
         GPS_PING_MIN_GAP_MS
     ) {
-      return true;
+      return {
+        ok: true,
+        sent: false,
+      };
     }
   }
 
@@ -276,7 +285,10 @@ async function postLocationToMavtrack(
     );
   }
 
-  return response.ok;
+  return {
+    ok: response.ok,
+    sent: response.ok,
+  };
 }
 
 TaskManager.defineTask(
@@ -330,17 +342,20 @@ TaskManager.defineTask(
     );
 
     try {
-      const sent =
+      const result =
         await postLocationToMavtrack(
           latestLocation,
           deviceId
         );
 
-      if (sent) {
+      if (result.sent) {
         await SecureStore.setItemAsync(
           LAST_BACKGROUND_SEND_KEY,
           new Date().toISOString()
         );
+      }
+
+      if (result.ok) {
         await SecureStore.deleteItemAsync(
           LAST_BACKGROUND_ERROR_KEY
         );
@@ -1326,7 +1341,7 @@ export default function App() {
     });
 
     try {
-      const sent =
+      const result =
         await postLocationToMavtrack(
           location,
           deviceId,
@@ -1334,7 +1349,9 @@ export default function App() {
         );
 
       setServerStatus(
-        sent ? "CONNECTED" : "SEND FAILED"
+        result.ok
+          ? "CONNECTED"
+          : "SEND FAILED"
       );
     } catch {
       setServerStatus("SEND FAILED");
@@ -1441,7 +1458,29 @@ export default function App() {
           setTracking(true);
           setTrackingMode("foreground");
           setTrackingStatus(
-            "FOREGROUND TRACKING ACTIVE"
+            "BACKGROUND LOCATION NOT ALLOWED"
+          );
+
+          Alert.alert(
+            "Background Location Required",
+            "Set MavDriver location access to Always so GPS can continue when the iPhone is locked or another app is open."
+          );
+          return;
+        }
+
+        const backgroundAvailable =
+          await Location.isBackgroundLocationAvailableAsync();
+
+        if (!backgroundAvailable) {
+          setTracking(true);
+          setTrackingMode("foreground");
+          setTrackingStatus(
+            "BACKGROUND GPS UNAVAILABLE"
+          );
+
+          Alert.alert(
+            "Background GPS Unavailable",
+            "This installed build does not have iOS background location enabled. Install the newest TestFlight build."
           );
           return;
         }
@@ -1466,9 +1505,17 @@ export default function App() {
           {
             accuracy:
               Location.Accuracy.BestForNavigation,
-            distanceInterval: 5,
+
+            // iOS background tracking must be driven by Core Location,
+            // not by a JavaScript timer. Ask for continuous native
+            // callbacks; network POSTs remain throttled to ~1/minute.
+            distanceInterval: 0,
+
+            // Deliver native fixes without batching.
             deferredUpdatesDistance: 0,
             deferredUpdatesInterval: 0,
+
+            // Keep Core Location active while locked/backgrounded.
             pausesUpdatesAutomatically: false,
             activityType:
               Location.ActivityType
@@ -1489,13 +1536,26 @@ export default function App() {
         setTrackingStatus(
           "BACKGROUND GPS ACTIVE"
         );
-      } catch {
-        // Foreground tracking is already alive.
-        // Keep it running instead of showing GPS ERROR.
+      } catch (backgroundError) {
         setTracking(true);
         setTrackingMode("foreground");
         setTrackingStatus(
-          "FOREGROUND TRACKING ACTIVE"
+          "BACKGROUND GPS FAILED"
+        );
+
+        const message =
+          backgroundError instanceof Error
+            ? backgroundError.message
+            : "Unable to start iOS background location.";
+
+        await SecureStore.setItemAsync(
+          LAST_BACKGROUND_ERROR_KEY,
+          `${new Date().toISOString()} · ${message}`
+        );
+
+        Alert.alert(
+          "Background GPS could not start",
+          message
         );
       }
     } catch (err) {
@@ -2450,22 +2510,67 @@ function encodeAsciiBase64(
   const alphabet =
     "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 
-  let output = "";
+  const bytes: number[] = [];
 
   for (
     let index = 0;
     index < value.length;
+    index++
+  ) {
+    let codePoint =
+      value.codePointAt(index) ?? 0;
+
+    if (codePoint > 0xffff) {
+      index++;
+    }
+
+    if (codePoint <= 0x7f) {
+      bytes.push(codePoint);
+    } else if (
+      codePoint <= 0x7ff
+    ) {
+      bytes.push(
+        0xc0 | (codePoint >> 6),
+        0x80 | (codePoint & 0x3f)
+      );
+    } else if (
+      codePoint <= 0xffff
+    ) {
+      bytes.push(
+        0xe0 | (codePoint >> 12),
+        0x80 |
+          ((codePoint >> 6) & 0x3f),
+        0x80 |
+          (codePoint & 0x3f)
+      );
+    } else {
+      bytes.push(
+        0xf0 | (codePoint >> 18),
+        0x80 |
+          ((codePoint >> 12) & 0x3f),
+        0x80 |
+          ((codePoint >> 6) & 0x3f),
+        0x80 |
+          (codePoint & 0x3f)
+      );
+    }
+  }
+
+  let output = "";
+
+  for (
+    let index = 0;
+    index < bytes.length;
     index += 3
   ) {
-    const a =
-      value.charCodeAt(index) & 255;
+    const a = bytes[index];
     const b =
-      index + 1 < value.length
-        ? value.charCodeAt(index + 1) & 255
+      index + 1 < bytes.length
+        ? bytes[index + 1]
         : NaN;
     const c =
-      index + 2 < value.length
-        ? value.charCodeAt(index + 2) & 255
+      index + 2 < bytes.length
+        ? bytes[index + 2]
         : NaN;
 
     const triple =
@@ -2476,12 +2581,20 @@ function encodeAsciiBase64(
     output +=
       alphabet[(triple >> 18) & 63] +
       alphabet[(triple >> 12) & 63] +
-      (Number.isNaN(b)
-        ? "="
-        : alphabet[(triple >> 6) & 63]) +
-      (Number.isNaN(c)
-        ? "="
-        : alphabet[triple & 63]);
+      (
+        Number.isNaN(b)
+          ? "="
+          : alphabet[
+              (triple >> 6) & 63
+            ]
+      ) +
+      (
+        Number.isNaN(c)
+          ? "="
+          : alphabet[
+              triple & 63
+            ]
+      );
   }
 
   return output;
@@ -2687,6 +2800,10 @@ function SignatureAcceptanceScreen({
         value: string
       ) =>
         value
+          .replace(
+            /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g,
+            ""
+          )
           .replace(/&/g, "&amp;")
           .replace(/</g, "&lt;")
           .replace(/>/g, "&gt;")

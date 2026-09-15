@@ -2281,43 +2281,28 @@ function HomeScreen({
         </Text>
       </View>
 
-      <View
-        style={{
-          marginTop: 10,
-          padding: 12,
-          borderRadius: 12,
-          backgroundColor: "#0B1726",
-          borderWidth: 1,
-          borderColor: "#1D2A3A",
-        }}
-      >
-        <Text
+      {backgroundLastError ? (
+        <View
           style={{
-            color: "#E5EEF8",
-            fontWeight: "800",
-            marginBottom: 6,
+            marginTop: 10,
+            padding: 12,
+            borderRadius: 12,
+            backgroundColor: "#2A1520",
+            borderWidth: 1,
+            borderColor: "#6B2637",
           }}
         >
-          Background GPS
-        </Text>
-        <Text style={{ color: "#9FB0C3", fontSize: 12 }}>
-          Last native fix: {backgroundLastFix}
-        </Text>
-        <Text style={{ color: "#9FB0C3", fontSize: 12 }}>
-          Last server send: {backgroundLastSend}
-        </Text>
-        {backgroundLastError ? (
           <Text
             style={{
               color: "#FCA5A5",
               fontSize: 12,
-              marginTop: 4,
+              fontWeight: "700",
             }}
           >
-            {backgroundLastError}
+            GPS background error: {backgroundLastError}
           </Text>
-        ) : null}
-      </View>
+        </View>
+      ) : null}
     </ScrollView>
   );
 }
@@ -2623,6 +2608,9 @@ function SignatureAcceptanceScreen({
   const [saving, setSaving] =
     useState(false);
 
+  const [isSigning, setIsSigning] =
+    useState(false);
+
   const width = 320;
   const height = 180;
 
@@ -2665,6 +2653,18 @@ function SignatureAcceptanceScreen({
           ? [...current, null]
           : current
     );
+  };
+
+  const beginSignatureStroke = (
+    event: any
+  ) => {
+    setIsSigning(true);
+    addPoint(event);
+  };
+
+  const finishSignatureStroke = () => {
+    endStroke();
+    setIsSigning(false);
   };
 
   const visiblePoints =
@@ -2897,6 +2897,9 @@ function SignatureAcceptanceScreen({
         contentContainerStyle={
           styles.signatureContent
         }
+        scrollEnabled={!isSigning}
+        keyboardShouldPersistTaps="handled"
+        showsVerticalScrollIndicator={false}
       >
         <View
           style={styles.detailCard}
@@ -2931,17 +2934,26 @@ function SignatureAcceptanceScreen({
             onMoveShouldSetResponder={() =>
               true
             }
+            onStartShouldSetResponderCapture={() =>
+              true
+            }
+            onMoveShouldSetResponderCapture={() =>
+              true
+            }
+            onResponderTerminationRequest={() =>
+              false
+            }
             onResponderGrant={
-              addPoint
+              beginSignatureStroke
             }
             onResponderMove={
               addPoint
             }
             onResponderRelease={
-              endStroke
+              finishSignatureStroke
             }
             onResponderTerminate={
-              endStroke
+              finishSignatureStroke
             }
           >
             {

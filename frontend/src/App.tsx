@@ -3251,7 +3251,7 @@ function App() {
         try {
           const response =
             await fetch(
-              `${API_BASE}/api/drivers/manage`,
+              `${API_BASE}/api/drivers`,
               {
                 headers: {
                   Authorization:
@@ -5255,22 +5255,14 @@ function App() {
     }
 
   const isAssetAssignableToDispatch = (
-    asset: any
+    _asset: any
   ) => {
-    if (assetTypeCode(asset) !== 'TRK') {
-      return true
-    }
-
-    const item =
-      fleetTelemetry[
-        asset.deviceId
-      ]
-
-    return (
-      getDeviceStatusForTelemetry(
-        item
-      ) === 'online'
-    )
+    // Assignment is a planning action, not a connectivity action.
+    // Keep offline/delayed TRK assets selectable so a dispatcher can
+    // assign the load before the driver opens MavDriver. The driver
+    // assignment is stored in PostgreSQL and will appear when the app
+    // next connects and refreshes /api/driver/assignments.
+    return true
   }
 
   const availableAssets =

@@ -49,8 +49,10 @@ const USER_KEY = "mavtrack_driver_user";
 const TRACKING_DEVICE_KEY =
   "mavtrack_tracking_device_id";
 
-const GPS_PING_INTERVAL_MS = 60_000;
-const GPS_PING_MIN_GAP_MS = 55_000;
+const GPS_PING_INTERVAL_MS = 30_000;
+const GPS_MOVING_MIN_GAP_MS = 15_000;
+const GPS_PARKED_MIN_GAP_MS = 55_000;
+const TRACKING_HEARTBEAT_INTERVAL_MS = 30_000;
 const LAST_GPS_PING_KEY =
   "mavtrack_last_gps_ping_at";
 
@@ -226,6 +228,17 @@ async function postLocationToMavtrack(
 
   const now = Date.now();
 
+  const speedKph =
+    location.coords.speed != null &&
+    location.coords.speed >= 0
+      ? location.coords.speed * 3.6
+      : null;
+
+  const minGapMs =
+    speedKph != null && speedKph >= 5
+      ? GPS_MOVING_MIN_GAP_MS
+      : GPS_PARKED_MIN_GAP_MS;
+
   if (!force) {
     const savedLastPing =
       await SecureStore.getItemAsync(
@@ -239,8 +252,7 @@ async function postLocationToMavtrack(
 
     if (
       Number.isFinite(lastPingAt) &&
-      now - lastPingAt <
-        GPS_PING_MIN_GAP_MS
+      now - lastPingAt < minGapMs
     ) {
       return {
         ok: true,
@@ -248,12 +260,6 @@ async function postLocationToMavtrack(
       };
     }
   }
-
-  const speedKph =
-    location.coords.speed != null &&
-    location.coords.speed >= 0
-      ? location.coords.speed * 3.6
-      : null;
 
   const response = await fetch(
     `${API_URL}/api/mobile/telemetry`,
@@ -271,6 +277,7 @@ async function postLocationToMavtrack(
         speedKph,
         heading: location.coords.heading,
         accuracy: location.coords.accuracy,
+        trackingActive: true,
         recordedAt: new Date(
           location.timestamp
         ).toISOString(),
@@ -289,6 +296,37 @@ async function postLocationToMavtrack(
     ok: response.ok,
     sent: response.ok,
   };
+}
+
+async function postTrackingStateToMavtrack(
+  deviceId: string,
+  active: boolean
+): Promise<boolean> {
+  if (!MOBILE_TELEMETRY_KEY || !deviceId) {
+    return false;
+  }
+
+  try {
+    const response = await fetch(
+      `${API_URL}/api/mobile/tracking-state`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-mavtrack-key": MOBILE_TELEMETRY_KEY,
+        },
+        body: JSON.stringify({
+          deviceId,
+          active,
+          reportedAt: new Date().toISOString(),
+        }),
+      }
+    );
+
+    return response.ok;
+  } catch {
+    return false;
+  }
 }
 
 TaskManager.defineTask(
@@ -1299,12 +1337,24 @@ export default function App() {
       }
     };
 
-    // START already sends the first point immediately.
-    // After that, request and transmit one fresh fix every 60 seconds.
+    // Foreground behavior: refresh GPS frequently, similar to MAV2.
+    // iOS background delivery is still driven by native Core Location.
     liveGpsPollRef.current =
       setInterval(() => {
         void sendMinuteGpsPing();
       }, GPS_PING_INTERVAL_MS);
+
+    // Keep the server-side PHONE tracking session fresh whenever
+    // JavaScript is running. If iOS suspends JS while locked, the
+    // persistent trackingActive state still prevents a parked truck
+    // from being treated as a disconnected tracker.
+    heartbeatRef.current =
+      setInterval(() => {
+        void postTrackingStateToMavtrack(
+          trackingDeviceId,
+          true
+        );
+      }, TRACKING_HEARTBEAT_INTERVAL_MS);
 
     return () => {
       if (heartbeatRef.current) {
@@ -1361,16 +1411,32 @@ export default function App() {
   async function beginForegroundTracking(
     deviceId: string
   ) {
-    // We intentionally do not depend on watchPositionAsync anymore.
-    // The reliable path proven by STOP -> START is a fresh
-    // getCurrentPositionAsync request. We repeat that once per minute.
     foregroundWatchRef.current?.remove();
     foregroundWatchRef.current = null;
+
+    // Keep a native foreground subscription for immediate movement
+    // updates while the app is open. The background TaskManager takes
+    // over when iOS locks/backgrounds the app.
+    foregroundWatchRef.current =
+      await Location.watchPositionAsync(
+        {
+          accuracy:
+            Location.Accuracy.BestForNavigation,
+          distanceInterval: 5,
+          timeInterval: 10_000,
+        },
+        (location) => {
+          void applyLocationUpdate(
+            location,
+            deviceId
+          );
+        }
+      );
 
     setTracking(true);
     setTrackingMode("foreground");
     setTrackingStatus(
-      "FOREGROUND GPS FALLBACK"
+      "GPS ACTIVE"
     );
   }
 
@@ -1420,6 +1486,11 @@ export default function App() {
       await SecureStore.setItemAsync(
         TRACKING_DEVICE_KEY,
         trackingDeviceId
+      );
+
+      await postTrackingStateToMavtrack(
+        trackingDeviceId,
+        true
       );
 
       // Send the first point immediately so the TRK
@@ -1506,10 +1577,10 @@ export default function App() {
             accuracy:
               Location.Accuracy.BestForNavigation,
 
-            // iOS background tracking must be driven by Core Location,
-            // not by a JavaScript timer. Ask for continuous native
-            // callbacks; network POSTs remain throttled to ~1/minute.
-            distanceInterval: 0,
+            // Native Core Location drives background GPS. Five meters
+            // is small enough to behave like a fleet tracker while moving,
+            // without depending on a suspended JavaScript timer.
+            distanceInterval: 5,
 
             // Deliver native fixes without batching.
             deferredUpdatesDistance: 0,
@@ -1594,6 +1665,11 @@ export default function App() {
       } catch {
         // Native background API may not exist in Expo Go.
       }
+
+      await postTrackingStateToMavtrack(
+        trackingDeviceId,
+        false
+      );
 
       await SecureStore.deleteItemAsync(
         TRACKING_DEVICE_KEY
@@ -1937,8 +2013,6 @@ export default function App() {
           trackingStatus={trackingStatus}
           serverStatus={serverStatus}
           gps={gps}
-          backgroundLastFix={backgroundLastFix}
-          backgroundLastSend={backgroundLastSend}
           backgroundLastError={backgroundLastError}
           onOpenLoad={(load) =>
             setSelectedLoad(load)
@@ -2006,8 +2080,6 @@ function HomeScreen({
   trackingStatus,
   serverStatus,
   gps,
-  backgroundLastFix,
-  backgroundLastSend,
   backgroundLastError,
   onOpenLoad,
   onOpenPending,
@@ -2026,8 +2098,6 @@ function HomeScreen({
   trackingStatus: string;
   serverStatus: string;
   gps: GPSData | null;
-  backgroundLastFix: string;
-  backgroundLastSend: string;
   backgroundLastError: string;
   onOpenLoad: (load: Dispatch) => void;
   onOpenPending: () => void;
@@ -4049,28 +4119,6 @@ function BottomTabs({
         badge={pendingCount}
         active={tab === "loads"}
         onPress={() => onChange("loads")}
-      />
-      <TabButton
-        label="Map"
-        icon="◇"
-        active={false}
-        onPress={() =>
-          Alert.alert(
-            "Map",
-            "Driver map view will be connected next."
-          )
-        }
-      />
-      <TabButton
-        label="Alerts"
-        icon="♢"
-        active={false}
-        onPress={() =>
-          Alert.alert(
-            "Alerts",
-            "Driver alerts will be connected next."
-          )
-        }
       />
       <TabButton
         label="Profile"

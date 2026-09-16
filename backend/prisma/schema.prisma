@@ -83,6 +83,14 @@ model Asset {
   assetType      String @default("TRL")
   trackingSource String @default("MAV2")
 
+  // Persistent PHONE tracking session state. This is separate from GPS
+  // freshness because iOS may pause location callbacks while stationary.
+  trackingActive    Boolean  @default(false)
+  trackingStartedAt DateTime?
+  trackingStoppedAt DateTime?
+  lastHeartbeatAt   DateTime?
+  lastPhoneGpsAt    DateTime?
+
   temperatureMinC          Float?
   temperatureMaxC          Float?
   temperatureAlertsEnabled Boolean @default(false)

@@ -600,101 +600,70 @@ async function ensureAdminUser() {
   )
 
 
-  // =====================================
-  // CREAR ASSET TRAILER-001
-  // =====================================
-
-  const asset =
-    await prisma.asset.upsert({
-      where: {
-        deviceId: 'TRAILER-001'
-      },
-
-      update: {
-        companyId: company.id,
-        active: true
-      },
-
-      create: {
+  // Demo assets are no longer recreated automatically in production.
+  // This is important because an asset intentionally deleted from Fleet
+  // must stay deleted after a Render restart or deploy. Demo seeding can
+  // still be enabled explicitly when needed.
+  if (
+    process.env.SEED_DEMO_ASSETS ===
+    'true'
+  ) {
+    const demoAssets = [
+      {
         deviceId: 'TRAILER-001',
         name: 'TRAILER-001',
         description:
           'Maverick tracking unit',
         assetType: 'TRL',
-        trackingSource: 'MAV2',
-        companyId: company.id
-      }
-    })
-
-  console.log(
-    `Asset ready: ${asset.deviceId}`
-  )
-
-
-  // =====================================
-  // CREAR ASSET TRAILER-002
-  // =====================================
-
-  const asset2 =
-    await prisma.asset.upsert({
-      where: {
-        deviceId: 'TRAILER-002'
+        trackingSource: 'MAV2'
       },
-
-      update: {
-        companyId: company.id,
-        active: true
-      },
-
-      create: {
+      {
         deviceId: 'TRAILER-002',
         name: 'TRAILER-002',
         description:
           'Maverick T-SIM7670G-S3 tracking unit',
         assetType: 'TRL',
-        trackingSource: 'MAV2',
-        companyId: company.id,
-        active: true
-      }
-    })
-
-  console.log(
-    `Asset ready: ${asset2.deviceId}`
-  )
-
-
-  // =====================================
-  // CREAR TRUCK DE PRUEBA / PHONE GPS
-  // =====================================
-
-  const truckTest =
-    await prisma.asset.upsert({
-      where: {
-        deviceId: 'TRK-TEST-001'
+        trackingSource: 'MAV2'
       },
-
-      update: {
-        companyId: company.id,
-        active: true,
-        assetType: 'TRK',
-        trackingSource: 'PHONE'
-      },
-
-      create: {
+      {
         deviceId: 'TRK-TEST-001',
         name: 'TRK-TEST-001',
         description:
           'MAVTRACK Driver phone tracking',
-        companyId: company.id,
         assetType: 'TRK',
-        trackingSource: 'PHONE',
-        active: true
+        trackingSource: 'PHONE'
       }
-    })
+    ] as const
 
-  console.log(
-    `Truck asset ready: ${truckTest.deviceId}`
-  )
+    for (const demo of demoAssets) {
+      const seeded =
+        await prisma.asset.upsert({
+          where: {
+            deviceId:
+              demo.deviceId
+          },
+          update: {
+            companyId:
+              company.id,
+            active: true,
+            assetType:
+              demo.assetType,
+            trackingSource:
+              demo.trackingSource
+          },
+          create: {
+            ...demo,
+            companyId:
+              company.id,
+            active: true
+          }
+        })
+
+      console.log(
+        `Demo asset ready: ${seeded.deviceId}`
+      )
+    }
+  }
 
 
   // =====================================
@@ -1005,37 +974,6 @@ function isDriver(
   return role === 'driver'
 }
 
-async function isTruckOnlineForDispatch(
-  assetId: number
-) {
-  const latestTelemetry =
-    await prisma.telemetry.findFirst({
-      where: {
-        assetId,
-        isBackfill: false
-      },
-      orderBy: {
-        receivedAt: 'desc'
-      },
-      select: {
-        receivedAt: true
-      }
-    })
-
-  if (!latestTelemetry?.receivedAt) {
-    return false
-  }
-
-  const ageMs =
-    Date.now() -
-    latestTelemetry.receivedAt.getTime()
-
-  return (
-    ageMs >= 0 &&
-    ageMs < 120000
-  )
-}
-
 const driverInclude = {
   driverProfile: true
 } as const
@@ -1075,143 +1013,6 @@ async function validateDriverEquipment(
 
   return truck.deviceId
 }
-
-async function ensurePhoneTruckAssetForDriver(
-  companyId: number,
-  currentTruckNumber: unknown
-) {
-  const truckNumber =
-    optionalString(currentTruckNumber)
-      ?.toUpperCase()
-
-  if (!truckNumber) {
-    return null
-  }
-
-  const existing =
-    await prisma.asset.findUnique({
-      where: {
-        deviceId: truckNumber
-      }
-    })
-
-  if (existing) {
-    if (
-      existing.companyId !== companyId ||
-      String(existing.assetType).toUpperCase() !== 'TRK'
-    ) {
-      throw new Error(
-        'INVALID_DRIVER_TRUCK'
-      )
-    }
-
-    if (
-      !existing.active ||
-      String(existing.trackingSource).toUpperCase() !== 'PHONE'
-    ) {
-      await prisma.asset.update({
-        where: {
-          id: existing.id
-        },
-        data: {
-          active: true,
-          assetType: 'TRK',
-          trackingSource: 'PHONE'
-        }
-      })
-    }
-
-    return existing.deviceId
-  }
-
-  const created =
-    await prisma.asset.create({
-      data: {
-        deviceId: truckNumber,
-        name: truckNumber,
-        description:
-          'MAVTRACK Driver phone tracking',
-        companyId,
-        assetType: 'TRK',
-        trackingSource: 'PHONE',
-        active: true
-      }
-    })
-
-  return created.deviceId
-}
-
-
-app.get(
-  '/api/drivers/manage',
-  requireAuth,
-  async (
-    req: AuthenticatedRequest,
-    res: Response
-  ) => {
-    try {
-      const companyId =
-        req.user?.companyId
-
-      if (!companyId) {
-        return res.status(401).json({
-          ok: false,
-          message: 'Invalid session'
-        })
-      }
-
-      if (!isCompanyAdmin(req.user?.role)) {
-        return res.status(403).json({
-          ok: false,
-          message:
-            'You do not have permission to manage drivers'
-        })
-      }
-
-      const drivers =
-        await prisma.user.findMany({
-          where: {
-            companyId,
-            role: 'driver'
-          },
-          include: driverInclude,
-          orderBy: [
-            {
-              active: 'desc'
-            },
-            {
-              name: 'asc'
-            }
-          ]
-        })
-
-      return res.json({
-        ok: true,
-        drivers: drivers.map((driver) => ({
-          id: driver.id,
-          email: driver.email,
-          name: driver.name,
-          role: driver.role,
-          active: driver.active,
-          companyId: driver.companyId,
-          profile: driver.driverProfile
-        }))
-      })
-    } catch (error) {
-      console.error(
-        'Manage drivers error:',
-        error
-      )
-
-      return res.status(500).json({
-        ok: false,
-        message:
-          'Unable to load driver accounts'
-      })
-    }
-  }
-)
-
 
 app.get(
   '/api/drivers',
@@ -1378,7 +1179,7 @@ app.post(
         )
 
       const currentTruckNumber =
-        await ensurePhoneTruckAssetForDriver(
+        await validateDriverEquipment(
           companyId,
           req.body?.currentTruckNumber
         )
@@ -1414,10 +1215,6 @@ app.post(
                     req.body?.profilePhotoUrl
                   ),
                 currentTruckNumber,
-                physicalTruckNumber:
-                  optionalString(
-                    req.body?.physicalTruckNumber
-                  ),
                 currentTrailerNumber:
                   optionalString(
                     req.body?.currentTrailerNumber
@@ -1557,7 +1354,7 @@ app.patch(
         undefined
       ) {
         profileData.currentTruckNumber =
-          await ensurePhoneTruckAssetForDriver(
+          await validateDriverEquipment(
             companyId,
             req.body.currentTruckNumber
           )
@@ -3210,17 +3007,9 @@ app.patch(
 
 
 // =====================================================
-// DELETE / ARCHIVE ASSET
+// ELIMINAR ASSET
 // =====================================================
-//
-// We soft-delete assets instead of physically deleting the database row.
-// This preserves telemetry and historical dispatch relationships while
-// removing the asset from the active Fleet list.
-//
-// For PHONE/TRK assets, any driver profile currently pointing at this
-// internal tracking ID is unlinked so the driver does not keep referencing
-// an archived asset.
-//
+
 app.delete(
   '/api/assets/:id',
   requireAuth,
@@ -3273,9 +3062,22 @@ app.delete(
             id: true,
             deviceId: true,
             name: true,
-            active: true,
-            assetType: true,
-            trackingSource: true
+            dispatches: {
+              where: {
+                status: {
+                  notIn: [
+                    'DELIVERED',
+                    'CANCELLED'
+                  ]
+                }
+              },
+              select: {
+                id: true,
+                loadNumber: true,
+                status: true
+              },
+              take: 1
+            }
           }
         })
 
@@ -3286,64 +3088,57 @@ app.delete(
         })
       }
 
-      const activeDispatch =
-        await prisma.dispatch.findFirst({
-          where: {
-            companyId,
-            assetId: asset.id,
-            status: {
-              notIn: [
-                'DELIVERED',
-                'CANCELLED'
-              ]
-            }
-          },
-          select: {
-            id: true,
-            loadNumber: true,
-            status: true
-          }
-        })
+      const activeLoad =
+        asset.dispatches[0]
 
-      if (activeDispatch) {
+      if (activeLoad) {
         return res.status(409).json({
           ok: false,
           message:
-            `Asset is assigned to active load ${activeDispatch.loadNumber}. Close or reassign that load before deleting the asset.`
+            `Asset is assigned to active load ${activeLoad.loadNumber}. Deliver or cancel that load before deleting the asset.`
         })
       }
 
       await prisma.$transaction(
         async (tx) => {
-          await tx.asset.update({
+          // Preserve historical telemetry, notifications and loads, but
+          // detach them from the asset before the asset itself is removed.
+          await tx.telemetry.updateMany({
+            where: {
+              assetId: asset.id
+            },
+            data: {
+              assetId: null
+            }
+          })
+
+          await tx.notificationEvent.updateMany({
+            where: {
+              assetId: asset.id
+            },
+            data: {
+              assetId: null
+            }
+          })
+
+          await tx.dispatch.updateMany({
+            where: {
+              assetId: asset.id
+            },
+            data: {
+              assetId: null
+            }
+          })
+
+          await tx.camera.deleteMany({
+            where: {
+              assetId: asset.id
+            }
+          })
+
+          await tx.asset.delete({
             where: {
               id: asset.id
-            },
-            data: {
-              active: false
-            }
-          })
-
-          await tx.camera.updateMany({
-            where: {
-              assetId: asset.id,
-              active: true
-            },
-            data: {
-              active: false
-            }
-          })
-
-          await tx.driverProfile.updateMany({
-            where: {
-              companyId,
-              currentTruckNumber: {
-                equals: asset.deviceId,
-                mode: 'insensitive'
-              }
-            },
-            data: {
-              currentTruckNumber: null
             }
           })
         }
@@ -3353,7 +3148,8 @@ app.delete(
         ok: true,
         deleted: {
           id: asset.id,
-          deviceId: asset.deviceId,
+          deviceId:
+            asset.deviceId,
           name: asset.name
         }
       })
@@ -4292,23 +4088,6 @@ app.post(
           })
         }
 
-        if (
-          String(asset.assetType).toUpperCase() === 'TRK'
-        ) {
-          const truckOnline =
-            await isTruckOnlineForDispatch(
-              asset.id
-            )
-
-          if (!truckOnline) {
-            return res.status(409).json({
-              ok: false,
-              message:
-                'TRK must be online before it can be assigned to a load'
-            })
-          }
-        }
-
         const conflicting =
           await prisma.dispatch.findFirst({
             where: {
@@ -4816,24 +4595,6 @@ app.patch(
             })
           }
 
-          if (
-            existing.assetId !== asset.id &&
-            String(asset.assetType).toUpperCase() === 'TRK'
-          ) {
-            const truckOnline =
-              await isTruckOnlineForDispatch(
-                asset.id
-              )
-
-            if (!truckOnline) {
-              return res.status(409).json({
-                ok: false,
-                message:
-                  'TRK must be online before it can be assigned to a load'
-              })
-            }
-          }
-
           const conflicting =
             await prisma.dispatch.findFirst({
               where: {
@@ -5201,11 +4962,7 @@ app.post(
             companyId
           },
           include: {
-            stops: {
-              select: {
-                id: true
-              }
-            }
+            stops: true
           }
         })
 
@@ -7705,6 +7462,123 @@ app.post(
 
 
 // =====================================================
+// ESTADO DE SESION DE TRACKING MOVIL / TRK
+// =====================================================
+
+app.post(
+  '/api/mobile/tracking-state',
+  async (req, res) => {
+    try {
+      const requestKey =
+        typeof req.headers['x-mavtrack-key'] === 'string'
+          ? req.headers['x-mavtrack-key'].trim()
+          : ''
+
+      if (
+        !MOBILE_TELEMETRY_KEY ||
+        requestKey !== MOBILE_TELEMETRY_KEY
+      ) {
+        return res.status(401).json({
+          ok: false,
+          message:
+            'Invalid mobile telemetry credentials'
+        })
+      }
+
+      const deviceId =
+        typeof req.body?.deviceId === 'string'
+          ? req.body.deviceId.trim()
+          : ''
+
+      const active =
+        req.body?.active === true
+
+      if (!deviceId) {
+        return res.status(400).json({
+          ok: false,
+          message: 'deviceId is required'
+        })
+      }
+
+      const asset =
+        await prisma.asset.findUnique({
+          where: {
+            deviceId
+          }
+        })
+
+      if (
+        !asset ||
+        !asset.active ||
+        asset.assetType !== 'TRK' ||
+        asset.trackingSource !== 'PHONE'
+      ) {
+        return res.status(404).json({
+          ok: false,
+          message:
+            'Truck asset not found'
+        })
+      }
+
+      const now =
+        new Date()
+
+      const updated =
+        await prisma.asset.update({
+          where: {
+            id: asset.id
+          },
+          data: active
+            ? {
+                trackingActive: true,
+                trackingStartedAt:
+                  asset.trackingActive
+                    ? asset.trackingStartedAt
+                    : now,
+                trackingStoppedAt:
+                  null,
+                lastHeartbeatAt:
+                  now
+              }
+            : {
+                trackingActive: false,
+                trackingStoppedAt:
+                  now,
+                lastHeartbeatAt:
+                  now
+              },
+          select: {
+            id: true,
+            deviceId: true,
+            trackingActive: true,
+            trackingStartedAt: true,
+            trackingStoppedAt: true,
+            lastHeartbeatAt: true,
+            lastPhoneGpsAt: true
+          }
+        })
+
+      return res.json({
+        ok: true,
+        tracking: updated
+      })
+    } catch (error) {
+      console.error(
+        'Mobile tracking state error:',
+        error
+      )
+
+      return res.status(500).json({
+        ok: false,
+        message:
+          'Unable to update tracking state'
+      })
+    }
+  }
+)
+
+
+// =====================================================
 // RECIBIR TELEMETRIA MOVIL / TRK
 // =====================================================
 
@@ -7736,6 +7610,7 @@ app.post(
         speedKph,
         heading,
         accuracy,
+        trackingActive,
         recordedAt
       } = req.body
 
@@ -7898,45 +7773,76 @@ app.post(
           ? 'MOVING'
           : 'STOPPED'
 
-      const telemetry =
-        await prisma.telemetry.create({
-          data: {
-            deviceId:
-              normalizedDeviceId,
+      const [telemetry] =
+        await prisma.$transaction([
+          prisma.telemetry.create({
+            data: {
+              deviceId:
+                normalizedDeviceId,
 
-            temperature:
-              null,
+              temperature:
+                null,
 
-            latitude,
-            longitude,
+              latitude,
+              longitude,
 
-            altitude:
-              safeAltitude,
+              altitude:
+                safeAltitude,
 
-            speedKph:
-              effectiveSpeedKph,
+              speedKph:
+                effectiveSpeedKph,
 
-            movementStatus,
+              movementStatus,
 
-            source:
-              'PHONE',
+              source:
+                'PHONE',
 
-            accuracyMeters:
-              safeAccuracy,
+              accuracyMeters:
+                safeAccuracy,
 
-            headingDegrees:
-              safeHeading,
+              headingDegrees:
+                safeHeading,
 
-            recordedAt:
-              safeRecordedAt,
+              recordedAt:
+                safeRecordedAt,
 
-            isBackfill:
-              false,
+              isBackfill:
+                false,
 
-            assetId:
-              asset.id
-          }
-        })
+              assetId:
+                asset.id
+            }
+          }),
+
+          prisma.asset.update({
+            where: {
+              id: asset.id
+            },
+            data: {
+              trackingActive:
+                trackingActive === false
+                  ? false
+                  : true,
+              lastHeartbeatAt:
+                new Date(),
+              lastPhoneGpsAt:
+                safeRecordedAt,
+              ...(trackingActive === false
+                ? {
+                    trackingStoppedAt:
+                      new Date()
+                  }
+                : {
+                    trackingStartedAt:
+                      asset.trackingActive
+                        ? asset.trackingStartedAt
+                        : new Date(),
+                    trackingStoppedAt:
+                      null
+                  })
+            }
+          })
+        ])
 
       console.log(
         'Mobile telemetry received:',

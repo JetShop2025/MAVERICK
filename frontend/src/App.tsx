@@ -350,7 +350,7 @@ const getBatteryLabel = (
 }
 
 // Keep Leaflet's default marker assets available for compatibility.
-// Maverick uses a custom status-aware trailer icon below.
+// MAVTRACK uses a custom status-aware trailer icon below.
 void markerIcon2x
 void markerIcon
 void markerShadow
@@ -1322,6 +1322,11 @@ function PublicLoadTrackingPage({
     setError
   ] = useState('')
 
+  const [
+    publicTab,
+    setPublicTab
+  ] = useState<'documents' | 'temperature' | 'details'>('documents')
+
   const loadPublicTracking =
     useCallback(
       async () => {
@@ -1352,7 +1357,7 @@ function PublicLoadTrackingPage({
           setError('')
         } catch {
           setError(
-            'Unable to connect to Maverick.'
+            'Unable to connect to MAVTRACK.'
           )
         } finally {
           setLoading(false)
@@ -1471,80 +1476,10 @@ function PublicLoadTrackingPage({
     driver?.currentTrailerLicense ||
     '—'
 
-  // Customer-facing timeline: when stop-level events exist, show only those
-  // so derived global statuses (Loaded, In Transit, etc.) do not repeat.
-  // Keep oldest -> newest so the customer reads the trip in route order.
-  const publicStatusEvents =
-    Array.isArray(dispatch?.statusEvents)
-      ? dispatch.statusEvents
-      : []
-
-  const publicStopStatusEvents =
-    publicStatusEvents.filter(
-      (event: any) =>
-        String(
-          event?.eventType || ''
-        ).toUpperCase() === 'STOP_STATUS'
-    )
-
-  const publicTimelineEvents =
-    [
-      ...(publicStopStatusEvents.length > 0
-        ? publicStopStatusEvents
-        : publicStatusEvents)
-    ]
-      .sort(
-        (a: any, b: any) =>
-          new Date(a?.createdAt || 0).getTime() -
-          new Date(b?.createdAt || 0).getTime()
-      )
-      .filter(
-        (event: any, index: number, items: any[]) => {
-          if (index === 0) return true
-
-          const previous = items[index - 1]
-
-          return !(
-            String(previous?.eventType || '') === String(event?.eventType || '') &&
-            String(previous?.title || '') === String(event?.title || '') &&
-            String(previous?.notes || '') === String(event?.notes || '') &&
-            String(previous?.createdAt || '') === String(event?.createdAt || '')
-          )
-        }
-      )
-
   const publicStops =
     Array.isArray(dispatch?.stops)
       ? dispatch.stops
       : []
-
-  const publicProgressPoints =
-    publicStops.reduce(
-      (total: number, stop: DispatchStopRecord) => {
-        const value =
-          stop.status === 'COMPLETED'
-            ? 3
-            : stop.status === 'ARRIVED'
-              ? 2
-              : stop.status === 'EN_ROUTE'
-                ? 1
-                : 0
-
-        return total + value
-      },
-      0
-    )
-
-  const publicProgressPercent =
-    publicStops.length > 0
-      ? Math.round(
-          (publicProgressPoints /
-            (publicStops.length * 3)) *
-            100
-        )
-      : dispatch?.status === 'DELIVERED'
-        ? 100
-        : 0
 
   if (loading) {
     return (
@@ -1552,7 +1487,7 @@ function PublicLoadTrackingPage({
         <div className="public-track-message">
           <img
             src={maverickLogo}
-            alt="Maverick"
+            alt="MAVTRACK"
           />
           <strong>
             Loading secure load tracking…
@@ -1571,7 +1506,7 @@ function PublicLoadTrackingPage({
         <div className="public-track-message">
           <img
             src={maverickLogo}
-            alt="Maverick"
+            alt="MAVTRACK"
           />
           <strong>
             Tracking link unavailable
@@ -1587,888 +1522,391 @@ function PublicLoadTrackingPage({
     )
   }
 
+  const publicLocationAllowed = share?.allowLocation !== false
+  const publicEtaAllowed = share?.allowEta !== false
+  const publicTemperatureAllowed =
+    share?.allowTemperature !== false &&
+    dispatch.asset?.trackingSource !== 'PHONE'
+  const publicDriverAllowed = share?.allowDriverInfo !== false
+
+  const sortedPublicStops = [...publicStops].sort(
+    (a: DispatchStopRecord, b: DispatchStopRecord) =>
+      a.sequence - b.sequence
+  )
+
+  const routeNodes = sortedPublicStops.length > 0
+    ? sortedPublicStops
+    : [
+        {
+          id: 'pickup-fallback',
+          sequence: 1,
+          pairNumber: 1,
+          type: 'PICKUP' as const,
+          status: dispatch.status === 'ASSIGNED' ? 'PENDING' as const : 'COMPLETED' as const,
+          name: dispatch.pickupName,
+          address: dispatch.pickupAddress,
+          scheduledAt: dispatch.pickupScheduledAt,
+          completedAt: null
+        },
+        {
+          id: 'drop-fallback',
+          sequence: 2,
+          pairNumber: 1,
+          type: 'DROP' as const,
+          status: dispatch.status === 'DELIVERED' ? 'COMPLETED' as const : 'PENDING' as const,
+          name: dispatch.deliveryName,
+          address: dispatch.deliveryAddress,
+          scheduledAt: dispatch.deliveryScheduledAt,
+          completedAt: dispatch.completedAt
+        }
+      ]
+
+  const sharedLabels = [
+    publicLocationAllowed ? 'Location' : null,
+    publicTemperatureAllowed ? 'Temperature' : null,
+    publicDriverAllowed ? 'Driver info' : null,
+    publicEtaAllowed ? 'ETA / schedule' : null
+  ].filter(Boolean)
+
   return (
-    <div className="public-track-shell">
-      <header className="public-track-header">
+    <div className="public-track-shell public-track-v2">
+      <header className="public-track-header public-track-v2-header">
         <div className="public-track-brand">
-          <img
-            src={maverickLogo}
-            alt="Maverick"
-          />
+          <img src={maverickLogo} alt="MAVTRACK" />
           <div>
-            <strong>
-              MAVERICK
-            </strong>
-            <span>
-              Secure Load Tracking
-            </span>
+            <strong>MAVTRACK</strong>
+            <span>Secure Load Tracking</span>
           </div>
         </div>
 
         <div className="public-track-updated">
-          Updated {
-            formatPublicTime(
-              telemetry?.receivedAt
-            )
-          }
+          Updated {formatPublicTime(telemetry?.receivedAt)}
         </div>
       </header>
 
-      <main className="public-track-main public-track-main-complete">
-        <section className="public-track-hero">
-          <div>
-            <span className="page-kicker">
-              Load
-            </span>
-
-            <h1>
-              {dispatch.loadNumber}
-            </h1>
-
+      <main className="public-track-v2-main">
+        <section className="public-track-v2-hero">
+          <div className="public-track-v2-load">
+            <span className="page-kicker">Load</span>
+            <h1>{dispatch.loadNumber}</h1>
             <p>
-              {
-                dispatch.asset?.name ||
-                dispatch.asset?.deviceId ||
-                truckNumber
-              }
+              {dispatch.asset?.name || dispatch.asset?.deviceId || truckNumber}
             </p>
+            {share?.customerName && (
+              <small>
+                Customer <strong>{share.customerName}</strong>
+              </small>
+            )}
           </div>
 
-          <div className="public-track-hero-actions">
-            {
-              share?.customerName && (
-                <span className="public-track-customer">
-                  {share.customerName}
-                </span>
-              )
-            }
-
-            <div
-              className={
-                `public-track-status ${String(
-                  dispatch.status
-                ).toLowerCase()}`
-              }
-            >
-              {
-                publicDispatchStatusLabel(
-                  dispatch.status
-                )
-              }
+          <div className="public-track-v2-state">
+            <div className={`public-track-v2-status ${String(dispatch.status).toLowerCase()}`}>
+              <i />
+              {publicDispatchStatusLabel(dispatch.status)}
             </div>
+            <strong>
+              {dispatch.status === 'DELIVERED'
+                ? 'Delivery completed'
+                : dispatch.status === 'CANCELLED'
+                  ? 'Load cancelled'
+                  : 'Load in progress'}
+            </strong>
+            <span>
+              {publicLocationAllowed && telemetry?.locationIsCurrent
+                ? 'Live tracking active'
+                : 'Customer tracking active'}
+            </span>
+          </div>
+
+          <div className="public-track-v2-hero-metric">
+            <span>Last Update</span>
+            <strong>{formatPublicTime(telemetry?.receivedAt)}</strong>
+          </div>
+
+          {publicEtaAllowed && (
+            <div className="public-track-v2-hero-metric">
+              <span>Estimated Arrival</span>
+              <strong>{formatPublicTime(dispatch.deliveryScheduledAt)}</strong>
+            </div>
+          )}
+
+          <div className="public-track-v2-hero-visual" aria-hidden="true">
+            <div className="public-track-v2-road" />
+            <div className="public-track-v2-truck">MAVTRACK</div>
+          </div>
+
+          <div className="public-track-v2-sharing-note">
+            <span>🔒</span>
+            Shared with customer: {sharedLabels.join(', ') || 'Basic load status'}
           </div>
         </section>
 
-        <section className="public-track-grid public-track-summary-grid">
-          <article className="public-track-card public-track-stop-card pickup">
-            <span>
-              Pickup
-            </span>
-
-            <strong>
-              {dispatch.pickupName}
-            </strong>
-
-            <p>
-              {dispatch.pickupAddress}
-            </p>
-
-            <div className="public-track-mini-details">
-              <small>
-                Appointment
-                <b>
-                  {
-                    formatPublicTime(
-                      dispatch.pickupScheduledAt
-                    )
-                  }
-                </b>
-              </small>
-
-              {
-                dispatch.pickupPhone && (
-                  <small>
-                    Phone
-                    <b>
-                      {dispatch.pickupPhone}
-                    </b>
-                  </small>
-                )
-              }
-
-              {
-                dispatch.pickupReference && (
-                  <small>
-                    Reference
-                    <b>
-                      {dispatch.pickupReference}
-                    </b>
-                  </small>
-                )
-              }
+        <section
+          className={`public-track-v2-summary ${publicLocationAllowed ? '' : 'no-location'}`}
+        >
+          <article className="public-track-v2-card pickup">
+            <div className="public-track-v2-card-title">
+              <span>●</span>
+              <div>
+                <small>Pickup</small>
+                <strong>{dispatch.pickupName}</strong>
+              </div>
+            </div>
+            <p>{dispatch.pickupAddress}</p>
+            <div className="public-track-v2-facts">
+              {publicEtaAllowed && (
+                <div><span>Appointment</span><strong>{formatPublicTime(dispatch.pickupScheduledAt)}</strong></div>
+              )}
+              <div><span>Status</span><strong>{routeNodes[0]?.status === 'COMPLETED' ? 'Completed' : publicDispatchStatusLabel(dispatch.status)}</strong></div>
+              {routeNodes[0]?.completedAt && (
+                <div><span>Completed</span><strong>{formatPublicTime(routeNodes[0].completedAt)}</strong></div>
+              )}
+              {dispatch.pickupPhone && (
+                <div><span>Phone</span><strong>{dispatch.pickupPhone}</strong></div>
+              )}
+              {dispatch.pickupReference && (
+                <div><span>Reference</span><strong>{dispatch.pickupReference}</strong></div>
+              )}
             </div>
           </article>
 
-          <article className="public-track-card public-track-live-card">
-            <span>
-              Current
-            </span>
-
-            <strong>
-              {truckNumber}
-            </strong>
-
-            <div className="public-track-current-status">
-              <i
-                className={
-                  telemetry?.deviceStatus === 'online' &&
-                  hasLocation &&
-                  telemetry?.locationIsCurrent
-                    ? 'live'
-                    : 'last-known'
-                }
-              />
-
-              <span>
-                {
-                  telemetry?.deviceStatus === 'online' &&
-                  hasLocation &&
-                  telemetry?.locationIsCurrent
-                    ? 'Live GPS'
-                    : hasLocation
-                      ? telemetry?.deviceStatus === 'delayed'
-                        ? 'Delayed · showing last known GPS'
-                        : telemetry?.deviceStatus === 'offline'
-                          ? 'Offline · showing last known GPS'
-                          : 'Last known GPS'
-                      : share?.allowLocation === false
-                        ? 'Location sharing disabled'
-                        : 'GPS unavailable'
-                }
-              </span>
-            </div>
-
-            <div className="public-track-live-metrics">
-              <div>
-                <span>
-                  Speed
-                </span>
-                <strong>
-                  {
-                    speedMph != null
-                      ? `${speedMph.toFixed(1)} mph`
-                      : '—'
-                  }
-                </strong>
-              </div>
-
-              <div>
-                <span>
-                  Accuracy
-                </span>
-                <strong>
-                  {
-                    telemetry?.accuracyMeters != null
-                      ? `${Number(
-                          telemetry.accuracyMeters
-                        ).toFixed(0)} m`
-                      : '—'
-                  }
-                </strong>
-              </div>
-
-              <div>
-                <span>
-                  Heading
-                </span>
-                <strong>
-                  {
-                    telemetry?.headingDegrees != null
-                      ? `${Number(
-                          telemetry.headingDegrees
-                        ).toFixed(0)}°`
-                      : '—'
-                  }
-                </strong>
-              </div>
-            </div>
-
-            <small className="public-track-location-time">
-              Location {
-                formatPublicTime(
-                  telemetry?.locationReceivedAt
-                )
-              }
-            </small>
-          </article>
-
-          <article className="public-track-card public-track-stop-card delivery">
-            <span>
-              Delivery
-            </span>
-
-            <strong>
-              {dispatch.deliveryName}
-            </strong>
-
-            <p>
-              {dispatch.deliveryAddress}
-            </p>
-
-            <div className="public-track-mini-details">
-              <small>
-                Appointment
-                <b>
-                  {
-                    formatPublicTime(
-                      dispatch.deliveryScheduledAt
-                    )
-                  }
-                </b>
-              </small>
-
-              {
-                dispatch.deliveryPhone && (
-                  <small>
-                    Phone
-                    <b>
-                      {dispatch.deliveryPhone}
-                    </b>
-                  </small>
-                )
-              }
-
-              {
-                dispatch.deliveryReference && (
-                  <small>
-                    Reference
-                    <b>
-                      {dispatch.deliveryReference}
-                    </b>
-                  </small>
-                )
-              }
-            </div>
-          </article>
-        </section>
-
-
-        {
-          (dispatch.stops || []).length > 0 && (
-            <section className="public-track-card public-track-route-stops-card">
-              <div className="public-track-section-heading">
-                <span className="page-kicker">
-                  Route Stops
-                </span>
-                <h2>
-                  Pickups & Drops
-                </h2>
-              </div>
-
-              <div className="public-track-stops-list">
-                {
-                  [...dispatch.stops]
-                    .sort(
-                      (
-                        a: DispatchStopRecord,
-                        b: DispatchStopRecord
-                      ) =>
-                        a.sequence -
-                        b.sequence
-                    )
-                    .map(
-                      (
-                        stop: DispatchStopRecord
-                      ) => (
-                        <article
-                          className={`public-track-route-stop ${String(
-                            stop.status
-                          ).toLowerCase()}`}
-                          key={
-                            stop.id ??
-                            `${stop.sequence}-${stop.type}`
-                          }
-                        >
-                          <div className="public-track-route-stop-number">
-                            {stop.pairNumber || stop.sequence}
-                          </div>
-
-                          <div>
-                            <div className="public-track-route-stop-title">
-                              <strong>
-                                {
-                                  stop.type === 'PICKUP'
-                                    ? 'Pickup'
-                                    : 'Drop'
-                                }
-                                {' · '}
-                                {stop.name}
-                              </strong>
-                              <span>
-                                {
-                                  stop.status === 'COMPLETED'
-                                    ? (stop.type === 'PICKUP' ? 'PICKED UP' : 'DELIVERED')
-                                    : String(stop.status).replaceAll('_', ' ')
-                                }
-                              </span>
-                            </div>
-
-                            <p>
-                              {stop.address}
-                            </p>
-
-                            <small>
-                              {
-                                stop.status === 'COMPLETED' && stop.completedAt
-                                  ? `Completed ${formatPublicTime(stop.completedAt)}`
-                                  : stop.status === 'ARRIVED' && stop.arrivedAt
-                                    ? `Arrived ${formatPublicTime(stop.arrivedAt)}`
-                                    : formatPublicTime(stop.scheduledAt)
-                              }
-                              {
-                                stop.reference
-                                  ? ` · Ref ${stop.reference}`
-                                  : ''
-                              }
-                            </small>
-                          </div>
-                        </article>
-                      )
-                    )
-                }
-              </div>
-            </section>
-          )
-        }
-
-        {
-          (dispatch.documents || []).length > 0 && (
-            <section className="public-track-card public-track-documents-card">
-              <div className="public-track-section-heading">
-                <span className="page-kicker">
-                  Documents
-                </span>
-                <h2>
-                  Load Documents
-                </h2>
-              </div>
-
-              <div className="public-track-documents-list">
-                {
-                  (dispatch.documents || []).map(
-                    (
-                      document: DispatchDocumentRecord
-                    ) => (
-                      <a
-                        key={document.id}
-                        href={`${API_BASE}/api/public/track/${encodeURIComponent(
-                          token
-                        )}/documents/${document.id}/file`}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="public-track-document-row"
-                      >
-                        <span>
-                          {
-                            document.isSignature
-                              ? 'SIGN'
-                              : document.category === 'PHOTO'
-                                ? 'IMG'
-                                : 'DOC'
-                          }
-                        </span>
-                        <div>
-                          <strong>
-                            {document.originalName}
-                          </strong>
-                          <small>
-                            {
-                              document.isSignature
-                                ? `Signed by ${document.signedBy || 'driver'}`
-                                : `Uploaded by ${document.uploadedByName || document.uploadedByRole}`
-                            }
-                            {' · '}
-                            {formatPublicTime(document.createdAt)}
-                          </small>
-                        </div>
-                        <b>
-                          View
-                        </b>
-                      </a>
-                    )
-                  )
-                }
-              </div>
-            </section>
-          )
-        }
-
-        {
-          hasLocation ? (
-            <section className="public-track-map-card public-track-map-card-complete">
-              <div className="public-track-map-header">
+          {publicLocationAllowed && (
+            <article className="public-track-v2-card live">
+              <div className="public-track-v2-card-title split">
                 <div>
-                  <span>
-                    Live Location
-                  </span>
-                  <strong>
-                    {
-                      telemetry?.deviceStatus === 'online' &&
-                      telemetry?.locationIsCurrent
-                        ? 'Current truck position'
-                        : 'Last known truck position'
-                    }
-                  </strong>
+                  <small>Current Vehicle Status</small>
+                  <strong>{truckNumber}</strong>
                 </div>
-
-                <small>
-                  {
-                    formatPublicTime(
-                      telemetry?.locationReceivedAt
-                    )
-                  }
-                </small>
+                <span className={`public-track-v2-live-pill ${telemetry?.locationIsCurrent ? 'active' : ''}`}>
+                  ● {telemetry?.locationIsCurrent ? 'Live GPS' : 'Last GPS'}
+                </span>
               </div>
 
-              <div className="public-track-map-wrap">
-                <MapContainer
-                  center={[
-                    Number(
-                      telemetry.latitude
-                    ),
-                    Number(
-                      telemetry.longitude
-                    )
-                  ]}
-                  zoom={13}
-                  className="public-track-map"
-                >
-                  <ResponsiveMapSize />
-
-                  <TileLayer
-                    attribution="&copy; OpenStreetMap contributors"
-                    url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-                  />
-
-                  <Marker
-                    position={[
-                      Number(
-                        telemetry.latitude
-                      ),
-                      Number(
-                        telemetry.longitude
-                      )
-                    ]}
-                    icon={
-                      assetTypeCode(
-                        dispatch.asset
-                      ) === 'TRK'
-                        ? createTruckIcon(
-                            String(
-                              telemetry.movementStatus ||
-                              ''
-                            ).toLowerCase() ===
-                              'moving'
-                              ? 'moving'
-                              : 'parked',
-                            true,
-                            true,
-                            trackingSourceCode(dispatch.asset)
-                          )
-                        : createTrailerIcon(
-                            String(
-                              telemetry.movementStatus ||
-                              ''
-                            ).toLowerCase() ===
-                              'moving'
-                              ? 'moving'
-                              : 'parked',
-                            true,
-                            true
-                          )
-                    }
+              {hasLocation ? (
+                <div className="public-track-v2-mini-map">
+                  <MapContainer
+                    center={[Number(telemetry.latitude), Number(telemetry.longitude)]}
+                    zoom={13}
+                    minZoom={3}
+                    maxZoom={22}
+                    zoomControl={false}
+                    className="public-track-map"
                   >
-                    <Popup>
-                      <strong>
-                        {truckNumber}
-                      </strong>
-                      <br />
-                      {
-                        telemetry?.deviceStatus === 'online' &&
-                        telemetry?.locationIsCurrent
-                          ? 'Current location'
-                          : 'Last known location'
+                    <ResponsiveMapSize />
+                    <TileLayer
+                      attribution="&copy; OpenStreetMap contributors"
+                      url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+                      maxNativeZoom={19}
+                      maxZoom={22}
+                    />
+                    <Marker
+                      position={[Number(telemetry.latitude), Number(telemetry.longitude)]}
+                      icon={
+                        assetTypeCode(dispatch.asset) === 'TRK'
+                          ? createTruckIcon(
+                              String(telemetry.movementStatus || '').toLowerCase() === 'moving'
+                                ? 'moving'
+                                : 'parked',
+                              true,
+                              true,
+                              trackingSourceCode(dispatch.asset)
+                            )
+                          : createTrailerIcon(
+                              String(telemetry.movementStatus || '').toLowerCase() === 'moving'
+                                ? 'moving'
+                                : 'parked',
+                              true,
+                              true
+                            )
                       }
-                    </Popup>
-                  </Marker>
-                </MapContainer>
+                    />
+                  </MapContainer>
+                </div>
+              ) : (
+                <div className="public-track-v2-map-placeholder">Waiting for GPS position</div>
+              )}
+
+              <div className="public-track-v2-live-stats">
+                <div><span>Speed</span><strong>{speedMph != null ? `${speedMph.toFixed(1)} mph` : '—'}</strong></div>
+                <div><span>Accuracy</span><strong>{telemetry?.accuracyMeters != null ? `${Number(telemetry.accuracyMeters).toFixed(0)} m` : '—'}</strong></div>
+                <div><span>Heading</span><strong>{telemetry?.headingDegrees != null ? `${Number(telemetry.headingDegrees).toFixed(0)}°` : '—'}</strong></div>
               </div>
-            </section>
-          ) : (
-            <section className="public-track-map-card public-track-map-empty">
-              <strong>
-                {
-                  share?.allowLocation === false
-                    ? 'Location sharing is disabled for this link'
-                    : 'Waiting for GPS position'
-                }
-              </strong>
-
-              <span>
-                {
-                  share?.allowLocation === false
-                    ? 'The sender chose not to share live location on this customer link.'
-                    : 'MAVTRACK will show the map as soon as this asset reports a valid GPS position.'
-                }
-              </span>
-            </section>
-          )
-        }
-
-        <section className="public-track-detail-layout">
-          <div className="public-track-detail-column">
-            <article className="public-track-card public-track-info-card">
-              <div className="public-track-card-heading">
-                Load Information
-              </div>
-
-              <dl className="public-track-data-grid">
-                <div>
-                  <dt>
-                    Load #
-                  </dt>
-                  <dd>
-                    {dispatch.loadNumber}
-                  </dd>
-                </div>
-
-                <div>
-                  <dt>
-                    Dispatcher
-                  </dt>
-                  <dd>
-                    {valueOrDash(
-                      dispatch.dispatcherName
-                    )}
-                  </dd>
-                </div>
-                <div>
-                  <dt>
-                    Dispatcher Phone
-                  </dt>
-                  <dd>
-                    {valueOrDash(
-                      dispatch.dispatcherPhone
-                    )}
-                  </dd>
-                </div>
-
-                <div>
-                  <dt>
-                    PO #
-                  </dt>
-                  <dd>
-                    {valueOrDash(
-                      dispatch.poNumber
-                    )}
-                  </dd>
-                </div>
-
-                <div>
-                  <dt>
-                    B/L #
-                  </dt>
-                  <dd>
-                    {valueOrDash(
-                      dispatch.bolNumber
-                    )}
-                  </dd>
-                </div>
-
-                <div>
-                  <dt>
-                    Reference
-                  </dt>
-                  <dd>
-                    {valueOrDash(
-                      dispatch.referenceNumber
-                    )}
-                  </dd>
-                </div>
-
-                <div>
-                  <dt>
-                    Commodity
-                  </dt>
-                  <dd>
-                    {valueOrDash(
-                      dispatch.commodity
-                    )}
-                  </dd>
-                </div>
-              </dl>
+              <small className="public-track-v2-location-time">
+                Location {formatPublicTime(telemetry?.locationReceivedAt)}
+              </small>
             </article>
+          )}
 
-            <article className="public-track-card public-track-info-card">
-              <div className="public-track-card-heading">
-                {share?.allowDriverInfo !== false ? 'Driver & Equipment' : 'Equipment'}
-              </div>
-
-              <dl className="public-track-data-grid">
-                {share?.allowDriverInfo !== false && (
-                  <>
-                    <div>
-                      <dt>
-                        Driver
-                      </dt>
-                      <dd>
-                        {valueOrDash(
-                          driver?.name || dispatch.manualDriverName
-                        )}
-                      </dd>
-                    </div>
-
-                    <div>
-                      <dt>
-                        Driver Phone
-                      </dt>
-                      <dd>
-                        {valueOrDash(
-                          driver?.phone
-                        )}
-                      </dd>
-                    </div>
-
-                    <div>
-                      <dt>
-                        Driver License
-                      </dt>
-                      <dd>
-                        {driverLicense}
-                      </dd>
-                    </div>
-                  </>
-                )}
-
-                <div>
-                  <dt>
-                    Truck #
-                  </dt>
-                  <dd>
-                    {truckNumber}
-                  </dd>
-                </div>
-
-                <div>
-                  <dt>
-                    Trailer #
-                  </dt>
-                  <dd>
-                    {trailerNumber}
-                  </dd>
-                </div>
-
-                <div>
-                  <dt>
-                    Trailer License
-                  </dt>
-                  <dd>
-                    {trailerLicense}
-                  </dd>
-                </div>
-              </dl>
-            </article>
-
-            {share?.allowTemperature !== false && dispatch.asset?.trackingSource !== 'PHONE' && (
-<article className="public-track-card public-track-info-card">
-              <div className="public-track-card-heading">
-                Temperature
-              </div>
-
-              <div className="public-track-temperature-grid">
-                <div>
-                  <span>
-                    Current
-                  </span>
-                  <strong>
-                    {
-                      temperatureF != null
-                        ? `${temperatureF}°F`
-                        : '—'
-                    }
-                  </strong>
-                </div>
-
-                <div>
-                  <span>
-                    Set Point
-                  </span>
-                  <strong>
-                    {
-                      temperatureValue(
-                        dispatch.temperatureSetpointC
-                      )
-                    }
-                  </strong>
-                </div>
-
-                <div>
-                  <span>
-                    Minimum
-                  </span>
-                  <strong>
-                    {
-                      temperatureValue(
-                        dispatch.temperatureMinC
-                      )
-                    }
-                  </strong>
-                </div>
-
-                <div>
-                  <span>
-                    Maximum
-                  </span>
-                  <strong>
-                    {
-                      temperatureValue(
-                        dispatch.temperatureMaxC
-                      )
-                    }
-                  </strong>
-                </div>
-              </div>
-            </article>
-)}
-
-            {
-              (
-                dispatch.driverInstructions ||
-                dispatch.notes
-              ) && (
-                <article className="public-track-card public-track-info-card">
-                  <div className="public-track-card-heading">
-                    Instructions & Notes
-                  </div>
-
-                  {
-                    dispatch.driverInstructions && (
-                      <div className="public-track-note-block">
-                        <span>
-                          Driver Instructions
-                        </span>
-                        <p>
-                          {
-                            dispatch.driverInstructions
-                          }
-                        </p>
-                      </div>
-                    )
-                  }
-
-                  {
-                    dispatch.notes && (
-                      <div className="public-track-note-block">
-                        <span>
-                          Load Notes
-                        </span>
-                        <p>
-                          {dispatch.notes}
-                        </p>
-                      </div>
-                    )
-                  }
-                </article>
-              )
-            }
-          </div>
-
-          <article className="public-track-card public-track-history-card public-track-progress-panel">
-            <div className="public-track-progress-heading">
+          <article className="public-track-v2-card delivery">
+            <div className="public-track-v2-card-title">
+              <span>●</span>
               <div>
-                <span className="page-kicker">
-                  Load Timeline
-                </span>
-                <h3>
-                  Progress
-                </h3>
+                <small>Delivery</small>
+                <strong>{dispatch.deliveryName}</strong>
               </div>
-
-              <strong>
-                {publicProgressPercent}%
-              </strong>
             </div>
-
-            <div className="public-track-progress-bar">
-              <i
-                style={{
-                  width: `${publicProgressPercent}%`
-                }}
-              />
-            </div>
-
-            <div className="public-track-timeline public-track-stop-timeline">
-              {
-                publicTimelineEvents.length > 0
-                  ? publicTimelineEvents.map(
-                      (event: any, index: number) => {
-                        const isLatest =
-                          index ===
-                          publicTimelineEvents.length - 1
-
-                        return (
-                          <div
-                            key={
-                              event.id ??
-                              `${event.createdAt}-${index}`
-                            }
-                            className={
-                              `public-track-timeline-item ${
-                                isLatest
-                                  ? 'current'
-                                  : 'complete'
-                              }`
-                            }
-                          >
-                            <i />
-                            <div>
-                              <strong>
-                                {
-                                  event.title ||
-                                  publicDispatchStatusLabel(
-                                    event.status
-                                  )
-                                }
-                              </strong>
-
-                              <span>
-                                {
-                                  formatPublicTime(
-                                    event.createdAt
-                                  )
-                                }
-                              </span>
-
-                              {
-                                event.notes && (
-                                  <small>
-                                    {event.notes}
-                                  </small>
-                                )
-                              }
-                            </div>
-                          </div>
-                        )
-                      }
-                    )
-                  : (
-                    <div className="public-track-progress-empty">
-                      No pickup or drop updates yet.
-                    </div>
-                  )
-              }
+            <p>{dispatch.deliveryAddress}</p>
+            <div className="public-track-v2-facts">
+              {publicEtaAllowed && (
+                <div><span>Appointment</span><strong>{formatPublicTime(dispatch.deliveryScheduledAt)}</strong></div>
+              )}
+              <div><span>Status</span><strong>{dispatch.status === 'DELIVERED' ? 'Completed' : publicDispatchStatusLabel(dispatch.status)}</strong></div>
+              {dispatch.deliveryReference && (
+                <div><span>Reference</span><strong>{dispatch.deliveryReference}</strong></div>
+              )}
+              {dispatch.deliveryPhone && (
+                <div><span>Phone</span><strong>{dispatch.deliveryPhone}</strong></div>
+              )}
             </div>
           </article>
+        </section>
+
+        <section className="public-track-v2-progress">
+          <div className="public-track-v2-progress-copy">
+            <span className="page-kicker">Route Progress</span>
+            <small>Real-time pickup and delivery progress</small>
+          </div>
+
+          <div className="public-track-v2-route-line">
+            {routeNodes.map((stop: any, index: number) => {
+              const done = stop.status === 'COMPLETED'
+              const active = !done && index === routeNodes.findIndex((candidate: any) => candidate.status !== 'COMPLETED')
+              return (
+                <div
+                  className={`public-track-v2-route-node ${done ? 'complete' : active ? 'active' : ''}`}
+                  key={stop.id ?? `${stop.sequence}-${stop.type}`}
+                >
+                  <i>{done ? '✓' : index + 1}</i>
+                  <strong>{stop.type === 'PICKUP' ? `Pickup ${stop.pairNumber || ''}` : `Drop ${stop.pairNumber || ''}`}</strong>
+                  <span>{stop.name}</span>
+                  <small>
+                    {done && stop.completedAt
+                      ? `Completed · ${formatPublicTime(stop.completedAt)}`
+                      : publicEtaAllowed && stop.scheduledAt
+                        ? `ETA · ${formatPublicTime(stop.scheduledAt)}`
+                        : String(stop.status || 'PENDING').replaceAll('_', ' ')}
+                  </small>
+                </div>
+              )
+            })}
+          </div>
+
+          {publicLocationAllowed && hasLocation && (
+            <button
+              type="button"
+              onClick={() => {
+                document.querySelector('.public-track-v2-mini-map')?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+              }}
+            >
+              View Map
+            </button>
+          )}
+        </section>
+
+        <section className="public-track-v2-tabs">
+          <div className="public-track-v2-tabbar">
+            <button
+              className={publicTab === 'documents' ? 'active' : ''}
+              type="button"
+              onClick={() => setPublicTab('documents')}
+            >
+              Documents
+            </button>
+
+            {publicTemperatureAllowed && (
+              <button
+                className={publicTab === 'temperature' ? 'active' : ''}
+                type="button"
+                onClick={() => setPublicTab('temperature')}
+              >
+                Temperature
+              </button>
+            )}
+
+            <button
+              className={publicTab === 'details' ? 'active' : ''}
+              type="button"
+              onClick={() => setPublicTab('details')}
+            >
+              Details
+            </button>
+          </div>
+
+          {publicTab === 'documents' && (
+            <div className="public-track-v2-tabpanel">
+              <div className="public-track-v2-tab-heading">
+                <div>
+                  <strong>Load Documents</strong>
+                  <span>Customer-visible documents for this load</span>
+                </div>
+              </div>
+
+              {(dispatch.documents || []).length > 0 ? (
+                <div className="public-track-v2-docs">
+                  {(dispatch.documents || []).map((document: DispatchDocumentRecord) => (
+                    <a
+                      key={document.id}
+                      href={`${API_BASE}/api/public/track/${encodeURIComponent(token)}/documents/${document.id}/file`}
+                      target="_blank"
+                      rel="noreferrer"
+                    >
+                      <span>{document.isSignature ? 'SIGN' : document.category === 'PHOTO' ? 'IMG' : 'DOC'}</span>
+                      <div>
+                        <strong>{document.originalName}</strong>
+                        <small>{formatPublicTime(document.createdAt)}</small>
+                      </div>
+                      <b>↗</b>
+                    </a>
+                  ))}
+                </div>
+              ) : (
+                <div className="public-track-v2-empty">No customer-visible documents yet.</div>
+              )}
+            </div>
+          )}
+
+          {publicTab === 'temperature' && publicTemperatureAllowed && (
+            <div className="public-track-v2-tabpanel">
+              <div className="public-track-v2-temperature">
+                <div><span>Current</span><strong>{temperatureF != null ? `${temperatureF}°F` : '—'}</strong></div>
+                <div><span>Set Point</span><strong>{temperatureValue(dispatch.temperatureSetpointC)}</strong></div>
+                <div><span>Minimum</span><strong>{temperatureValue(dispatch.temperatureMinC)}</strong></div>
+                <div><span>Maximum</span><strong>{temperatureValue(dispatch.temperatureMaxC)}</strong></div>
+              </div>
+            </div>
+          )}
+
+          {publicTab === 'details' && (
+            <div className="public-track-v2-tabpanel public-track-v2-details">
+              <div>
+                <strong>Load Information</strong>
+                <dl>
+                  <div><dt>Load #</dt><dd>{dispatch.loadNumber}</dd></div>
+                  <div><dt>Dispatcher</dt><dd>{valueOrDash(dispatch.dispatcherName)}</dd></div>
+                  <div><dt>Dispatcher Phone</dt><dd>{valueOrDash(dispatch.dispatcherPhone)}</dd></div>
+                  <div><dt>PO #</dt><dd>{valueOrDash(dispatch.poNumber)}</dd></div>
+                  <div><dt>B/L #</dt><dd>{valueOrDash(dispatch.bolNumber)}</dd></div>
+                  <div><dt>Reference</dt><dd>{valueOrDash(dispatch.referenceNumber)}</dd></div>
+                </dl>
+              </div>
+
+              <div>
+                <strong>{publicDriverAllowed ? 'Driver & Equipment' : 'Equipment'}</strong>
+                <dl>
+                  {publicDriverAllowed && (
+                    <>
+                      <div><dt>Driver</dt><dd>{valueOrDash(driver?.name || dispatch.manualDriverName)}</dd></div>
+                      <div><dt>Driver Phone</dt><dd>{valueOrDash(driver?.phone)}</dd></div>
+                      <div><dt>Driver License</dt><dd>{driverLicense}</dd></div>
+                    </>
+                  )}
+                  <div><dt>Truck #</dt><dd>{truckNumber}</dd></div>
+                  <div><dt>Trailer #</dt><dd>{trailerNumber}</dd></div>
+                  <div><dt>Trailer License</dt><dd>{trailerLicense}</dd></div>
+                </dl>
+              </div>
+            </div>
+          )}
         </section>
       </main>
     </div>
@@ -3544,7 +2982,7 @@ function App() {
           )
         } catch {
           setDispatchError(
-            'Unable to connect to Maverick.'
+            'Unable to connect to MAVTRACK.'
           )
         } finally {
           setDispatchLoading(false)
@@ -3670,7 +3108,7 @@ function App() {
           )
         } catch {
           setDriverManagerError(
-            'Unable to connect to Maverick.'
+            'Unable to connect to MAVTRACK.'
           )
         } finally {
           setDriverManagerLoading(false)
@@ -3867,7 +3305,7 @@ function App() {
         ])
       } catch {
         setDriverManagerError(
-          'Unable to connect to Maverick.'
+          'Unable to connect to MAVTRACK.'
         )
       } finally {
         setDriverSaving(false)
@@ -3936,7 +3374,7 @@ function App() {
         ])
       } catch {
         setDriverManagerError(
-          'Unable to connect to Maverick.'
+          'Unable to connect to MAVTRACK.'
         )
       }
     }
@@ -4006,7 +3444,7 @@ function App() {
     loadBackendNotifications
   ])
 
-  const openShareDispatch = (
+  const openShareDispatch = async (
     dispatch: DispatchRecord
   ) => {
     setShareDispatchId(
@@ -4030,6 +3468,64 @@ function App() {
       allowEta: true
     })
     setShareDispatchOpen(true)
+
+    // Always reload persisted share links from the backend when the modal
+    // opens. Dispatch list responses may not contain the full share URL,
+    // while this endpoint returns every saved link with trackingUrl.
+    const token =
+      localStorage.getItem(
+        'maverick_token'
+      )
+
+    if (!token) {
+      return
+    }
+
+    try {
+      const response =
+        await fetch(
+          `${API_BASE}/api/dispatches/${dispatch.id}/shares`,
+          {
+            headers: {
+              Authorization:
+                `Bearer ${token}`
+            }
+          }
+        )
+
+      const payload =
+        await response.json()
+
+      if (
+        response.ok &&
+        payload.ok
+      ) {
+        const persistedShares =
+          Array.isArray(payload.shares)
+            ? payload.shares
+            : []
+
+        setShareExisting(
+          persistedShares
+        )
+
+        const latestActiveShare =
+          persistedShares.find(
+            (share: DispatchShareRecord) =>
+              !share.revokedAt &&
+              Boolean(share.trackingUrl)
+          )
+
+        if (latestActiveShare?.trackingUrl) {
+          setShareDispatchUrl(
+            latestActiveShare.trackingUrl
+          )
+        }
+      }
+    } catch {
+      // Keep any share data already present on the dispatch. Creating a new
+      // link still remains available even if this refresh temporarily fails.
+    }
   }
 
   const createDispatchShare =
@@ -4128,7 +3624,7 @@ function App() {
         ])
       } catch {
         setShareDispatchError(
-          'Unable to connect to Maverick.'
+          'Unable to connect to MAVTRACK.'
         )
       } finally {
         setShareDispatchSaving(false)
@@ -4199,7 +3695,7 @@ function App() {
         await loadDispatches()
       } catch {
         setShareDispatchError(
-          'Unable to connect to Maverick.'
+          'Unable to connect to MAVTRACK.'
         )
       } finally {
         setShareDispatchSaving(false)
@@ -4465,52 +3961,8 @@ function App() {
           )
         }
 
-        let blob =
+        const blob =
           await response.blob()
-
-        // Repair signature SVG files created by older MavDriver builds.
-        // The legacy Base64 encoder truncated Unicode code points to one
-        // byte, so U+2014 (—) could become illegal XML character U+0014.
-        const contentType =
-          (
-            response.headers.get(
-              'content-type'
-            ) ||
-            blob.type ||
-            ''
-          ).toLowerCase()
-
-        if (
-          contentType.includes(
-            'image/svg+xml'
-          ) ||
-          fileName
-            .toLowerCase()
-            .endsWith('.svg')
-        ) {
-          const svgText =
-            await blob.text()
-
-          const repairedSvg =
-            svgText
-              .replace(
-                /\u0014/g,
-                '—'
-              )
-              .replace(
-                /[\u0000-\u0008\u000B\u000C\u000E-\u0013\u0015-\u001F\u007F]/g,
-                ''
-              )
-
-          blob =
-            new Blob(
-              [repairedSvg],
-              {
-                type:
-                  'image/svg+xml;charset=utf-8'
-              }
-            )
-        }
 
         const url =
           URL.createObjectURL(
@@ -4793,7 +4245,7 @@ function App() {
         await loadDispatches()
       } catch {
         setDispatchError(
-          'Unable to connect to Maverick.'
+          'Unable to connect to MAVTRACK.'
         )
       } finally {
         setNewDispatchSaving(false)
@@ -5283,7 +4735,7 @@ function App() {
         await loadDispatches()
       } catch {
         setDispatchError(
-          'Unable to connect to Maverick.'
+          'Unable to connect to MAVTRACK.'
         )
       } finally {
         setEditDispatchSaving(false)
@@ -5344,7 +4796,7 @@ function App() {
         )
       } catch {
         setDispatchError(
-          'Unable to connect to Maverick.'
+          'Unable to connect to MAVTRACK.'
         )
       }
     }
@@ -5405,7 +4857,7 @@ function App() {
         )
       } catch {
         setDispatchError(
-          'Unable to connect to Maverick.'
+          'Unable to connect to MAVTRACK.'
         )
       }
     }
@@ -5493,7 +4945,7 @@ function App() {
         }
       } catch {
         setDispatchError(
-          'Unable to connect to Maverick.'
+          'Unable to connect to MAVTRACK.'
         )
       } finally {
         setDispatchDeletingId(null)
@@ -6251,7 +5703,7 @@ function App() {
   const userName =
     currentUser?.name ||
     currentUser?.email ||
-    'Maverick User'
+    'MAVTRACK User'
 
   const isAdmin =
     ['company_admin', 'superadmin']
@@ -6415,7 +5867,7 @@ function App() {
   // =====================================================
   // Device connectivity and GPS availability are separate.
   // A trailer can be ONLINE while the GNSS is still
-  // acquiring a fresh fix. In that case Maverick keeps
+  // acquiring a fresh fix. In that case MAVTRACK keeps
   // the previous valid position only as "last known".
 
   const gpsAcquiring =
@@ -6981,7 +6433,7 @@ function App() {
         }
       } catch {
         window.alert(
-          'Unable to connect to Maverick.'
+          'Unable to connect to MAVTRACK.'
         )
       } finally {
         setAssetDeletingId(null)
@@ -7074,7 +6526,7 @@ function App() {
         setRenameValue('')
       } catch {
         setRenameError(
-          'Unable to connect to Maverick.'
+          'Unable to connect to MAVTRACK.'
         )
       } finally {
         setRenameSaving(false)
@@ -7316,7 +6768,7 @@ function App() {
         setTemperatureLimitsOpen(false)
       } catch {
         setTemperatureLimitsError(
-          'Unable to connect to Maverick.'
+          'Unable to connect to MAVTRACK.'
         )
       } finally {
         setTemperatureLimitsSaving(false)
@@ -7396,7 +6848,7 @@ function App() {
         setTemperatureLimitsOpen(false)
       } catch {
         setTemperatureLimitsError(
-          'Unable to connect to Maverick.'
+          'Unable to connect to MAVTRACK.'
         )
       } finally {
         setTemperatureLimitsSaving(false)
@@ -7563,7 +7015,7 @@ function App() {
       } catch {
         setHistoryPoints([])
         setHistoryError(
-          'Unable to connect to Maverick.'
+          'Unable to connect to MAVTRACK.'
         )
       } finally {
         setHistoryLoading(false)
@@ -7708,7 +7160,7 @@ function App() {
       } catch {
         setReportPoints([])
         setReportError(
-          'Unable to connect to Maverick.'
+          'Unable to connect to MAVTRACK.'
         )
       } finally {
         setReportLoading(false)
@@ -7730,7 +7182,7 @@ function App() {
       (
         selectedAsset?.name ||
         selectedDeviceId ||
-        'Maverick'
+        'MAVTRACK'
       )
         .replace(
           /[^a-zA-Z0-9-_]+/g,
@@ -7738,7 +7190,7 @@ function App() {
         )
 
     document.title =
-      `Maverick-${safeAssetName}-Telemetry-Report`
+      `MAVTRACK-${safeAssetName}-Telemetry-Report`
 
     window.print()
 
@@ -8796,11 +8248,11 @@ function App() {
         >
           <img
             src={maverickLogo}
-            alt="Maverick"
+            alt="MAVTRACK"
           />
 
           <strong>
-            MAVERICK
+            MAVTRACK
           </strong>
         </button>
 
@@ -13989,7 +13441,7 @@ function App() {
                   </h1>
 
                   <p>
-                    Generate structured location and temperature reports from stored Maverick telemetry.
+                    Generate structured location and temperature reports from stored MAVTRACK telemetry.
                   </p>
                 </div>
 
@@ -14127,7 +13579,7 @@ function App() {
                     <div className="report-document-header">
                       <div>
                         <span>
-                          MAVERICK
+                          MAVTRACK
                         </span>
 
                         <h2>
@@ -14505,11 +13957,11 @@ function App() {
 
                     <div className="report-footer-note">
                       <span>
-                        Maverick Fleet Telemetry
+                        MAVTRACK Fleet Telemetry
                       </span>
 
                       <span>
-                        Location points are based on current or recorded GNSS telemetry received by Maverick.
+                        Location points are based on current or recorded GNSS telemetry received by MAVTRACK.
                       </span>
                     </div>
 
@@ -14742,7 +14194,7 @@ function App() {
 
             <div className="popover-header">
               <strong>
-                Maverick Help
+                MAVTRACK Help
               </strong>
 
               <button
@@ -16133,24 +15585,87 @@ function App() {
                                       .join(' · ') || 'Basic load status only'
                                   }
                                 </small>
+
+                                {
+                                  share.trackingUrl && (
+                                    <small
+                                      style={{
+                                        display: 'block',
+                                        maxWidth: 620,
+                                        overflow: 'hidden',
+                                        textOverflow: 'ellipsis',
+                                        whiteSpace: 'nowrap',
+                                        color: '#7dd3fc'
+                                      }}
+                                      title={share.trackingUrl}
+                                    >
+                                      {share.trackingUrl}
+                                    </small>
+                                  )
+                                }
                               </div>
 
                               {
                                 !share.revokedAt && (
-                                  <button
-                                    className="secondary-action"
-                                    onClick={() =>
-                                      revokeDispatchShare(
-                                        share.id
+                                  <div
+                                    style={{
+                                      display: 'flex',
+                                      gap: 8,
+                                      alignItems: 'center',
+                                      flexWrap: 'wrap',
+                                      justifyContent: 'flex-end'
+                                    }}
+                                  >
+                                    {
+                                      share.trackingUrl && (
+                                        <>
+                                          <button
+                                            className="secondary-action"
+                                            onClick={() => {
+                                              navigator.clipboard
+                                                ?.writeText(
+                                                  share.trackingUrl || ''
+                                                )
+                                            }}
+                                            type="button"
+                                          >
+                                            Copy Link
+                                          </button>
+
+                                          <button
+                                            className="secondary-action"
+                                            onClick={() => {
+                                              if (share.trackingUrl) {
+                                                window.open(
+                                                  share.trackingUrl,
+                                                  '_blank',
+                                                  'noopener,noreferrer'
+                                                )
+                                              }
+                                            }}
+                                            type="button"
+                                          >
+                                            Open
+                                          </button>
+                                        </>
                                       )
                                     }
-                                    type="button"
-                                    disabled={
-                                      shareDispatchSaving
-                                    }
-                                  >
-                                    Revoke
-                                  </button>
+
+                                    <button
+                                      className="secondary-action"
+                                      onClick={() =>
+                                        revokeDispatchShare(
+                                          share.id
+                                        )
+                                      }
+                                      type="button"
+                                      disabled={
+                                        shareDispatchSaving
+                                      }
+                                    >
+                                      Revoke
+                                    </button>
+                                  </div>
                                 )
                               }
                             </div>
@@ -16369,7 +15884,7 @@ function App() {
                 />
 
                 <small className="temperature-email-help">
-                  Maverick sends an email when temperature leaves the configured range and another when it returns to normal. Active shared-load customers can also receive load temperature alerts.
+                  MAVTRACK sends an email when temperature leaves the configured range and another when it returns to normal. Active shared-load customers can also receive load temperature alerts.
                 </small>
 
                 {
@@ -16418,7 +15933,7 @@ function App() {
 
                 <div className="rename-help">
                   <span>
-                    Maverick stores limits internally in Celsius and displays them here in Fahrenheit.
+                    MAVTRACK stores limits internally in Celsius and displays them here in Fahrenheit.
                   </span>
                 </div>
 

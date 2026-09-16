@@ -10168,3 +10168,813 @@ button:disabled {
     align-items: stretch;
   }
 }
+
+/* =====================================================
+   MAVTRACK CUSTOMER PAGE V2 — COMPACT PREMIUM LAYOUT
+   Authoritative overrides. Keep at end of App.css.
+   ===================================================== */
+
+.public-track-shell.public-track-v2 {
+  min-height: 100dvh;
+  background:
+    radial-gradient(circle at 72% 12%, rgba(30, 64, 175, 0.17), transparent 31%),
+    linear-gradient(180deg, #071425 0%, #07111f 58%, #081523 100%);
+  color: #e7eef8;
+}
+
+.public-track-v2-header {
+  min-height: 68px;
+  padding: 10px 3vw;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.14);
+  background: rgba(4, 14, 28, 0.88);
+  backdrop-filter: blur(14px);
+}
+
+.public-track-v2 .public-track-brand strong {
+  letter-spacing: 0.16em;
+  font-size: 1.08rem;
+}
+
+.public-track-v2-main {
+  width: min(1540px, calc(100% - 36px));
+  margin: 0 auto;
+  padding: 18px 0 24px;
+}
+
+.public-track-v2-hero {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(220px, 1.1fr) minmax(190px, .8fr) minmax(210px, .9fr) minmax(220px, .9fr) minmax(250px, 1fr);
+  gap: 0;
+  min-height: 160px;
+  margin-bottom: 14px;
+  overflow: hidden;
+  border: 1px solid rgba(96, 165, 250, 0.15);
+  border-radius: 16px;
+  background:
+    linear-gradient(90deg, rgba(8, 24, 44, .98) 0%, rgba(8, 27, 51, .96) 65%, rgba(12, 38, 68, .85) 100%);
+  box-shadow: 0 20px 45px rgba(2, 8, 23, .22);
+}
+
+.public-track-v2-load,
+.public-track-v2-state,
+.public-track-v2-hero-metric {
+  z-index: 2;
+  display: flex;
+  justify-content: center;
+  flex-direction: column;
+  min-width: 0;
+  padding: 22px 24px;
+  border-right: 1px solid rgba(148, 163, 184, .13);
+}
+
+.public-track-v2-load h1 {
+  margin: 2px 0 0;
+  font-size: clamp(2.05rem, 4vw, 3.6rem);
+  line-height: .98;
+  letter-spacing: -.055em;
+}
+
+.public-track-v2-load p {
+  margin: 7px 0 8px;
+  color: #c2d0e2;
+  font-size: .92rem;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+}
+
+.public-track-v2-load small,
+.public-track-v2-state span,
+.public-track-v2-hero-metric span {
+  color: #8194ad;
+  font-size: .72rem;
+}
+
+.public-track-v2-load small strong {
+  margin-left: 7px;
+  color: #f8fafc;
+  font-size: .8rem;
+}
+
+.public-track-v2-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  width: fit-content;
+  min-height: 39px;
+  padding: 0 17px;
+  border: 1px solid rgba(59, 130, 246, .65);
+  border-radius: 999px;
+  background: rgba(30, 64, 175, .24);
+  color: #bfdbfe;
+  font-size: .85rem;
+  font-weight: 850;
+  text-transform: uppercase;
+}
+
+.public-track-v2-status i {
+  width: 9px;
+  height: 9px;
+  border-radius: 999px;
+  background: #60a5fa;
+  box-shadow: 0 0 0 5px rgba(59, 130, 246, .12);
+}
+
+.public-track-v2-status.delivered,
+.public-track-v2-status.in_transit,
+.public-track-v2-status.loaded,
+.public-track-v2-status.at_delivery,
+.public-track-v2-status.at_pickup {
+  border-color: rgba(52, 211, 153, .58);
+  background: rgba(6, 95, 70, .28);
+  color: #6ee7b7;
+}
+
+.public-track-v2-status.delivered i,
+.public-track-v2-status.in_transit i,
+.public-track-v2-status.loaded i,
+.public-track-v2-status.at_delivery i,
+.public-track-v2-status.at_pickup i {
+  background: #34d399;
+  box-shadow: 0 0 0 5px rgba(52, 211, 153, .12);
+}
+
+.public-track-v2-state > strong {
+  margin-top: 10px;
+  color: #6ee7b7;
+  font-size: .88rem;
+}
+
+.public-track-v2-state > span {
+  margin-top: 4px;
+}
+
+.public-track-v2-hero-metric strong {
+  margin-top: 7px;
+  color: #f8fafc;
+  font-size: .98rem;
+  line-height: 1.35;
+}
+
+.public-track-v2-hero-visual {
+  position: relative;
+  min-height: 160px;
+  overflow: hidden;
+  background:
+    radial-gradient(circle at 70% 65%, rgba(37, 99, 235, .32), transparent 26%),
+    linear-gradient(145deg, rgba(15, 48, 85, .88), rgba(2, 12, 27, .97));
+}
+
+.public-track-v2-hero-visual::before {
+  content: '';
+  position: absolute;
+  right: -10%;
+  bottom: 0;
+  width: 105%;
+  height: 78%;
+  opacity: .7;
+  background:
+    linear-gradient(170deg, transparent 50%, rgba(96, 165, 250, .15) 51%, transparent 55%),
+    linear-gradient(10deg, transparent 59%, rgba(15, 23, 42, .9) 60%);
+}
+
+.public-track-v2-road {
+  position: absolute;
+  right: -2%;
+  bottom: 15px;
+  width: 92%;
+  height: 4px;
+  transform: rotate(-4deg);
+  background: linear-gradient(90deg, transparent, rgba(147, 197, 253, .55), transparent);
+}
+
+.public-track-v2-truck {
+  position: absolute;
+  right: 12%;
+  bottom: 27px;
+  display: grid;
+  place-items: center;
+  width: 130px;
+  height: 44px;
+  border: 1px solid rgba(147, 197, 253, .45);
+  border-radius: 8px 3px 3px 8px;
+  background: linear-gradient(90deg, #0b2e54, #123f70);
+  color: rgba(255,255,255,.8);
+  font-size: .65rem;
+  font-weight: 900;
+  letter-spacing: .18em;
+  box-shadow: 0 12px 28px rgba(0,0,0,.35);
+}
+
+.public-track-v2-sharing-note {
+  position: absolute;
+  z-index: 3;
+  left: 39%;
+  bottom: 10px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: #8da4bf;
+  font-size: .64rem;
+}
+
+.public-track-v2-summary {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.05fr) minmax(0, 1fr);
+  gap: 14px;
+  margin-bottom: 14px;
+}
+
+.public-track-v2-summary.no-location {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.public-track-v2-card {
+  position: relative;
+  min-height: 250px;
+  padding: 18px 20px;
+  overflow: hidden;
+  border: 1px solid rgba(96, 165, 250, .18);
+  border-radius: 14px;
+  background: linear-gradient(180deg, rgba(16, 37, 61, .96), rgba(10, 29, 49, .98));
+  box-shadow: 0 14px 30px rgba(2, 8, 23, .18);
+}
+
+.public-track-v2-card::before {
+  content: '';
+  position: absolute;
+  inset: 0 0 auto;
+  height: 3px;
+  background: #60a5fa;
+}
+
+.public-track-v2-card.pickup::before {
+  background: #34d399;
+}
+
+.public-track-v2-card.delivery::before {
+  background: #60a5fa;
+}
+
+.public-track-v2-card-title {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.public-track-v2-card-title > span:first-child {
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 999px;
+  background: rgba(59, 130, 246, .15);
+  color: #60a5fa;
+}
+
+.public-track-v2-card.pickup .public-track-v2-card-title > span:first-child {
+  background: rgba(16, 185, 129, .15);
+  color: #34d399;
+}
+
+.public-track-v2-card-title small {
+  display: block;
+  color: #60a5fa;
+  font-size: .68rem;
+  font-weight: 850;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+}
+
+.public-track-v2-card.pickup .public-track-v2-card-title small {
+  color: #34d399;
+}
+
+.public-track-v2-card-title strong {
+  display: block;
+  margin-top: 5px;
+  color: #f8fafc;
+  font-size: .92rem;
+}
+
+.public-track-v2-card-title.split {
+  align-items: center;
+  justify-content: space-between;
+}
+
+.public-track-v2-card > p {
+  margin: 14px 0 12px 52px;
+  color: #aebdd0;
+  font-size: .76rem;
+  line-height: 1.5;
+}
+
+.public-track-v2-facts {
+  display: grid;
+  gap: 7px;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid rgba(148, 163, 184, .11);
+}
+
+.public-track-v2-facts > div {
+  display: grid;
+  grid-template-columns: 90px 1fr;
+  gap: 10px;
+  align-items: center;
+}
+
+.public-track-v2-facts span {
+  color: #8194ad;
+  font-size: .66rem;
+}
+
+.public-track-v2-facts strong {
+  overflow: hidden;
+  color: #e2e8f0;
+  font-size: .7rem;
+  text-align: right;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.public-track-v2-live-pill {
+  flex: none;
+  padding: 6px 9px;
+  border: 1px solid rgba(148, 163, 184, .17);
+  border-radius: 999px;
+  color: #9fb0c5;
+  font-size: .63rem;
+}
+
+.public-track-v2-live-pill.active {
+  border-color: rgba(52, 211, 153, .25);
+  background: rgba(6, 95, 70, .22);
+  color: #6ee7b7;
+}
+
+.public-track-v2-mini-map,
+.public-track-v2-map-placeholder {
+  height: 120px;
+  margin: 14px -20px 0;
+  overflow: hidden;
+  border-top: 1px solid rgba(96, 165, 250, .16);
+  border-bottom: 1px solid rgba(96, 165, 250, .12);
+}
+
+.public-track-v2-mini-map .leaflet-container {
+  width: 100%;
+  height: 100%;
+  filter: saturate(.85) brightness(.77) contrast(1.1);
+}
+
+.public-track-v2-map-placeholder {
+  display: grid;
+  place-items: center;
+  color: #71849d;
+  font-size: .72rem;
+  background: rgba(2, 12, 27, .4);
+}
+
+.public-track-v2-live-stats {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+  padding-top: 11px;
+}
+
+.public-track-v2-live-stats > div {
+  text-align: center;
+}
+
+.public-track-v2-live-stats span,
+.public-track-v2-live-stats strong {
+  display: block;
+}
+
+.public-track-v2-live-stats span {
+  color: #71849d;
+  font-size: .61rem;
+}
+
+.public-track-v2-live-stats strong {
+  margin-top: 3px;
+  color: #f8fafc;
+  font-size: .75rem;
+}
+
+.public-track-v2-location-time {
+  display: block;
+  margin-top: 8px;
+  color: #71849d;
+  font-size: .6rem;
+  text-align: center;
+}
+
+.public-track-v2-progress {
+  display: grid;
+  grid-template-columns: 190px minmax(0, 1fr) auto;
+  gap: 18px;
+  align-items: center;
+  min-height: 135px;
+  margin-bottom: 14px;
+  padding: 18px 20px;
+  border: 1px solid rgba(96, 165, 250, .17);
+  border-radius: 14px;
+  background: linear-gradient(180deg, rgba(12, 34, 56, .95), rgba(8, 27, 47, .98));
+}
+
+.public-track-v2-progress-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.public-track-v2-progress-copy small {
+  color: #8194ad;
+  font-size: .65rem;
+}
+
+.public-track-v2-route-line {
+  position: relative;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(100px, 1fr));
+  gap: 8px;
+  align-items: start;
+}
+
+.public-track-v2-route-line::before {
+  content: '';
+  position: absolute;
+  top: 15px;
+  right: 6%;
+  left: 6%;
+  height: 2px;
+  background: #28425f;
+}
+
+.public-track-v2-route-node {
+  position: relative;
+  z-index: 2;
+  min-width: 0;
+  text-align: center;
+}
+
+.public-track-v2-route-node i {
+  display: grid;
+  place-items: center;
+  width: 31px;
+  height: 31px;
+  margin: 0 auto 9px;
+  border: 2px solid #61758e;
+  border-radius: 999px;
+  background: #102a45;
+  color: #aec0d3;
+  font-size: .69rem;
+  font-style: normal;
+  font-weight: 900;
+}
+
+.public-track-v2-route-node.complete i {
+  border-color: #34d399;
+  background: #0e755d;
+  color: white;
+  box-shadow: 0 0 0 5px rgba(52, 211, 153, .1);
+}
+
+.public-track-v2-route-node.active i {
+  border-color: #60a5fa;
+  background: #2563eb;
+  color: white;
+  box-shadow: 0 0 0 5px rgba(59, 130, 246, .12);
+}
+
+.public-track-v2-route-node strong,
+.public-track-v2-route-node span,
+.public-track-v2-route-node small {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.public-track-v2-route-node strong {
+  color: #e5edf7;
+  font-size: .68rem;
+}
+
+.public-track-v2-route-node span {
+  margin-top: 3px;
+  color: #9badc2;
+  font-size: .6rem;
+}
+
+.public-track-v2-route-node small {
+  margin-top: 3px;
+  color: #6f8299;
+  font-size: .56rem;
+}
+
+.public-track-v2-route-node.complete small {
+  color: #34d399;
+}
+
+.public-track-v2-progress > button {
+  min-height: 36px;
+  padding: 0 13px;
+  border: 1px solid rgba(59, 130, 246, .6);
+  border-radius: 9px;
+  background: rgba(30, 64, 175, .23);
+  color: #bfdbfe;
+  font: inherit;
+  font-size: .68rem;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.public-track-v2-tabs {
+  overflow: hidden;
+  border: 1px solid rgba(96, 165, 250, .2);
+  border-radius: 14px;
+  background: rgba(8, 27, 47, .96);
+}
+
+.public-track-v2-tabbar {
+  display: flex;
+  gap: 0;
+  border-bottom: 1px solid rgba(96, 165, 250, .18);
+}
+
+.public-track-v2-tabbar button {
+  min-width: 150px;
+  min-height: 43px;
+  padding: 0 20px;
+  border: 0;
+  border-right: 1px solid rgba(96, 165, 250, .12);
+  background: transparent;
+  color: #8fa2b9;
+  font: inherit;
+  font-size: .72rem;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.public-track-v2-tabbar button.active {
+  background: rgba(37, 99, 235, .22);
+  color: #dbeafe;
+  box-shadow: inset 0 -2px 0 #3b82f6;
+}
+
+.public-track-v2-tabpanel {
+  min-height: 128px;
+  padding: 15px 18px 17px;
+}
+
+.public-track-v2-tab-heading {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.public-track-v2-tab-heading strong,
+.public-track-v2-tab-heading span {
+  display: block;
+}
+
+.public-track-v2-tab-heading strong {
+  color: #f1f5f9;
+  font-size: .78rem;
+}
+
+.public-track-v2-tab-heading span {
+  margin-top: 3px;
+  color: #71849d;
+  font-size: .62rem;
+}
+
+.public-track-v2-docs {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.public-track-v2-docs > a {
+  display: grid;
+  grid-template-columns: 38px minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  min-height: 66px;
+  padding: 9px 11px;
+  border: 1px solid rgba(96, 165, 250, .15);
+  border-radius: 9px;
+  background: rgba(15, 36, 60, .72);
+  color: inherit;
+  text-decoration: none;
+}
+
+.public-track-v2-docs > a > span {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 38px;
+  border-radius: 8px;
+  background: rgba(59, 130, 246, .16);
+  color: #93c5fd;
+  font-size: .58rem;
+  font-weight: 900;
+}
+
+.public-track-v2-docs strong,
+.public-track-v2-docs small {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.public-track-v2-docs strong {
+  font-size: .67rem;
+}
+
+.public-track-v2-docs small {
+  margin-top: 3px;
+  color: #71849d;
+  font-size: .57rem;
+}
+
+.public-track-v2-docs b {
+  color: #60a5fa;
+}
+
+.public-track-v2-temperature {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.public-track-v2-temperature > div {
+  padding: 15px;
+  border: 1px solid rgba(96, 165, 250, .13);
+  border-radius: 10px;
+  background: rgba(15, 36, 60, .65);
+}
+
+.public-track-v2-temperature span,
+.public-track-v2-temperature strong {
+  display: block;
+}
+
+.public-track-v2-temperature span {
+  color: #71849d;
+  font-size: .62rem;
+}
+
+.public-track-v2-temperature strong {
+  margin-top: 5px;
+  color: #93c5fd;
+  font-size: 1rem;
+}
+
+.public-track-v2-details {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.public-track-v2-details > div {
+  padding: 13px;
+  border: 1px solid rgba(96, 165, 250, .12);
+  border-radius: 10px;
+  background: rgba(15, 36, 60, .55);
+}
+
+.public-track-v2-details > div > strong {
+  display: block;
+  margin-bottom: 8px;
+  color: #e8eef7;
+  font-size: .72rem;
+}
+
+.public-track-v2-details dl {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin: 0;
+}
+
+.public-track-v2-details dl > div {
+  min-width: 0;
+}
+
+.public-track-v2-details dt,
+.public-track-v2-details dd {
+  margin: 0;
+}
+
+.public-track-v2-details dt {
+  color: #71849d;
+  font-size: .56rem;
+}
+
+.public-track-v2-details dd {
+  margin-top: 3px;
+  overflow: hidden;
+  color: #dbe5f1;
+  font-size: .63rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.public-track-v2-empty {
+  padding: 20px;
+  color: #71849d;
+  font-size: .7rem;
+  text-align: center;
+}
+
+@media (max-width: 1180px) {
+  .public-track-v2-hero {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .public-track-v2-hero-visual {
+    display: none;
+  }
+
+  .public-track-v2-sharing-note {
+    position: static;
+    grid-column: 1 / -1;
+    padding: 0 20px 10px;
+  }
+
+  .public-track-v2-summary {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .public-track-v2-card.live {
+    grid-column: 1 / -1;
+  }
+
+  .public-track-v2-progress {
+    grid-template-columns: 1fr;
+  }
+
+  .public-track-v2-docs {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 760px) {
+  .public-track-v2-main {
+    width: min(100% - 20px, 1540px);
+    padding-top: 10px;
+  }
+
+  .public-track-v2-header {
+    align-items: flex-start;
+    gap: 8px;
+    padding: 10px 14px;
+  }
+
+  .public-track-v2-hero,
+  .public-track-v2-summary,
+  .public-track-v2-summary.no-location {
+    grid-template-columns: 1fr;
+  }
+
+  .public-track-v2-load,
+  .public-track-v2-state,
+  .public-track-v2-hero-metric {
+    border-right: 0;
+    border-bottom: 1px solid rgba(148, 163, 184, .12);
+  }
+
+  .public-track-v2-card.live {
+    grid-column: auto;
+  }
+
+  .public-track-v2-route-line {
+    display: flex;
+    overflow-x: auto;
+    padding-bottom: 5px;
+  }
+
+  .public-track-v2-route-node {
+    flex: 0 0 120px;
+  }
+
+  .public-track-v2-docs,
+  .public-track-v2-temperature,
+  .public-track-v2-details,
+  .public-track-v2-details dl {
+    grid-template-columns: 1fr;
+  }
+
+  .public-track-v2-tabbar {
+    overflow-x: auto;
+  }
+
+  .public-track-v2-tabbar button {
+    min-width: 125px;
+  }
+}

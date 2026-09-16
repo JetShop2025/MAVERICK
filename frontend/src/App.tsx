@@ -21,6 +21,7 @@ import {
 
 import './App.css'
 import maverickLogo from './assets/maverick-logo.jpeg'
+import mavtrackTruckHero from './assets/mavtrack-truck-hero.png'
 import Login from './Login'
 
 type ViewName =
@@ -1327,6 +1328,11 @@ function PublicLoadTrackingPage({
     setPublicTab
   ] = useState<'documents' | 'temperature' | 'details'>('documents')
 
+  const [
+    publicMapOpen,
+    setPublicMapOpen
+  ] = useState(false)
+
   const loadPublicTracking =
     useCallback(
       async () => {
@@ -1631,8 +1637,10 @@ function PublicLoadTrackingPage({
           )}
 
           <div className="public-track-v2-hero-visual" aria-hidden="true">
-            <div className="public-track-v2-road" />
-            <div className="public-track-v2-truck">MAVTRACK</div>
+            <img
+              src={mavtrackTruckHero}
+              alt=""
+            />
           </div>
 
           <div className="public-track-v2-sharing-note">
@@ -1794,9 +1802,7 @@ function PublicLoadTrackingPage({
           {publicLocationAllowed && hasLocation && (
             <button
               type="button"
-              onClick={() => {
-                document.querySelector('.public-track-v2-mini-map')?.scrollIntoView({ behavior: 'smooth', block: 'center' })
-              }}
+              onClick={() => setPublicMapOpen(true)}
             >
               View Map
             </button>
@@ -1908,6 +1914,173 @@ function PublicLoadTrackingPage({
             </div>
           )}
         </section>
+
+        {
+          publicMapOpen &&
+          publicLocationAllowed &&
+          hasLocation && (
+            <div
+              className="public-track-v2-map-modal"
+              role="dialog"
+              aria-modal="true"
+              aria-label="Live load map"
+              onMouseDown={(event) => {
+                if (event.currentTarget === event.target) {
+                  setPublicMapOpen(false)
+                }
+              }}
+            >
+              <section className="public-track-v2-map-dialog">
+                <div className="public-track-v2-map-dialog-header">
+                  <div>
+                    <span className="page-kicker">Live Location</span>
+                    <strong>{truckNumber}</strong>
+                    <small>
+                      Updated {formatPublicTime(telemetry?.locationReceivedAt)}
+                    </small>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => setPublicMapOpen(false)}
+                    aria-label="Close map"
+                  >
+                    ×
+                  </button>
+                </div>
+
+                <div className="public-track-v2-map-dialog-body">
+                  <MapContainer
+                    center={[
+                      Number(telemetry.latitude),
+                      Number(telemetry.longitude)
+                    ]}
+                    zoom={14}
+                    minZoom={3}
+                    maxZoom={22}
+                    zoomControl={true}
+                    className="public-track-v2-large-map"
+                  >
+                    <ResponsiveMapSize />
+
+                    <TileLayer
+                      attribution="&copy; OpenStreetMap contributors"
+                      url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+                      maxNativeZoom={19}
+                      maxZoom={22}
+                    />
+
+                    <Marker
+                      position={[
+                        Number(telemetry.latitude),
+                        Number(telemetry.longitude)
+                      ]}
+                      icon={
+                        assetTypeCode(dispatch.asset) === 'TRK'
+                          ? createTruckIcon(
+                              String(
+                                telemetry.movementStatus ||
+                                ''
+                              ).toLowerCase() === 'moving'
+                                ? 'moving'
+                                : 'parked',
+                              true,
+                              true,
+                              trackingSourceCode(dispatch.asset)
+                            )
+                          : createTrailerIcon(
+                              String(
+                                telemetry.movementStatus ||
+                                ''
+                              ).toLowerCase() === 'moving'
+                                ? 'moving'
+                                : 'parked',
+                              true,
+                              true
+                            )
+                      }
+                    >
+                      <Popup>
+                        <strong>{truckNumber}</strong>
+                        <br />
+                        {speedMph != null
+                          ? `${speedMph.toFixed(1)} mph`
+                          : 'Speed unavailable'}
+                      </Popup>
+                    </Marker>
+
+                    {
+                      sortedPublicStops
+                        .filter(
+                          (stop: DispatchStopRecord) =>
+                            stop.latitude != null &&
+                            stop.longitude != null
+                        )
+                        .map(
+                          (
+                            stop: DispatchStopRecord
+                          ) => (
+                            <Marker
+                              key={`public-map-stop-${stop.id ?? stop.sequence}`}
+                              position={[
+                                Number(stop.latitude),
+                                Number(stop.longitude)
+                              ]}
+                            >
+                              <Popup>
+                                <strong>
+                                  {stop.type === 'PICKUP'
+                                    ? `Pickup ${stop.pairNumber}`
+                                    : `Drop ${stop.pairNumber}`}
+                                </strong>
+                                <br />
+                                {stop.name}
+                                <br />
+                                {stop.address}
+                              </Popup>
+                            </Marker>
+                          )
+                        )
+                    }
+                  </MapContainer>
+
+                  <div className="public-track-v2-map-dialog-stats">
+                    <div>
+                      <span>Status</span>
+                      <strong>
+                        {publicDispatchStatusLabel(dispatch.status)}
+                      </strong>
+                    </div>
+                    <div>
+                      <span>Speed</span>
+                      <strong>
+                        {speedMph != null
+                          ? `${speedMph.toFixed(1)} mph`
+                          : '—'}
+                      </strong>
+                    </div>
+                    <div>
+                      <span>Heading</span>
+                      <strong>
+                        {telemetry?.headingDegrees != null
+                          ? `${Number(telemetry.headingDegrees).toFixed(0)}°`
+                          : '—'}
+                      </strong>
+                    </div>
+                    <div>
+                      <span>Accuracy</span>
+                      <strong>
+                        {telemetry?.accuracyMeters != null
+                          ? `${Number(telemetry.accuracyMeters).toFixed(0)} m`
+                          : '—'}
+                      </strong>
+                    </div>
+                  </div>
+                </div>
+              </section>
+            </div>
+          )
+        }
       </main>
     </div>
   )
@@ -2229,11 +2402,6 @@ function App() {
   const [
     shareDispatchError,
     setShareDispatchError
-  ] = useState('')
-
-  const [
-    shareDispatchUrl,
-    setShareDispatchUrl
   ] = useState('')
 
   const [
@@ -3454,7 +3622,6 @@ function App() {
       dispatch.loadNumber
     )
     setShareDispatchError('')
-    setShareDispatchUrl('')
     setShareExisting(
       dispatch.shares || []
     )
@@ -3509,18 +3676,6 @@ function App() {
           persistedShares
         )
 
-        const latestActiveShare =
-          persistedShares.find(
-            (share: DispatchShareRecord) =>
-              !share.revokedAt &&
-              Boolean(share.trackingUrl)
-          )
-
-        if (latestActiveShare?.trackingUrl) {
-          setShareDispatchUrl(
-            latestActiveShare.trackingUrl
-          )
-        }
       }
     } catch {
       // Keep any share data already present on the dispatch. Creating a new
@@ -3605,11 +3760,6 @@ function App() {
           )
           return
         }
-
-        setShareDispatchUrl(
-          payload.share.trackingUrl ||
-          ''
-        )
 
         setShareExisting(
           (current) => [
@@ -15490,38 +15640,6 @@ function App() {
                     <i className="toggle" />
                   </label>
                 </div>
-
-                {
-                  shareDispatchUrl && (
-                    <div className="share-created-link">
-                      <strong>
-                        Tracking link created
-                      </strong>
-
-                      <div>
-                        <input
-                          readOnly
-                          value={
-                            shareDispatchUrl
-                          }
-                        />
-
-                        <button
-                          className="secondary-action"
-                          onClick={() => {
-                            navigator.clipboard
-                              ?.writeText(
-                                shareDispatchUrl
-                              )
-                          }}
-                          type="button"
-                        >
-                          Copy
-                        </button>
-                      </div>
-                    </div>
-                  )
-                }
 
                 {
                   shareDispatchError && (

@@ -7939,7 +7939,13 @@ app.get(
           },
           select: {
             id: true,
-            deviceId: true
+            deviceId: true,
+            trackingSource: true,
+            trackingActive: true,
+            trackingStartedAt: true,
+            trackingStoppedAt: true,
+            lastHeartbeatAt: true,
+            lastPhoneGpsAt: true
           }
         })
 
@@ -8014,6 +8020,16 @@ app.get(
 
           // Always identify the requested device.
           deviceId: asset.deviceId,
+
+          // PHONE tracking session state. Keep connection status separate
+          // from GPS freshness so a locked/stationary iPhone does not
+          // bounce Offline just because iOS has not emitted a new fix.
+          trackingSource: asset.trackingSource,
+          trackingActive: asset.trackingActive,
+          trackingStartedAt: asset.trackingStartedAt,
+          trackingStoppedAt: asset.trackingStoppedAt,
+          lastHeartbeatAt: asset.lastHeartbeatAt,
+          lastPhoneGpsAt: asset.lastPhoneGpsAt,
 
           // MAV2 power telemetry.
           reeferPower:

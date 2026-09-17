@@ -5203,6 +5203,63 @@ function App() {
 
   const getDeviceStatusForTelemetry =
     (item: any): DeviceStatus => {
+      if (!item) {
+        return 'offline'
+      }
+
+      const trackingSource =
+        String(
+          item?.trackingSource ||
+          item?.source ||
+          ''
+        ).toUpperCase()
+
+      // PHONE trackers are session-based. iOS can legitimately stop
+      // producing fresh GPS fixes while a phone is locked and stationary.
+      // Do not flip a driver OFFLINE just because receivedAt is old while
+      // MavDriver still has an active tracking session.
+      if (trackingSource === 'PHONE') {
+        if (item?.trackingActive === false) {
+          return 'offline'
+        }
+
+        if (item?.trackingActive === true) {
+          const activityTimes = [
+            item?.lastHeartbeatAt,
+            item?.lastPhoneGpsAt,
+            item?.receivedAt,
+            item?.trackingStartedAt
+          ]
+            .map((value) =>
+              value ? new Date(value).getTime() : NaN
+            )
+            .filter((value) => Number.isFinite(value))
+
+          if (activityTimes.length === 0) {
+            return 'delayed'
+          }
+
+          const sessionAgeMs =
+            Math.max(
+              0,
+              now - Math.max(...activityTimes)
+            )
+
+          // A PHONE session is intentionally much more tolerant than a
+          // hardware tracker. This prevents lock-screen/stationary iPhones
+          // from bouncing Online -> Delayed -> Offline every few minutes.
+          if (sessionAgeMs < 12 * 60 * 60 * 1000) {
+            return 'online'
+          }
+
+          if (sessionAgeMs < 24 * 60 * 60 * 1000) {
+            return 'delayed'
+          }
+
+          return 'offline'
+        }
+      }
+
       if (!item?.receivedAt) {
         return 'offline'
       }
@@ -5242,7 +5299,7 @@ function App() {
         return 'offline'
       }
 
-      // Moving / acquiring / normal reporting.
+      // Moving / acquiring / normal MAV2 reporting.
       if (ageMs < 120000) {
         return 'online'
       }

@@ -11238,3 +11238,301 @@ button:disabled {
     border-bottom: 1px solid rgba(96, 165, 250, .12);
   }
 }
+
+/* =====================================================
+   MAVTRACK DISPATCH MODAL — SCROLL + COMPACT ROUTE STOPS V2
+   Keeps the modal inside the viewport, makes only the form body
+   scroll, removes dead space in extra pickup/drop cards and keeps
+   the action bar visible while editing long multi-stop loads.
+   ===================================================== */
+
+.modal-backdrop:has(.details-modal.dispatch-modal) {
+  overflow: hidden;
+  padding: 14px;
+}
+
+.details-modal.dispatch-modal {
+  width: min(1540px, calc(100vw - 28px));
+  max-width: calc(100vw - 28px);
+  height: min(920px, calc(100dvh - 28px));
+  max-height: calc(100dvh - 28px);
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto auto;
+  align-content: stretch;
+  overflow: hidden !important;
+  padding: 14px 16px;
+}
+
+.details-modal.dispatch-modal > .dispatch-form-grid-real {
+  min-height: 0;
+  height: 100%;
+  max-height: 100%;
+  overflow-y: auto !important;
+  overflow-x: hidden !important;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+  align-content: start;
+  padding: 2px 8px 14px 0;
+}
+
+.details-modal.dispatch-modal > .dispatch-form-grid-real::-webkit-scrollbar {
+  width: 9px;
+}
+
+.details-modal.dispatch-modal > .dispatch-form-grid-real::-webkit-scrollbar-track {
+  background: rgba(148, 163, 184, 0.05);
+  border-radius: 999px;
+}
+
+.details-modal.dispatch-modal > .dispatch-form-grid-real::-webkit-scrollbar-thumb {
+  background: rgba(96, 165, 250, 0.34);
+  border-radius: 999px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+
+.details-modal.dispatch-modal > .dispatch-form-grid-real::-webkit-scrollbar-thumb:hover {
+  background: rgba(96, 165, 250, 0.56);
+  background-clip: padding-box;
+}
+
+/* Keep modal chrome visible while the route form scrolls. */
+.details-modal.dispatch-modal > .modal-header,
+.details-modal.dispatch-modal > .modal-actions {
+  flex: 0 0 auto;
+  z-index: 5;
+}
+
+.details-modal.dispatch-modal > .modal-header {
+  margin-bottom: 10px;
+}
+
+.details-modal.dispatch-modal > .modal-actions {
+  margin-top: 9px;
+  padding-top: 10px;
+  background: #0f1b2d;
+  border-top: 1px solid rgba(148, 163, 184, 0.14);
+}
+
+/* Additional stops: two compact cards per row on wide desktop. */
+.details-modal.dispatch-modal .dispatch-stop-pairs {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  align-items: start;
+}
+
+.details-modal.dispatch-modal .dispatch-stop-pair-card {
+  min-width: 0;
+  padding: 10px;
+  border-radius: 10px;
+}
+
+.details-modal.dispatch-modal .dispatch-stop-pair-header {
+  margin-bottom: 8px;
+  padding-bottom: 7px;
+}
+
+/* There is only one stop body per card; one column removes the old
+   empty right half that was creating the large dead area. */
+.details-modal.dispatch-modal .dispatch-stop-pair-grid {
+  grid-template-columns: minmax(0, 1fr) !important;
+  gap: 0;
+}
+
+.details-modal.dispatch-modal .dispatch-pair-stop {
+  width: 100%;
+  padding: 9px;
+}
+
+.details-modal.dispatch-modal .dispatch-pair-stop-title {
+  margin-bottom: 7px;
+  font-size: 0.64rem;
+}
+
+/* Use three columns inside each extra stop so six fields fit cleanly. */
+.details-modal.dispatch-modal .dispatch-pair-fields {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px 8px;
+}
+
+.details-modal.dispatch-modal .dispatch-pair-fields label.wide {
+  grid-column: span 2;
+}
+
+.details-modal.dispatch-modal .dispatch-pair-fields label > span {
+  font-size: 0.55rem;
+  line-height: 1.05;
+}
+
+.details-modal.dispatch-modal .dispatch-pair-fields input,
+.details-modal.dispatch-modal .dispatch-pair-fields select {
+  height: 30px;
+  min-height: 30px;
+  padding: 0 7px;
+  border-radius: 6px;
+  font-size: 0.7rem;
+}
+
+.details-modal.dispatch-modal .dispatch-stop-remove {
+  padding: 3px 0;
+  font-size: 0.62rem;
+}
+
+/* Tighter but balanced spacing around the full-width route section. */
+.details-modal.dispatch-modal .dispatch-linked-pairs-group {
+  gap: 8px;
+  padding: 10px 12px;
+}
+
+.details-modal.dispatch-modal .dispatch-form-section-title-actions {
+  margin-bottom: 1px;
+}
+
+.details-modal.dispatch-modal .dispatch-stop-empty {
+  margin: 0;
+}
+
+/* Keep temperature and notes balanced under the route list. */
+.details-modal.dispatch-modal .dispatch-temperature-group,
+.details-modal.dispatch-modal .dispatch-notes-group {
+  align-self: stretch;
+}
+
+/* Medium desktop / laptop: one extra-stop card per row for readability. */
+@media (max-width: 1260px) {
+  .details-modal.dispatch-modal .dispatch-stop-pairs {
+    grid-template-columns: 1fr;
+  }
+
+  .details-modal.dispatch-modal .dispatch-pair-fields {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 900px) {
+  .modal-backdrop:has(.details-modal.dispatch-modal) {
+    padding: 8px;
+  }
+
+  .details-modal.dispatch-modal {
+    width: calc(100vw - 16px);
+    max-width: calc(100vw - 16px);
+    height: calc(100dvh - 16px);
+    max-height: calc(100dvh - 16px);
+    padding: 12px;
+  }
+
+  .details-modal.dispatch-modal .dispatch-stop-pairs,
+  .details-modal.dispatch-modal .dispatch-pair-fields {
+    grid-template-columns: 1fr;
+  }
+
+  .details-modal.dispatch-modal .dispatch-pair-fields label.wide {
+    grid-column: auto;
+  }
+}
+
+/* =====================================================
+   MAVTRACK — FLEET ASSET TABLE ACTIONS FINAL POLISH
+   Keeps every action visible, aligned and responsive.
+   ===================================================== */
+.fleet-table-card {
+  width: min(1540px, calc(100vw - 72px));
+  max-width: 1540px;
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+
+.fleet-table-card .table-header,
+.fleet-table-card .fleet-row {
+  grid-template-columns:
+    minmax(225px, 1.35fr)
+    92px
+    minmax(175px, 1.05fr)
+    118px
+    minmax(170px, 0.95fr)
+    minmax(410px, 1.65fr) !important;
+  column-gap: 14px;
+  align-items: center;
+}
+
+.fleet-table-card .fleet-row {
+  min-height: 78px;
+  padding-top: 12px;
+  padding-bottom: 12px;
+}
+
+.fleet-table-card .row-actions {
+  min-width: 0;
+  width: 100%;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 7px;
+  align-items: stretch;
+  justify-content: stretch;
+}
+
+.fleet-table-card .row-actions button {
+  width: 100%;
+  min-width: 0;
+  min-height: 34px;
+  padding: 0 8px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 7px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 0.72rem;
+  line-height: 1;
+}
+
+.fleet-table-card .fleet-asset-name,
+.fleet-table-card .fleet-asset-name > div,
+.fleet-table-card .fleet-telemetry-cell {
+  min-width: 0;
+}
+
+.fleet-table-card .fleet-asset-name strong,
+.fleet-table-card .fleet-asset-name small,
+.fleet-table-card .fleet-telemetry-cell span,
+.fleet-table-card .fleet-telemetry-cell small {
+  max-width: 100%;
+}
+
+@media (max-width: 1380px) {
+  .fleet-table-card {
+    width: calc(100vw - 48px);
+  }
+
+  .fleet-table-card .table-header,
+  .fleet-table-card .fleet-row {
+    grid-template-columns:
+      minmax(210px, 1.3fr)
+      86px
+      minmax(155px, 0.95fr)
+      110px
+      minmax(150px, 0.9fr)
+      minmax(360px, 1.5fr) !important;
+    column-gap: 10px;
+  }
+
+  .fleet-table-card .row-actions {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 1120px) {
+  .fleet-table-card {
+    width: 100%;
+    max-width: none;
+    overflow-x: auto;
+  }
+
+  .fleet-table-card .table-header,
+  .fleet-table-card .fleet-row {
+    min-width: 1050px;
+  }
+}

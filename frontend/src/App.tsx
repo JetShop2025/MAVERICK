@@ -685,14 +685,15 @@ function DispatchStopPairsEditor({
     ) => ExtraDispatchStop[]
   ) => void
 }) {
-  const pairNumbers =
-    Array.from(
-      new Set(
-        stops.map(
-          (stop) => stop.pairNumber
-        )
-      )
-    ).sort((a, b) => a - b)
+  const orderedStops =
+    [...stops].sort(
+      (a, b) =>
+        a.type === b.type
+          ? a.pairNumber - b.pairNumber
+          : a.type === 'PICKUP'
+            ? -1
+            : 1
+    )
 
   const updateStop = (
     key: string,
@@ -710,10 +711,7 @@ function DispatchStopPairsEditor({
         current.map(
           (stop) =>
             stop.key === key
-              ? {
-                  ...stop,
-                  [field]: value
-                }
+              ? { ...stop, [field]: value }
               : stop
         )
     )
@@ -758,159 +756,122 @@ function DispatchStopPairsEditor({
     )
   }
 
+  if (orderedStops.length === 0) {
+    return (
+      <p className="dispatch-stop-empty">
+        This load currently has one pickup and one drop. Add extra pickups or drops independently when the route needs them.
+      </p>
+    )
+  }
+
   return (
-    <>
-      {
-        pairNumbers.length === 0
-          ? (
-            <p className="dispatch-stop-empty">
-              This load currently has one linked pickup / drop pair. Add another pair when freight is picked up and delivered at additional facilities.
-            </p>
-          )
-          : (
-            <div className="dispatch-stop-pairs">
-              {
-                pairNumbers.map(
-                  (pairNumber) => {
-                    const pickup =
-                      stops.find(
-                        (stop) =>
-                          stop.pairNumber === pairNumber &&
-                          stop.type === 'PICKUP'
-                      )
+    <div className="dispatch-stop-pairs">
+      {orderedStops.map((stop) => {
+        const label =
+          `${stop.type === 'PICKUP' ? 'PICKUP' : 'DROP'} ${stop.pairNumber}`
 
-                    const drop =
-                      stops.find(
-                        (stop) =>
-                          stop.pairNumber === pairNumber &&
-                          stop.type === 'DROP'
-                      )
-
-                    if (!pickup || !drop) {
-                      return null
-                    }
-
-                    const renderPoint = (
-                      stop: ExtraDispatchStop,
-                      label: string
-                    ) => (
-                      <div className="dispatch-pair-stop">
-                        <div className="dispatch-pair-stop-title">
-                          {label}
-                        </div>
-
-                        <div className="dispatch-pair-fields">
-                          <label>
-                            <span>Customer / Location Code</span>
-                            <CustomerLocationInput
-                              code={stop.customerCode}
-                              onCodeChange={(value) =>
-                                updateStop(stop.key, 'customerCode', value)
-                              }
-                              onSelect={(location) =>
-                                applyLocation(stop.key, location)
-                              }
-                            />
-                          </label>
-
-                          <label>
-                            <span>Facility *</span>
-                            <input
-                              value={stop.name}
-                              onChange={(event) =>
-                                updateStop(stop.key, 'name', event.target.value)
-                              }
-                              placeholder="Facility name"
-                            />
-                          </label>
-
-                          <label>
-                            <span>Appointment</span>
-                            <input
-                              type="datetime-local"
-                              value={stop.scheduledAt}
-                              onChange={(event) =>
-                                updateStop(stop.key, 'scheduledAt', event.target.value)
-                              }
-                            />
-                          </label>
-
-                          <label>
-                            <span>Phone</span>
-                            <input
-                              value={stop.phone}
-                              onChange={(event) =>
-                                updateStop(stop.key, 'phone', formatDispatchPhone(event.target.value))
-                              }
-                              placeholder="000 000 0000"
-                            />
-                          </label>
-
-                          <label className="wide">
-                            <span>Address *</span>
-                            <AddressAutocompleteInput
-                              value={stop.address}
-                              onChange={(value) => updateStop(stop.key, 'address', value)}
-                              onSelect={(item) => applyAddress(stop.key, item)}
-                            />
-                          </label>
-
-                          <label>
-                            <span>Reference</span>
-                            <input
-                              value={stop.reference}
-                              onChange={(event) =>
-                                updateStop(stop.key, 'reference', event.target.value)
-                              }
-                              placeholder="Reference"
-                            />
-                          </label>
-                        </div>
-                      </div>
+        return (
+          <article
+            className="dispatch-stop-pair-card"
+            key={stop.key}
+          >
+            <div className="dispatch-stop-pair-header">
+              <div>
+                <span>ROUTE STOP</span>
+                <strong>{label}</strong>
+              </div>
+              <button
+                type="button"
+                className="dispatch-stop-remove"
+                onClick={() =>
+                  setStops((current) =>
+                    current.filter(
+                      (item) => item.key !== stop.key
                     )
-
-                    return (
-                      <article
-                        className="dispatch-stop-pair-card"
-                        key={pairNumber}
-                      >
-                        <div className="dispatch-stop-pair-header">
-                          <div>
-                            <span>ROUTE PAIR</span>
-                            <strong>
-                              Pickup {pairNumber} → Drop {pairNumber}
-                            </strong>
-                          </div>
-                          <button
-                            type="button"
-                            className="dispatch-stop-remove"
-                            onClick={() =>
-                              setStops(
-                                (current) =>
-                                  current.filter(
-                                    (stop) =>
-                                      stop.pairNumber !== pairNumber
-                                  )
-                              )
-                            }
-                          >
-                            Remove Pair
-                          </button>
-                        </div>
-
-                        <div className="dispatch-stop-pair-grid">
-                          {renderPoint(pickup, `PICKUP ${pairNumber}`)}
-                          {renderPoint(drop, `DROP ${pairNumber}`)}
-                        </div>
-                      </article>
-                    )
-                  }
-                )
-              }
+                  )
+                }
+              >
+                Remove {stop.type === 'PICKUP' ? 'Pickup' : 'Drop'}
+              </button>
             </div>
-          )
-      }
-    </>
+
+            <div className="dispatch-stop-pair-grid">
+              <div className="dispatch-pair-stop">
+                <div className="dispatch-pair-stop-title">
+                  {label}
+                </div>
+                <div className="dispatch-pair-fields">
+                  <label>
+                    <span>Customer / Location Code</span>
+                    <CustomerLocationInput
+                      code={stop.customerCode}
+                      onCodeChange={(value) =>
+                        updateStop(stop.key, 'customerCode', value)
+                      }
+                      onSelect={(location) =>
+                        applyLocation(stop.key, location)
+                      }
+                    />
+                  </label>
+                  <label>
+                    <span>Facility *</span>
+                    <input
+                      value={stop.name}
+                      onChange={(event) =>
+                        updateStop(stop.key, 'name', event.target.value)
+                      }
+                      placeholder="Facility name"
+                    />
+                  </label>
+                  <label>
+                    <span>Appointment</span>
+                    <input
+                      type="datetime-local"
+                      value={stop.scheduledAt}
+                      onChange={(event) =>
+                        updateStop(stop.key, 'scheduledAt', event.target.value)
+                      }
+                    />
+                  </label>
+                  <label>
+                    <span>Phone</span>
+                    <input
+                      value={stop.phone}
+                      onChange={(event) =>
+                        updateStop(stop.key, 'phone', formatDispatchPhone(event.target.value))
+                      }
+                      placeholder="000 000 0000"
+                    />
+                  </label>
+                  <label className="wide">
+                    <span>Address *</span>
+                    <AddressAutocompleteInput
+                      value={stop.address}
+                      onChange={(value) =>
+                        updateStop(stop.key, 'address', value)
+                      }
+                      onSelect={(item) =>
+                        applyAddress(stop.key, item)
+                      }
+                    />
+                  </label>
+                  <label>
+                    <span>Reference</span>
+                    <input
+                      value={stop.reference}
+                      onChange={(event) =>
+                        updateStop(stop.key, 'reference', event.target.value)
+                      }
+                      placeholder="Reference"
+                    />
+                  </label>
+                </div>
+              </div>
+            </div>
+          </article>
+        )
+      })}
+    </div>
   )
 }
 
@@ -1265,6 +1226,24 @@ function distanceMiles(
     )
 }
 
+function generateAutomaticLoadNumber() {
+  const values = new Uint32Array(1)
+
+  if (
+    typeof crypto !== 'undefined' &&
+    typeof crypto.getRandomValues === 'function'
+  ) {
+    crypto.getRandomValues(values)
+    return String(
+      values[0] % 100_000_000
+    ).padStart(8, '0')
+  }
+
+  return String(
+    Math.floor(Math.random() * 100_000_000)
+  ).padStart(8, '0')
+}
+
 function readStoredUser() {
   try {
     const saved =
@@ -1537,7 +1516,12 @@ function PublicLoadTrackingPage({
 
   const sortedPublicStops = [...publicStops].sort(
     (a: DispatchStopRecord, b: DispatchStopRecord) =>
-      a.sequence - b.sequence
+      a.type === b.type
+        ? (a.pairNumber || a.sequence) -
+          (b.pairNumber || b.sequence)
+        : a.type === 'PICKUP'
+          ? -1
+          : 1
   )
 
   const routeNodes = sortedPublicStops.length > 0
@@ -2315,7 +2299,7 @@ function App() {
     newDispatchForm,
     setNewDispatchForm
   ] = useState({
-    loadNumber: '',
+    loadNumber: generateAutomaticLoadNumber(),
     dispatcherName: '',
     dispatcherPhone: '',
     poNumber: '',
@@ -2649,6 +2633,26 @@ function App() {
   const [
     renameError,
     setRenameError
+  ] = useState('')
+
+  const [
+    assetGroupOpen,
+    setAssetGroupOpen
+  ] = useState(false)
+
+  const [
+    assetGroupValue,
+    setAssetGroupValue
+  ] = useState('')
+
+  const [
+    assetGroupSaving,
+    setAssetGroupSaving
+  ] = useState(false)
+
+  const [
+    assetGroupError,
+    setAssetGroupError
   ] = useState('')
 
   const [
@@ -3872,82 +3876,93 @@ function App() {
     scheduledAt: ''
   })
 
-  const addDispatchStopPair = (
-    current: ExtraDispatchStop[]
+  const addDispatchStop = (
+    current: ExtraDispatchStop[],
+    type: 'PICKUP' | 'DROP'
   ) => {
-    const highestPair =
-      current.reduce(
-        (max, stop) =>
-          Math.max(max, stop.pairNumber || 1),
-        1
-      )
-
-    const pairNumber = highestPair + 1
+    const highestNumber =
+      current
+        .filter((stop) => stop.type === type)
+        .reduce(
+          (max, stop) =>
+            Math.max(max, stop.pairNumber || 1),
+          1
+        )
 
     return [
       ...current,
-      createExtraDispatchStop('PICKUP', pairNumber),
-      createExtraDispatchStop('DROP', pairNumber)
+      createExtraDispatchStop(
+        type,
+        highestNumber + 1
+      )
     ]
   }
 
   const buildStopsPayload = (
     form: typeof newDispatchForm,
     extras: ExtraDispatchStop[]
-  ) => [
-    {
-      pairNumber: 1,
-      type: 'PICKUP',
-      customerCode: form.pickupCustomerCode,
-      name: form.pickupName,
-      address: form.pickupAddress,
-      phone: form.pickupPhone,
-      latitude: form.pickupLatitude,
-      longitude: form.pickupLongitude,
-      reference: form.pickupReference,
+  ) => {
+    const extraPickups =
+      extras
+        .filter((stop) => stop.type === 'PICKUP')
+        .sort((a, b) => a.pairNumber - b.pairNumber)
+
+    const extraDrops =
+      extras
+        .filter((stop) => stop.type === 'DROP')
+        .sort((a, b) => a.pairNumber - b.pairNumber)
+
+    const mapStop = (stop: ExtraDispatchStop) => ({
+      pairNumber: stop.pairNumber,
+      type: stop.type,
+      customerCode: stop.customerCode,
+      name: stop.name,
+      address: stop.address,
+      phone: stop.phone,
+      latitude: stop.latitude,
+      longitude: stop.longitude,
+      reference: stop.reference,
       scheduledAt:
-        form.pickupScheduledAt
-          ? new Date(form.pickupScheduledAt).toISOString()
+        stop.scheduledAt
+          ? new Date(stop.scheduledAt).toISOString()
           : null
-    },
-    {
-      pairNumber: 1,
-      type: 'DROP',
-      customerCode: form.deliveryCustomerCode,
-      name: form.deliveryName,
-      address: form.deliveryAddress,
-      phone: form.deliveryPhone,
-      latitude: form.deliveryLatitude,
-      longitude: form.deliveryLongitude,
-      reference: form.deliveryReference,
-      scheduledAt:
-        form.deliveryScheduledAt
-          ? new Date(form.deliveryScheduledAt).toISOString()
-          : null
-    },
-    ...extras
-      .slice()
-      .sort(
-        (a, b) =>
-          a.pairNumber - b.pairNumber ||
-          (a.type === 'PICKUP' ? -1 : 1)
-      )
-      .map((stop) => ({
-        pairNumber: stop.pairNumber,
-        type: stop.type,
-        customerCode: stop.customerCode,
-        name: stop.name,
-        address: stop.address,
-        phone: stop.phone,
-        latitude: stop.latitude,
-        longitude: stop.longitude,
-        reference: stop.reference,
+    })
+
+    return [
+      {
+        pairNumber: 1,
+        type: 'PICKUP',
+        customerCode: form.pickupCustomerCode,
+        name: form.pickupName,
+        address: form.pickupAddress,
+        phone: form.pickupPhone,
+        latitude: form.pickupLatitude,
+        longitude: form.pickupLongitude,
+        reference: form.pickupReference,
         scheduledAt:
-          stop.scheduledAt
-            ? new Date(stop.scheduledAt).toISOString()
+          form.pickupScheduledAt
+            ? new Date(form.pickupScheduledAt).toISOString()
             : null
-      }))
-  ]
+      },
+      ...extraPickups.map(mapStop),
+      {
+        pairNumber: 1,
+        type: 'DROP',
+        customerCode: form.deliveryCustomerCode,
+        name: form.deliveryName,
+        address: form.deliveryAddress,
+        phone: form.deliveryPhone,
+        latitude: form.deliveryLatitude,
+        longitude: form.deliveryLongitude,
+        reference: form.deliveryReference,
+        scheduledAt:
+          form.deliveryScheduledAt
+            ? new Date(form.deliveryScheduledAt).toISOString()
+            : null
+      },
+      ...extraDrops.map(mapStop)
+    ]
+  }
 
   const readBrowserFileAsBase64 = (
     file: File
@@ -4142,7 +4157,7 @@ function App() {
   const resetNewDispatchForm = () => {
     setNewStopPairs([])
     setNewDispatchForm({
-      loadNumber: '',
+      loadNumber: generateAutomaticLoadNumber(),
       dispatcherName: '',
     dispatcherPhone: '',
       poNumber: '',
@@ -5726,6 +5741,14 @@ function App() {
             .includes(
               mapFilterSearch
             )
+          ||
+          String(
+            asset.groupName || ''
+          )
+            .toLowerCase()
+            .includes(
+              mapFilterSearch
+            )
 
         const typeCode =
           assetTypeCode(asset)
@@ -6729,6 +6752,83 @@ function App() {
         )
       } finally {
         setRenameSaving(false)
+      }
+    }
+
+  const handleAssetGroup =
+    async () => {
+      const token =
+        localStorage.getItem(
+          'maverick_token'
+        )
+
+      if (!selectedAsset?.id) {
+        setAssetGroupError(
+          'Asset information is not loaded yet.'
+        )
+        return
+      }
+
+      if (!token) {
+        setAssetGroupError(
+          'Your session has expired.'
+        )
+        return
+      }
+
+      const cleanGroup =
+        assetGroupValue.trim().slice(0, 80)
+
+      setAssetGroupSaving(true)
+      setAssetGroupError('')
+
+      try {
+        const res =
+          await fetch(
+            `${API_BASE}/api/assets/${selectedAsset.id}`,
+            {
+              method: 'PATCH',
+              headers: {
+                'Content-Type': 'application/json',
+                Authorization: `Bearer ${token}`
+              },
+              body: JSON.stringify({
+                groupName: cleanGroup || null
+              })
+            }
+          )
+
+        const data = await res.json()
+
+        if (res.status === 401) {
+          handleLogout()
+          return
+        }
+
+        if (!res.ok || !data.ok) {
+          setAssetGroupError(
+            data.message ||
+            'Unable to update asset group.'
+          )
+          return
+        }
+
+        setAssets((currentAssets) =>
+          currentAssets.map((asset) =>
+            asset.id === data.asset.id
+              ? data.asset
+              : asset
+          )
+        )
+
+        setAssetGroupOpen(false)
+        setAssetGroupValue('')
+      } catch {
+        setAssetGroupError(
+          'Unable to connect to MAVTRACK.'
+        )
+      } finally {
+        setAssetGroupSaving(false)
       }
     }
 
@@ -8323,11 +8423,19 @@ function App() {
                 asset.name || ''
               ).toLowerCase()
 
+            const groupName =
+              String(
+                asset.groupName || ''
+              ).toLowerCase()
+
             return (
               deviceId.includes(
                 normalizedAssetSearch
               ) ||
               name.includes(
+                normalizedAssetSearch
+              ) ||
+              groupName.includes(
                 normalizedAssetSearch
               )
             )
@@ -9114,6 +9222,18 @@ function App() {
                                     {
                                       asset.deviceId
                                     }
+                                  </>
+                                )
+                              }
+
+                              {
+                                asset.groupName && (
+                                  <>
+                                    <br />
+                                    Group / Company:{' '}
+                                    <strong>
+                                      {asset.groupName}
+                                    </strong>
                                   </>
                                 )
                               }
@@ -10251,6 +10371,16 @@ function App() {
                                       ? 'Phone GPS'
                                       : 'MAV2'}
                                   </span>
+                                  {
+                                    asset.groupName && (
+                                      <>
+                                        {' · '}
+                                        <span className="asset-source-label">
+                                          {asset.groupName}
+                                        </span>
+                                      </>
+                                    )
+                                  }
                                 </small>
                               </div>
                             </div>
@@ -10365,6 +10495,22 @@ function App() {
                                 type="button"
                               >
                                 Rename
+                              </button>
+
+                              <button
+                                onClick={() => {
+                                  setSelectedDeviceId(
+                                    asset.deviceId
+                                  )
+                                  setAssetGroupError('')
+                                  setAssetGroupValue(
+                                    asset.groupName || ''
+                                  )
+                                  setAssetGroupOpen(true)
+                                }}
+                                type="button"
+                              >
+                                Group
                               </button>
 
                               {
@@ -11013,6 +11159,7 @@ function App() {
                     className="primary-action operations-new-dispatch"
                     onClick={() => {
                       setDispatchError('')
+                      resetNewDispatchForm()
                       setNewDispatchOpen(true)
                     }}
                     type="button"
@@ -11956,7 +12103,13 @@ function App() {
 
                                                 <div className="operations-quick-stop-list">
                                                   {[...(dispatch.stops || [])]
-                                                    .sort((a, b) => a.sequence - b.sequence)
+                                                    .sort((a, b) =>
+                                                      a.type === b.type
+                                                        ? (a.pairNumber || a.sequence) - (b.pairNumber || b.sequence)
+                                                        : a.type === 'PICKUP'
+                                                          ? -1
+                                                          : 1
+                                                    )
                                                     .map((stop) => (
                                                       <div
                                                         className={`operations-quick-stop-control ${String(stop.status).toLowerCase()}`}
@@ -12121,13 +12274,10 @@ function App() {
                               <span>Trip / Load Number *</span>
                               <input
                                 value={newDispatchForm.loadNumber}
-                                onChange={(event) =>
-                                  setNewDispatchForm((current) => ({
-                                    ...current,
-                                    loadNumber: event.target.value
-                                  }))
-                                }
-                                placeholder="121333-01"
+                                readOnly
+                                inputMode="numeric"
+                                aria-label="Automatically generated 8 digit trip load number"
+                                title="MAVTRACK generates this 8-digit reference automatically."
                               />
                             </label>
                             <label>
@@ -12236,7 +12386,7 @@ function App() {
                                       key={asset.id}
                                       value={asset.id}
                                     >
-                                      {asset.name || asset.deviceId} ({asset.deviceId})
+                                      {asset.groupName ? `[${asset.groupName}] ` : ''}{asset.name || asset.deviceId} ({asset.deviceId})
                                       {assetTypeCode(asset) === 'TRK'
                                         ? ` · ${String(
                                             assetStatus ||
@@ -12589,18 +12739,31 @@ function App() {
                         </section>
                         <section className="dispatch-form-group dispatch-form-group-wide dispatch-linked-pairs-group">
                           <div className="dispatch-form-section-title dispatch-form-section-title-actions">
-                            <span>ADDITIONAL LINKED PICKUP / DROP PAIRS</span>
-                            <button
-                              type="button"
-                              className="secondary-action"
-                              onClick={() =>
-                                setNewStopPairs((current) =>
-                                  addDispatchStopPair(current)
-                                )
-                              }
-                            >
-                              + Add Pickup / Drop Pair
-                            </button>
+                            <span>ADDITIONAL ROUTE STOPS</span>
+                            <div className="row-actions">
+                              <button
+                                type="button"
+                                className="secondary-action"
+                                onClick={() =>
+                                  setNewStopPairs((current) =>
+                                    addDispatchStop(current, 'PICKUP')
+                                  )
+                                }
+                              >
+                                + Add Pickup
+                              </button>
+                              <button
+                                type="button"
+                                className="secondary-action"
+                                onClick={() =>
+                                  setNewStopPairs((current) =>
+                                    addDispatchStop(current, 'DROP')
+                                  )
+                                }
+                              >
+                                + Add Drop
+                              </button>
+                            </div>
                           </div>
 
                           <DispatchStopPairsEditor
@@ -12765,13 +12928,10 @@ function App() {
                               <span>Trip / Load Number *</span>
                               <input
                                 value={editDispatchForm.loadNumber}
-                                onChange={(event) =>
-                                  setEditDispatchForm((current) => ({
-                                    ...current,
-                                    loadNumber: event.target.value
-                                  }))
-                                }
-                                placeholder="121333-01"
+                                readOnly
+                                inputMode="numeric"
+                                aria-label="Trip load number"
+                                title="Trip / Load Number is generated automatically when the load is created."
                               />
                             </label>
                             <label>
@@ -12880,7 +13040,7 @@ function App() {
                                       key={asset.id}
                                       value={asset.id}
                                     >
-                                      {asset.name || asset.deviceId} ({asset.deviceId})
+                                      {asset.groupName ? `[${asset.groupName}] ` : ''}{asset.name || asset.deviceId} ({asset.deviceId})
                                       {assetTypeCode(asset) === 'TRK'
                                         ? ` · ${String(
                                             assetStatus ||
@@ -13233,18 +13393,31 @@ function App() {
                         </section>
                         <section className="dispatch-form-group dispatch-form-group-wide dispatch-linked-pairs-group">
                           <div className="dispatch-form-section-title dispatch-form-section-title-actions">
-                            <span>ADDITIONAL LINKED PICKUP / DROP PAIRS</span>
-                            <button
-                              type="button"
-                              className="secondary-action"
-                              onClick={() =>
-                                setEditStopPairs((current) =>
-                                  addDispatchStopPair(current)
-                                )
-                              }
-                            >
-                              + Add Pickup / Drop Pair
-                            </button>
+                            <span>ADDITIONAL ROUTE STOPS</span>
+                            <div className="row-actions">
+                              <button
+                                type="button"
+                                className="secondary-action"
+                                onClick={() =>
+                                  setEditStopPairs((current) =>
+                                    addDispatchStop(current, 'PICKUP')
+                                  )
+                                }
+                              >
+                                + Add Pickup
+                              </button>
+                              <button
+                                type="button"
+                                className="secondary-action"
+                                onClick={() =>
+                                  setEditStopPairs((current) =>
+                                    addDispatchStop(current, 'DROP')
+                                  )
+                                }
+                              >
+                                + Add Drop
+                              </button>
+                            </div>
                           </div>
 
                           <DispatchStopPairsEditor
@@ -14714,6 +14887,138 @@ function App() {
                 </button>
               </div>
 
+            </section>
+          </div>
+        )
+      }
+
+      {/* ================================= */}
+      {/* ASSET GROUP / COMPANY MODAL */}
+      {/* ================================= */}
+
+      {
+        assetGroupOpen && (
+          <div
+            className="modal-backdrop"
+            onMouseDown={() => {
+              if (!assetGroupSaving) {
+                setAssetGroupOpen(false)
+                setAssetGroupError('')
+              }
+            }}
+          >
+            <section
+              className="details-modal rename-modal"
+              onMouseDown={(event) =>
+                event.stopPropagation()
+              }
+            >
+              <div className="modal-header">
+                <div>
+                  <span className="page-kicker">
+                    Asset Group / Company
+                  </span>
+                  <h2>
+                    {selectedAsset?.name || selectedDeviceId}
+                  </h2>
+                </div>
+                <button
+                  className="modal-close"
+                  onClick={() => {
+                    setAssetGroupOpen(false)
+                    setAssetGroupError('')
+                  }}
+                  type="button"
+                  disabled={assetGroupSaving}
+                >
+                  ×
+                </button>
+              </div>
+
+              <div className="rename-form">
+                <label htmlFor="asset-group-name">
+                  Group / company name
+                </label>
+                <input
+                  id="asset-group-name"
+                  type="text"
+                  value={assetGroupValue}
+                  onChange={(event) =>
+                    setAssetGroupValue(event.target.value)
+                  }
+                  onKeyDown={(event) => {
+                    if (
+                      event.key === 'Enter' &&
+                      !assetGroupSaving
+                    ) {
+                      void handleAssetGroup()
+                    }
+                  }}
+                  maxLength={80}
+                  autoFocus
+                  placeholder="Example: GA LOG"
+                  list="asset-group-suggestions"
+                />
+                <datalist id="asset-group-suggestions">
+                  {
+                    Array.from(
+                      new Set(
+                        assets
+                          .map((asset) =>
+                            String(asset.groupName || '').trim()
+                          )
+                          .filter(Boolean)
+                      )
+                    )
+                      .sort()
+                      .map((groupName) => (
+                        <option
+                          key={groupName}
+                          value={groupName}
+                        />
+                      ))
+                  }
+                </datalist>
+                <div className="rename-help">
+                  <span>
+                    Assets with the same group name are identified together in Fleet, Dispatch and the map.
+                  </span>
+                  <span>
+                    Leave blank to remove the group.
+                  </span>
+                </div>
+                {
+                  assetGroupError && (
+                    <div className="rename-error">
+                      {assetGroupError}
+                    </div>
+                  )
+                }
+              </div>
+
+              <div className="modal-actions">
+                <button
+                  className="secondary-action"
+                  onClick={() => {
+                    setAssetGroupOpen(false)
+                    setAssetGroupError('')
+                  }}
+                  type="button"
+                  disabled={assetGroupSaving}
+                >
+                  Cancel
+                </button>
+                <button
+                  className="primary-action"
+                  onClick={() =>
+                    void handleAssetGroup()
+                  }
+                  type="button"
+                  disabled={assetGroupSaving}
+                >
+                  {assetGroupSaving ? 'Saving...' : 'Save Group'}
+                </button>
+              </div>
             </section>
           </div>
         )

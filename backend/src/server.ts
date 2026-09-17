@@ -2257,6 +2257,7 @@ app.get(
             active: true,
             assetType: true,
             trackingSource: true,
+            groupName: true,
             temperatureMinC: true,
             temperatureMaxC: true,
             temperatureAlertsEnabled: true,
@@ -2740,6 +2741,7 @@ app.patch(
 
       const data: {
         name?: string
+        groupName?: string | null
         temperatureMinC?: number | null
         temperatureMaxC?: number | null
         temperatureAlertsEnabled?: boolean
@@ -2768,6 +2770,35 @@ app.patch(
         }
 
         data.name = name
+      }
+
+      // ---------------------------------
+      // ASSET GROUP / COMPANY
+      // ---------------------------------
+
+      if (req.body?.groupName !== undefined) {
+        const value = req.body.groupName
+
+        if (
+          value === null ||
+          (
+            typeof value === 'string' &&
+            value.trim() === ''
+          )
+        ) {
+          data.groupName = null
+        } else if (
+          typeof value === 'string' &&
+          value.trim().length <= 80
+        ) {
+          data.groupName = value.trim()
+        } else {
+          return res.status(400).json({
+            ok: false,
+            message:
+              'Asset group name must be 80 characters or fewer'
+          })
+        }
       }
 
       // ---------------------------------
@@ -2956,6 +2987,7 @@ app.patch(
             active: true,
             assetType: true,
             trackingSource: true,
+            groupName: true,
             temperatureMinC: true,
             temperatureMaxC: true,
             temperatureAlertsEnabled: true,
@@ -3442,6 +3474,38 @@ function isDispatchStatus(
   )
 }
 
+async function generateUniqueDispatchLoadNumber(
+  companyId: number
+) {
+  for (let attempt = 0; attempt < 30; attempt += 1) {
+    const candidate =
+      String(
+        Math.floor(
+          Math.random() * 100_000_000
+        )
+      ).padStart(8, '0')
+
+    const existing =
+      await prisma.dispatch.findFirst({
+        where: {
+          companyId,
+          loadNumber: candidate
+        },
+        select: {
+          id: true
+        }
+      })
+
+    if (!existing) {
+      return candidate
+    }
+  }
+
+  throw new Error(
+    'Unable to generate a unique load number'
+  )
+}
+
 function optionalString(value: unknown) {
   if (typeof value !== 'string') {
     return null
@@ -3512,8 +3576,7 @@ function parseDispatchStops(
     return { stops: null, error: 'Stops must be an array' }
   }
 
-  const stops: DispatchStopInput[] = []
-  const fallbackPairCount = { PICKUP: 0, DROP: 0 }
+  const rawStops: DispatchStopInput[] = []
 
   for (let index = 0; index < value.length; index += 1) {
     const raw = value[index] as any
@@ -3528,23 +3591,15 @@ function parseDispatchStops(
       }
     }
 
-    fallbackPairCount[type as 'PICKUP' | 'DROP'] += 1
-    const explicitPairNumber = Number(raw?.pairNumber)
-    const pairNumber =
-      Number.isInteger(explicitPairNumber) && explicitPairNumber > 0
-        ? explicitPairNumber
-        : fallbackPairCount[type as 'PICKUP' | 'DROP']
-
-    stops.push({
+    rawStops.push({
       sequence: index + 1,
-      pairNumber,
+      pairNumber: 1,
       type: type as 'PICKUP' | 'DROP',
       customerCode:
         normalizeCustomerCode(raw?.customerCode) || null,
       name,
       address,
-      phone:
-        formatPhone(raw?.phone) || null,
+      phone: formatPhone(raw?.phone) || null,
       latitude: optionalNumber(raw?.latitude),
       longitude: optionalNumber(raw?.longitude),
       reference: optionalString(raw?.reference),
@@ -3553,34 +3608,38 @@ function parseDispatchStops(
     })
   }
 
-  const pairNumbers = Array.from(new Set(stops.map((stop) => stop.pairNumber))).sort((a, b) => a - b)
+  const pickups = rawStops.filter(
+    (stop) => stop.type === 'PICKUP'
+  )
+  const drops = rawStops.filter(
+    (stop) => stop.type === 'DROP'
+  )
 
-  if (pairNumbers.length === 0) {
-    return { stops: null, error: 'A load must contain at least one pickup / drop pair' }
-  }
-
-  for (const pairNumber of pairNumbers) {
-    const pairStops = stops.filter((stop) => stop.pairNumber === pairNumber)
-    const pickups = pairStops.filter((stop) => stop.type === 'PICKUP')
-    const drops = pairStops.filter((stop) => stop.type === 'DROP')
-
-    if (pairStops.length !== 2 || pickups.length !== 1 || drops.length !== 1) {
-      return {
-        stops: null,
-        error: `Route pair ${pairNumber} must contain exactly one pickup and one drop`
-      }
+  if (pickups.length === 0 || drops.length === 0) {
+    return {
+      stops: null,
+      error: 'A load must contain at least one pickup and one drop'
     }
   }
 
-  const orderedStops = stops
-    .slice()
-    .sort((a, b) =>
-      a.pairNumber - b.pairNumber ||
-      (a.type === 'PICKUP' ? -1 : 1)
-    )
-    .map((stop, index) => ({ ...stop, sequence: index + 1 }))
+  const orderedStops = [
+    ...pickups.map((stop, index) => ({
+      ...stop,
+      pairNumber: index + 1
+    })),
+    ...drops.map((stop, index) => ({
+      ...stop,
+      pairNumber: index + 1
+    }))
+  ].map((stop, index) => ({
+    ...stop,
+    sequence: index + 1
+  }))
 
-  return { stops: orderedStops, error: null }
+  return {
+    stops: orderedStops,
+    error: null
+  }
 }
 
 function dispatchDocumentMeta(
@@ -3949,10 +4008,20 @@ app.post(
         })
       }
 
-      const loadNumber =
+      const requestedLoadNumber =
         optionalString(
           req.body?.loadNumber
         )
+
+      const loadNumber =
+        requestedLoadNumber &&
+        /^\d{8}$/.test(
+          requestedLoadNumber
+        )
+          ? requestedLoadNumber
+          : await generateUniqueDispatchLoadNumber(
+              companyId
+            )
 
       const pickupName =
         optionalString(
@@ -3975,7 +4044,6 @@ app.post(
         )
 
       if (
-        !loadNumber ||
         !pickupName ||
         !pickupAddress ||
         !deliveryName ||
@@ -3984,7 +4052,7 @@ app.post(
         return res.status(400).json({
           ok: false,
           message:
-            'Load number, pickup and delivery are required'
+            'Pickup and delivery are required'
         })
       }
 
@@ -5265,7 +5333,12 @@ async function updateDispatchStopStatusForRequest({
     const orderedStops =
       [...stopsAfterUpdate].sort(
         (a, b) =>
-          a.sequence - b.sequence
+          a.type === b.type
+            ? (a.pairNumber || a.sequence) -
+              (b.pairNumber || b.sequence)
+            : a.type === 'PICKUP'
+              ? -1
+              : 1
       )
 
     const allStopsCompleted =

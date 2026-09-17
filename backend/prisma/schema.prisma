@@ -15,9 +15,9 @@ model Company {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  users          User[]
-  driverProfiles DriverProfile[]
-  assets         Asset[]
+  users             User[]
+  driverProfiles    DriverProfile[]
+  assets            Asset[]
   dispatches        Dispatch[]
   customerLocations CustomerLocation[]
   notifications     NotificationEvent[]
@@ -52,12 +52,12 @@ model DriverProfile {
   companyId Int
   company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
 
-  firstName       String
-  lastName        String
-  phone           String?
-  licenseNumber   String?
-  licenseState         String?
-  profilePhotoUrl      String?
+  firstName             String
+  lastName              String
+  phone                 String?
+  licenseNumber         String?
+  licenseState          String?
+  profilePhotoUrl       String?
   currentTruckNumber    String?
   physicalTruckNumber   String?
   currentTrailerNumber  String?
@@ -80,12 +80,11 @@ model Asset {
 
   // TRL = trailer tracked by MAV2
   // TRK = truck tracked by the driver's phone
-  assetType      String @default("TRL")
-  trackingSource String @default("MAV2")
+  assetType      String  @default("TRL")
+  trackingSource String  @default("MAV2")
+  groupName      String?
 
-  // Persistent PHONE tracking session state. This is separate from GPS
-  // freshness because iOS may pause location callbacks while stationary.
-  trackingActive    Boolean  @default(false)
+  trackingActive    Boolean   @default(false)
   trackingStartedAt DateTime?
   trackingStoppedAt DateTime?
   lastHeartbeatAt   DateTime?
@@ -109,8 +108,8 @@ model Asset {
 
   @@index([companyId])
   @@index([companyId, assetType])
+  @@index([companyId, groupName])
 }
-
 
 model Camera {
   id         Int     @id @default(autoincrement())
@@ -131,9 +130,9 @@ model Camera {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  @@unique([provider, externalId])
   @@index([assetId])
   @@index([provider])
-  @@unique([provider, externalId])
 }
 
 model Telemetry {
@@ -246,13 +245,13 @@ model Dispatch {
 
   dispatcherName  String?
   dispatcherPhone String?
-  poNumber       String?
-  bolNumber      String?
-  carrierName    String?
-  lessorName     String?
-  truckNumber    String?
-  trailerNumber  String?
-  trailerLicense String?
+  poNumber        String?
+  bolNumber       String?
+  carrierName     String?
+  lessorName      String?
+  truckNumber     String?
+  trailerNumber   String?
+  trailerLicense  String?
 
   pickupPhone     String?
   pickupReference String?
@@ -296,7 +295,7 @@ model Dispatch {
 model DispatchStatusEvent {
   id        Int            @id @default(autoincrement())
   status    DispatchStatus
-  eventType String          @default("STATUS")
+  eventType String         @default("STATUS")
   title     String?
   notes     String?
   createdAt DateTime       @default(now())
@@ -314,7 +313,7 @@ model DispatchStop {
   dispatch   Dispatch @relation(fields: [dispatchId], references: [id], onDelete: Cascade)
 
   sequence   Int
-  pairNumber Int              @default(1)
+  pairNumber Int                @default(1)
   type       DispatchStopType
   status     DispatchStopStatus @default(PENDING)
 
@@ -324,9 +323,9 @@ model DispatchStop {
   phone        String?
   latitude     Float?
   longitude    Float?
-  reference   String?
-  notes       String?
-  scheduledAt DateTime?
+  reference    String?
+  notes        String?
+  scheduledAt  DateTime?
 
   arrivedAt   DateTime?
   completedAt DateTime?
@@ -377,9 +376,9 @@ model DispatchDocument {
   uploadedByUserId Int?
   uploadedByRole   String
   uploadedByName   String?
-  customerVisible Boolean @default(true)
+  customerVisible  Boolean @default(true)
 
-  isSignature Boolean @default(false)
+  isSignature Boolean   @default(false)
   signedBy    String?
   signedAt    DateTime?
   description String?

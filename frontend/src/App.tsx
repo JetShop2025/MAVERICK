@@ -2519,6 +2519,11 @@ function App() {
   ] = useState(true)
 
   const [
+    mapLayer,
+    setMapLayer
+  ] = useState<'street' | 'satellite'>('street')
+
+  const [
     historyOpen,
     setHistoryOpen
   ] = useState(false)
@@ -9096,17 +9101,33 @@ function App() {
 
         {
           activeView === 'map' && (
-            <button
-              className="toolbar-button"
-              onClick={() =>
-                setFiltersOpen(
-                  !filtersOpen
-                )
-              }
-              type="button"
-            >
-              Filters
-            </button>
+            <>
+              <button
+                className="toolbar-button"
+                onClick={() =>
+                  setMapLayer(
+                    mapLayer === 'street'
+                      ? 'satellite'
+                      : 'street'
+                  )
+                }
+                type="button"
+              >
+                {mapLayer === 'street' ? 'Satellite' : 'Map'}
+              </button>
+
+              <button
+                className="toolbar-button"
+                onClick={() =>
+                  setFiltersOpen(
+                    !filtersOpen
+                  )
+                }
+                type="button"
+              >
+                Filters
+              </button>
+            </>
           )
         }
 
@@ -9189,16 +9210,27 @@ function App() {
 
                 <ResponsiveMapSize />
 
-                <TileLayer
-                  attribution={
-                    '&copy; OpenStreetMap contributors'
-                  }
-                  url={
-                    'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png'
-                  }
-                  maxNativeZoom={19}
-                  maxZoom={22}
-                />
+                {
+                  mapLayer === 'satellite'
+                    ? (
+                      <TileLayer
+                        key="satellite"
+                        attribution="Tiles &copy; Esri"
+                        url="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
+                        maxNativeZoom={19}
+                        maxZoom={22}
+                      />
+                    )
+                    : (
+                      <TileLayer
+                        key="street"
+                        attribution="&copy; OpenStreetMap contributors"
+                        url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+                        maxNativeZoom={19}
+                        maxZoom={22}
+                      />
+                    )
+                }
 
                 {
                   showRoute &&
@@ -9467,6 +9499,7 @@ function App() {
                                     )
                                   : 'No data'
                               }
+
                             </div>
                           </Popup>
                         </Marker>

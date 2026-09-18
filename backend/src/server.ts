@@ -730,6 +730,7 @@ async function ensureAdminUser() {
 type BootstrapUser = {
   email: string
   name: string
+  phone: string | null
   role: 'company_admin' | 'dispatch'
   passwordEnv: string
 }
@@ -738,30 +739,35 @@ const bootstrapUsers: BootstrapUser[] = [
   {
     email: 'mario@ga-logistics.su',
     name: 'Mario',
+    phone: null,
     role: 'company_admin',
     passwordEnv: 'MAVTRACK_MARIO_PASSWORD'
   },
   {
     email: 'dispatcher@ga-logistics.us',
     name: 'Cris',
+    phone: '(831) 265-6205',
     role: 'company_admin',
     passwordEnv: 'MAVTRACK_CRIS_PASSWORD'
   },
   {
     email: 'luis@ga-logistics.us',
     name: 'Luis',
+    phone: '(831) 236-3029',
     role: 'dispatch',
     passwordEnv: 'MAVTRACK_LUIS_PASSWORD'
   },
   {
     email: 'angel@jettrucking.net',
     name: 'Angel',
+    phone: '(831) 901-4213',
     role: 'dispatch',
     passwordEnv: 'MAVTRACK_ANGEL_PASSWORD'
   },
   {
     email: 'augie@jettrucking.net',
     name: 'Augie',
+    phone: '(831) 901-7018',
     role: 'dispatch',
     passwordEnv: 'MAVTRACK_AUGIE_PASSWORD'
   }
@@ -823,6 +829,7 @@ async function ensureBootstrapUsers() {
         },
         data: {
           name: account.name,
+          phone: account.phone,
           role: account.role,
           passwordHash,
           companyId: company.id,
@@ -841,6 +848,7 @@ async function ensureBootstrapUsers() {
         email: account.email,
         passwordHash,
         name: account.name,
+        phone: account.phone,
         role: account.role,
         active: true,
         companyId: company.id
@@ -983,6 +991,7 @@ return res.json({
     id: user.id,
     email: user.email,
     name: user.name,
+    phone: user.phone,
     role: user.role,
     companyId: user.companyId
   }
@@ -1052,6 +1061,7 @@ app.get(
             id: true,
             email: true,
             name: true,
+            phone: true,
             role: true,
             companyId: true,
             active: true,
@@ -4138,6 +4148,21 @@ app.post(
         })
       }
 
+      const creatingUser =
+        req.user?.userId
+          ? await prisma.user.findFirst({
+              where: {
+                id: req.user.userId,
+                companyId,
+                active: true
+              },
+              select: {
+                name: true,
+                phone: true
+              }
+            })
+          : null
+
       const requestedLoadNumber =
         optionalString(
           req.body?.loadNumber
@@ -4507,10 +4532,10 @@ app.post(
               ),
 
             dispatcherName:
-              optionalString(
-                req.body?.dispatcherName
-              ),
+              creatingUser?.name ||
+              optionalString(req.body?.dispatcherName),
             dispatcherPhone:
+              formatPhone(creatingUser?.phone) ||
               formatPhone(req.body?.dispatcherPhone) || null,
             poNumber:
               optionalString(

@@ -28,6 +28,7 @@ model User {
   email        String  @unique
   passwordHash String
   name         String
+  phone        String?
   role         String  @default("viewer")
   active       Boolean @default(true)
 

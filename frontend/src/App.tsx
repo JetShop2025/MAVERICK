@@ -2235,6 +2235,16 @@ function App() {
   ] = useState<'all' | DispatchStatus>('all')
 
   const [
+    dispatchGroupFilter,
+    setDispatchGroupFilter
+  ] = useState('all')
+
+  const [
+    newDispatchAssetGroup,
+    setNewDispatchAssetGroup
+  ] = useState('all')
+
+  const [
     operationsTab,
     setOperationsTab
   ] = useState<'active' | 'history'>('active')
@@ -4172,10 +4182,11 @@ function App() {
 
   const resetNewDispatchForm = () => {
     setNewStopPairs([])
+    setNewDispatchAssetGroup('all')
     setNewDispatchForm({
       loadNumber: generateAutomaticLoadNumber(dispatches),
-      dispatcherName: '',
-    dispatcherPhone: '',
+      dispatcherName: currentUser?.name || currentUser?.email || '',
+      dispatcherPhone: formatDispatchPhone(currentUser?.phone || ''),
       poNumber: '',
       bolNumber: '',
       referenceNumber: '',
@@ -5197,9 +5208,19 @@ function App() {
           dispatch.status ===
             dispatchStatusFilter
 
+        const dispatchAssetGroup =
+          String(dispatch.asset?.groupName || '').trim()
+
+        const matchesGroup =
+          dispatchGroupFilter === 'all' ||
+          (dispatchGroupFilter === '__unassigned__'
+            ? !dispatchAssetGroup
+            : dispatchAssetGroup === dispatchGroupFilter)
+
         return (
           matchesText &&
-          matchesStatus
+          matchesStatus &&
+          matchesGroup
         )
       }
     )
@@ -5356,9 +5377,14 @@ function App() {
   const availableAssets =
     unassignedAssets.filter(
       (asset) =>
-        isAssetAssignableToDispatch(asset) ||
-        String(asset.id) ===
-          newDispatchForm.assetId
+        (
+          newDispatchAssetGroup === 'all' ||
+          (newDispatchAssetGroup === '__unassigned__'
+            ? !String(asset.groupName || '').trim()
+            : String(asset.groupName || '').trim() === newDispatchAssetGroup)
+        ) &&
+        (isAssetAssignableToDispatch(asset) ||
+          String(asset.id) === newDispatchForm.assetId)
     )
 
   const editableAssets =
@@ -11414,6 +11440,23 @@ function App() {
                         )
                       }
                     </div>
+
+                    <select
+                      value={dispatchGroupFilter}
+                      onChange={(event) => {
+                        setDispatchGroupFilter(event.target.value)
+                        setSelectedOperationsDispatchId(null)
+                      }}
+                      aria-label="Filter loads by asset group"
+                    >
+                      <option value="all">All Groups</option>
+                      {assetGroups.map((group) => (
+                        <option key={group.name} value={group.name}>
+                          {group.name}
+                        </option>
+                      ))}
+                      <option value="__unassigned__">Unassigned</option>
+                    </select>
                   </div>
 
                   <div className="operations-load-table-head">
@@ -12518,26 +12561,17 @@ function App() {
                               <span>Dispatcher</span>
                               <input
                                 value={newDispatchForm.dispatcherName}
-                                onChange={(event) =>
-                                  setNewDispatchForm((current) => ({
-                                    ...current,
-                                    dispatcherName: event.target.value
-                                  }))
-                                }
-                                placeholder="CRI"
+                                readOnly
+                                title="Automatically set from the signed-in user"
                               />
                             </label>
                             <label>
                               <span>Dispatcher Phone</span>
                               <input
                                 value={newDispatchForm.dispatcherPhone}
-                                onChange={(event) =>
-                                  setNewDispatchForm((current) => ({
-                                    ...current,
-                                    dispatcherPhone: formatDispatchPhone(event.target.value)
-                                  }))
-                                }
+                                readOnly
                                 placeholder="(831) 000-0000"
+                                title="Automatically set from the signed-in user"
                               />
                             </label>
                             <label>
@@ -12586,6 +12620,31 @@ function App() {
                             EQUIPMENT / CARRIER
                           </div>
                           <div className="dispatch-form-group-grid">
+                            <label>
+                              <span>Asset Group</span>
+                              <select
+                                value={newDispatchAssetGroup}
+                                onChange={(event) => {
+                                  setNewDispatchAssetGroup(event.target.value)
+                                  setNewDispatchForm((current) => ({
+                                    ...current,
+                                    assetId: '',
+                                    driverId: '',
+                                    truckNumber: '',
+                                    trailerNumber: '',
+                                    trailerLicense: ''
+                                  }))
+                                }}
+                              >
+                                <option value="all">All Groups</option>
+                                {assetGroups.map((group) => (
+                                  <option key={group.name} value={group.name}>
+                                    {group.name} ({group.count})
+                                  </option>
+                                ))}
+                                <option value="__unassigned__">Unassigned</option>
+                              </select>
+                            </label>
                             <label>
                               <span>Tracked Asset</span>
                               <select

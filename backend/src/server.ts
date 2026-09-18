@@ -724,6 +724,136 @@ async function ensureAdminUser() {
 }
 
 // =====================================================
+// CUENTAS INTERNAS DE MAVTRACK
+// =====================================================
+
+type BootstrapUser = {
+  email: string
+  name: string
+  role: 'company_admin' | 'dispatch'
+  passwordEnv: string
+}
+
+const bootstrapUsers: BootstrapUser[] = [
+  {
+    email: 'mario@ga-logistics.su',
+    name: 'Mario',
+    role: 'company_admin',
+    passwordEnv: 'MAVTRACK_MARIO_PASSWORD'
+  },
+  {
+    email: 'dispatcher@ga-logistics.us',
+    name: 'Cris',
+    role: 'company_admin',
+    passwordEnv: 'MAVTRACK_CRIS_PASSWORD'
+  },
+  {
+    email: 'luis@ga-logistics.us',
+    name: 'Luis',
+    role: 'dispatch',
+    passwordEnv: 'MAVTRACK_LUIS_PASSWORD'
+  },
+  {
+    email: 'angel@jettrucking.net',
+    name: 'Angel',
+    role: 'dispatch',
+    passwordEnv: 'MAVTRACK_ANGEL_PASSWORD'
+  },
+  {
+    email: 'augie@jettrucking.net',
+    name: 'Augie',
+    role: 'dispatch',
+    passwordEnv: 'MAVTRACK_AUGIE_PASSWORD'
+  }
+]
+
+async function ensureBootstrapUsers() {
+  const company =
+    await prisma.company.upsert({
+      where: {
+        slug: 'maverick-demo'
+      },
+      update: {
+        active: true
+      },
+      create: {
+        name: 'Maverick Demo Company',
+        slug: 'maverick-demo',
+        active: true
+      }
+    })
+
+  for (const account of bootstrapUsers) {
+    const password =
+      process.env[account.passwordEnv]
+
+    if (!password) {
+      console.warn(
+        `${account.passwordEnv} is not configured; ${account.email} was not provisioned.`
+      )
+      continue
+    }
+
+    if (password.length < 8) {
+      throw new Error(
+        `${account.passwordEnv} must contain at least 8 characters`
+      )
+    }
+
+    const passwordHash =
+      await bcrypt.hash(
+        password,
+        12
+      )
+
+    const existingUser =
+      await prisma.user.findUnique({
+        where: {
+          email: account.email
+        },
+        select: {
+          id: true
+        }
+      })
+
+    if (existingUser) {
+      await prisma.user.update({
+        where: {
+          id: existingUser.id
+        },
+        data: {
+          name: account.name,
+          role: account.role,
+          passwordHash,
+          companyId: company.id,
+          active: true
+        }
+      })
+
+      console.log(
+        `MAVTRACK user ready: ${account.email} (${account.role})`
+      )
+      continue
+    }
+
+    await prisma.user.create({
+      data: {
+        email: account.email,
+        passwordHash,
+        name: account.name,
+        role: account.role,
+        active: true,
+        companyId: company.id
+      }
+    })
+
+    console.log(
+      `MAVTRACK user created: ${account.email} (${account.role})`
+    )
+  }
+}
+
+// =====================================================
 // ROOT
 // =====================================================
 
@@ -8944,6 +9074,8 @@ async function startServer() {
   try {
 
     await ensureAdminUser()
+
+    await ensureBootstrapUsers()
 
     app.listen(
       PORT,

@@ -10636,40 +10636,48 @@ function App() {
                                 Locate
                               </button>
 
-                              <button
-                                onClick={() => {
-                                  setSelectedDeviceId(
-                                    asset.deviceId
-                                  )
-                                  setRenameError('')
-                                  setRenameValue(
-                                    asset.name || asset.deviceId
-                                  )
-                                  setRenameOpen(true)
-                                }}
-                                type="button"
-                              >
-                                Rename
-                              </button>
-
-                              <button
-                                onClick={() => {
-                                  setSelectedDeviceId(
-                                    asset.deviceId
-                                  )
-                                  setAssetGroupError('')
-                                  setAssetGroupValue(
-                                    asset.groupName || ''
-                                  )
-                                  setAssetGroupOpen(true)
-                                }}
-                                type="button"
-                              >
-                                Group
-                              </button>
+                              {
+                                isAdmin && (
+                                  <button
+                                    onClick={() => {
+                                      setSelectedDeviceId(
+                                        asset.deviceId
+                                      )
+                                      setRenameError('')
+                                      setRenameValue(
+                                        asset.name || asset.deviceId
+                                      )
+                                      setRenameOpen(true)
+                                    }}
+                                    type="button"
+                                  >
+                                    Rename
+                                  </button>
+                                )
+                              }
 
                               {
-                                !rowIsTruck && (
+                                isAdmin && (
+                                  <button
+                                    onClick={() => {
+                                      setSelectedDeviceId(
+                                        asset.deviceId
+                                      )
+                                      setAssetGroupError('')
+                                      setAssetGroupValue(
+                                        asset.groupName || ''
+                                      )
+                                      setAssetGroupOpen(true)
+                                    }}
+                                    type="button"
+                                  >
+                                    Group
+                                  </button>
+                                )
+                              }
+
+                              {
+                                isAdmin && !rowIsTruck && (
                                   <button
                                     onClick={() => {
                                       setSelectedDeviceId(
@@ -10716,28 +10724,32 @@ function App() {
                                 Details
                               </button>
 
-                              <button
-                                className="asset-delete-button"
-                                disabled={
-                                  assetDeletingId === asset.id ||
-                                  Boolean(rowDispatch)
-                                }
-                                onClick={() =>
-                                  void deleteAsset(asset)
-                                }
-                                type="button"
-                                title={
-                                  rowDispatch
-                                    ? `Finish or cancel load ${rowDispatch.loadNumber} before deleting this asset.`
-                                    : `Delete ${asset.name || asset.deviceId}`
-                                }
-                              >
-                                {
-                                  assetDeletingId === asset.id
-                                    ? 'Deleting…'
-                                    : 'Delete'
-                                }
-                              </button>
+                              {
+                                isAdmin && (
+                                  <button
+                                    className="asset-delete-button"
+                                    disabled={
+                                      assetDeletingId === asset.id ||
+                                      Boolean(rowDispatch)
+                                    }
+                                    onClick={() =>
+                                      void deleteAsset(asset)
+                                    }
+                                    type="button"
+                                    title={
+                                      rowDispatch
+                                        ? `Finish or cancel load ${rowDispatch.loadNumber} before deleting this asset.`
+                                        : `Delete ${asset.name || asset.deviceId}`
+                                    }
+                                  >
+                                    {
+                                      assetDeletingId === asset.id
+                                        ? 'Deleting…'
+                                        : 'Delete'
+                                    }
+                                  </button>
+                                )
+                              }
                             </div>
                           </div>
                         )

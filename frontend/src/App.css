@@ -2233,6 +2233,205 @@ button:disabled {
 }
 
 /* =====================================================
+   OPERATIONS CLASSIC PROPORTIONS + UNIFIED STOP CARDS V7
+   Restores the original workspace sizing while keeping content clear.
+   ===================================================== */
+
+@media (min-width: 1181px) {
+  .workspace-page.operations-master-detail {
+    padding: 14px 18px 16px !important;
+  }
+
+  .workspace-page.operations-master-detail .operations-split-workspace {
+    grid-template-columns:
+      minmax(0, 61%)
+      minmax(500px, 39%) !important;
+  }
+
+  .workspace-page.operations-master-detail .operations-load-table-head,
+  .workspace-page.operations-master-detail .operations-load-row {
+    min-width: 920px !important;
+    grid-template-columns:
+      minmax(108px, 1.03fr)
+      minmax(130px, 1.28fr)
+      minmax(130px, 1.28fr)
+      minmax(90px, 0.82fr)
+      minmax(118px, 1.02fr)
+      72px
+      78px
+      78px !important;
+    gap: 8px !important;
+  }
+
+  .workspace-page.operations-master-detail .operations-load-row {
+    min-height: 74px !important;
+    padding: 9px 14px !important;
+  }
+}
+
+.workspace-page.operations-master-detail .operations-commandbar {
+  position: relative;
+  z-index: 3;
+  flex: 0 0 auto;
+  min-height: 112px !important;
+  grid-template-columns: minmax(190px, 1fr) minmax(300px, auto) minmax(190px, 1fr) !important;
+  grid-template-areas:
+    ". title actions"
+    "kpis kpis kpis" !important;
+  align-items: center !important;
+  overflow: visible !important;
+}
+
+.workspace-page.operations-master-detail .operations-title-block {
+  grid-area: title !important;
+  min-width: 300px;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+}
+
+.workspace-page.operations-master-detail .operations-title-block .page-kicker {
+  display: block;
+  margin-bottom: 3px;
+  font-size: 0.66rem;
+  letter-spacing: 0.12em;
+}
+
+.workspace-page.operations-master-detail .operations-title-block h1 {
+  margin: 0 !important;
+  color: #f1f5f9;
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 1.45rem !important;
+  font-style: italic;
+  font-weight: 600;
+  line-height: 1.2;
+  letter-spacing: 0.015em;
+  text-shadow: 0 1px 12px rgba(96, 165, 250, 0.12);
+}
+
+.workspace-page.operations-master-detail .operations-title-block p {
+  max-width: 520px;
+  margin-top: 4px !important;
+  text-align: center;
+  font-size: 0.68rem;
+  line-height: 1.35;
+}
+
+.workspace-page.operations-master-detail .operations-command-actions {
+  grid-area: actions !important;
+  justify-self: end;
+}
+
+.workspace-page.operations-master-detail .operations-kpis-compact {
+  grid-area: kpis !important;
+}
+
+/* Load, Equipment, Pickup 1 and Drop 1 return to two balanced columns. */
+@media (min-width: 901px) {
+  .details-modal.dispatch-modal > .dispatch-form-grid-real > .dispatch-form-group:nth-child(1),
+  .details-modal.dispatch-modal > .dispatch-form-grid-real > .dispatch-form-group:nth-child(2),
+  .details-modal.dispatch-modal .dispatch-pair-primary.pickup,
+  .details-modal.dispatch-modal .dispatch-pair-primary.drop {
+    grid-column: auto !important;
+  }
+}
+
+.details-modal.dispatch-modal .dispatch-pair-primary,
+.details-modal.dispatch-modal .dispatch-stop-pair-card {
+  border: 1px solid rgba(96, 165, 250, 0.22) !important;
+  border-radius: 12px !important;
+  background: rgba(12, 25, 43, 0.76) !important;
+  box-shadow: 0 8px 24px rgba(2, 8, 20, 0.12);
+}
+
+.details-modal.dispatch-modal .dispatch-pair-primary {
+  min-height: 248px !important;
+  display: flex !important;
+  flex-direction: column !important;
+  padding: 14px !important;
+}
+
+.details-modal.dispatch-modal .dispatch-pair-primary::before {
+  content: "ROUTE STOP";
+  display: block;
+  margin-bottom: 9px;
+  color: #7f90a6;
+  font-size: 0.6rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+}
+
+.details-modal.dispatch-modal .dispatch-pair-primary .dispatch-form-section-title,
+.details-modal.dispatch-modal .dispatch-stop-pair-header {
+  min-height: 38px !important;
+  margin: 0 0 12px !important;
+  padding: 0 0 10px !important;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.14) !important;
+}
+
+.details-modal.dispatch-modal .dispatch-pair-primary .dispatch-form-section-title {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #86efac;
+  font-size: 0.7rem !important;
+}
+
+.details-modal.dispatch-modal .dispatch-pair-primary .dispatch-form-group-grid {
+  flex: 1 1 auto;
+  display: grid !important;
+  grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+  grid-auto-rows: max-content !important;
+  align-content: start;
+  gap: 10px !important;
+  padding: 14px !important;
+  border: 1px solid rgba(52, 211, 153, 0.25);
+  border-radius: 10px;
+  background: rgba(6, 20, 34, 0.38);
+}
+
+.details-modal.dispatch-modal .dispatch-pair-primary .dispatch-form-group-grid label,
+.details-modal.dispatch-modal .dispatch-pair-primary .dispatch-form-group-grid label.wide {
+  min-width: 0 !important;
+  grid-column: auto !important;
+}
+
+.details-modal.dispatch-modal .dispatch-pair-primary .dispatch-form-group-grid input,
+.details-modal.dispatch-modal .dispatch-pair-primary .dispatch-form-group-grid select,
+.details-modal.dispatch-modal .dispatch-pair-fields input,
+.details-modal.dispatch-modal .dispatch-pair-fields select {
+  min-height: 36px !important;
+  height: 36px !important;
+  border-radius: 7px !important;
+  font-size: 0.72rem !important;
+}
+
+.details-modal.dispatch-modal .dispatch-stop-pair-card {
+  min-height: 248px !important;
+}
+
+@media (max-width: 1180px) {
+  .workspace-page.operations-master-detail .operations-commandbar {
+    grid-template-columns: 1fr !important;
+    grid-template-areas:
+      "title"
+      "actions"
+      "kpis" !important;
+  }
+
+  .workspace-page.operations-master-detail .operations-command-actions {
+    justify-self: center;
+    justify-content: center;
+  }
+}
+
+@media (max-width: 720px) {
+  .details-modal.dispatch-modal .dispatch-pair-primary .dispatch-form-group-grid {
+    grid-template-columns: 1fr !important;
+  }
+}
+
+/* =====================================================
    MAVERICK HISTORY V2 — TRIPS + TEMPERATURE
    ===================================================== */
 
@@ -11998,6 +12197,162 @@ button:disabled {
    DISPATCH MULTI-STOP FINAL PRIORITY OVERRIDE V6
    This block intentionally stays last in the file.
    ===================================================== */
+
+/* Final Operations presentation: original proportions and centered title. */
+@media (min-width: 1181px) {
+  .workspace-page.operations-master-detail {
+    padding: 14px 18px 16px !important;
+  }
+
+  .workspace-page.operations-master-detail .operations-split-workspace {
+    grid-template-columns: minmax(0, 61%) minmax(500px, 39%) !important;
+  }
+
+  .workspace-page.operations-master-detail .operations-load-table-head,
+  .workspace-page.operations-master-detail .operations-load-row {
+    min-width: 920px !important;
+    grid-template-columns: minmax(108px, 1.03fr) minmax(130px, 1.28fr) minmax(130px, 1.28fr) minmax(90px, .82fr) minmax(118px, 1.02fr) 72px 78px 78px !important;
+    gap: 8px !important;
+  }
+
+  .workspace-page.operations-master-detail .operations-load-row {
+    min-height: 74px !important;
+    padding: 9px 14px !important;
+  }
+}
+
+.workspace-page.operations-master-detail .operations-commandbar {
+  position: relative;
+  z-index: 3;
+  flex: 0 0 auto;
+  min-height: 112px !important;
+  grid-template-columns: minmax(190px, 1fr) minmax(300px, auto) minmax(190px, 1fr) !important;
+  grid-template-areas: ". title actions" "kpis kpis kpis" !important;
+  align-items: center !important;
+  overflow: visible !important;
+}
+
+.workspace-page.operations-master-detail .operations-title-block {
+  grid-area: title !important;
+  min-width: 300px;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+}
+
+.workspace-page.operations-master-detail .operations-title-block h1 {
+  margin: 0 !important;
+  color: #f1f5f9;
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 1.45rem !important;
+  font-style: italic;
+  font-weight: 600;
+  line-height: 1.2;
+  letter-spacing: .015em;
+}
+
+.workspace-page.operations-master-detail .operations-title-block p {
+  max-width: 520px;
+  margin-top: 4px !important;
+  text-align: center;
+}
+
+.workspace-page.operations-master-detail .operations-command-actions {
+  grid-area: actions !important;
+  justify-self: end;
+}
+
+.workspace-page.operations-master-detail .operations-kpis-compact {
+  grid-area: kpis !important;
+}
+
+/* Default and added route stops share one visual system. */
+@media (min-width: 901px) {
+  .details-modal.dispatch-modal > .dispatch-form-grid-real > .dispatch-form-group:nth-child(1),
+  .details-modal.dispatch-modal > .dispatch-form-grid-real > .dispatch-form-group:nth-child(2),
+  .details-modal.dispatch-modal .dispatch-pair-primary.pickup,
+  .details-modal.dispatch-modal .dispatch-pair-primary.drop {
+    grid-column: auto !important;
+  }
+}
+
+.details-modal.dispatch-modal .dispatch-pair-primary,
+.details-modal.dispatch-modal .dispatch-stop-pair-card {
+  min-height: 248px !important;
+  border: 1px solid rgba(96, 165, 250, .22) !important;
+  border-radius: 12px !important;
+  background: rgba(12, 25, 43, .76) !important;
+  box-shadow: 0 8px 24px rgba(2, 8, 20, .12);
+}
+
+.details-modal.dispatch-modal .dispatch-pair-primary {
+  display: flex !important;
+  flex-direction: column !important;
+  padding: 14px !important;
+}
+
+.details-modal.dispatch-modal .dispatch-pair-primary::before {
+  content: "ROUTE STOP";
+  margin-bottom: 9px;
+  color: #7f90a6;
+  font-size: .6rem;
+  font-weight: 800;
+  letter-spacing: .08em;
+}
+
+.details-modal.dispatch-modal .dispatch-pair-primary .dispatch-form-section-title,
+.details-modal.dispatch-modal .dispatch-stop-pair-header {
+  min-height: 38px !important;
+  margin: 0 0 12px !important;
+  padding: 0 0 10px !important;
+  border-bottom: 1px solid rgba(148, 163, 184, .14) !important;
+}
+
+.details-modal.dispatch-modal .dispatch-pair-primary .dispatch-form-section-title {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #86efac;
+  font-size: .7rem !important;
+}
+
+.details-modal.dispatch-modal .dispatch-pair-primary .dispatch-form-group-grid {
+  flex: 1 1 auto;
+  display: grid !important;
+  grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+  grid-auto-rows: max-content !important;
+  align-content: start;
+  gap: 10px !important;
+  padding: 14px !important;
+  border: 1px solid rgba(52, 211, 153, .25);
+  border-radius: 10px;
+  background: rgba(6, 20, 34, .38);
+}
+
+.details-modal.dispatch-modal .dispatch-pair-primary .dispatch-form-group-grid label,
+.details-modal.dispatch-modal .dispatch-pair-primary .dispatch-form-group-grid label.wide {
+  min-width: 0 !important;
+  grid-column: auto !important;
+}
+
+.details-modal.dispatch-modal .dispatch-pair-primary .dispatch-form-group-grid input,
+.details-modal.dispatch-modal .dispatch-pair-primary .dispatch-form-group-grid select {
+  min-height: 36px !important;
+  height: 36px !important;
+  border-radius: 7px !important;
+}
+
+@media (max-width: 1180px) {
+  .workspace-page.operations-master-detail .operations-commandbar {
+    grid-template-columns: 1fr !important;
+    grid-template-areas: "title" "actions" "kpis" !important;
+  }
+
+  .workspace-page.operations-master-detail .operations-command-actions {
+    justify-self: center;
+    justify-content: center;
+  }
+}
 
 .details-modal.dispatch-modal {
   grid-template-rows: auto minmax(0, 1fr) auto auto !important;

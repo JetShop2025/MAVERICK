@@ -1243,7 +1243,7 @@ function generateAutomaticLoadNumber(
     usedLoadNumbers.add(Number(loadNumber))
   })
 
-  let nextLoadNumber = 0
+  let nextLoadNumber = 1
 
   while (
     usedLoadNumbers.has(nextLoadNumber) &&

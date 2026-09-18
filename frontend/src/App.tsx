@@ -3,6 +3,7 @@ import {
   TileLayer,
   Marker,
   Popup,
+  Tooltip,
   Polyline,
   useMap
 } from 'react-leaflet'
@@ -1226,22 +1227,32 @@ function distanceMiles(
     )
 }
 
-function generateAutomaticLoadNumber() {
-  const values = new Uint32Array(1)
+function generateAutomaticLoadNumber(
+  dispatches: Array<{ loadNumber: string }> = []
+) {
+  const usedLoadNumbers = new Set<number>()
 
-  if (
-    typeof crypto !== 'undefined' &&
-    typeof crypto.getRandomValues === 'function'
+  dispatches.forEach((dispatch) => {
+    const loadNumber =
+      String(dispatch.loadNumber || '').trim()
+
+    if (!/^\d{8}$/.test(loadNumber)) {
+      return
+    }
+
+    usedLoadNumbers.add(Number(loadNumber))
+  })
+
+  let nextLoadNumber = 0
+
+  while (
+    usedLoadNumbers.has(nextLoadNumber) &&
+    nextLoadNumber < 99_999_999
   ) {
-    crypto.getRandomValues(values)
-    return String(
-      values[0] % 100_000_000
-    ).padStart(8, '0')
+    nextLoadNumber += 1
   }
 
-  return String(
-    Math.floor(Math.random() * 100_000_000)
-  ).padStart(8, '0')
+  return String(nextLoadNumber).padStart(8, '0')
 }
 
 function readStoredUser() {
@@ -2603,6 +2614,11 @@ function App() {
   const [
     assetTypeFilter,
     setAssetTypeFilter
+  ] = useState('all')
+
+  const [
+    groupFilter,
+    setGroupFilter
   ] = useState('all')
 
   const [
@@ -4157,7 +4173,7 @@ function App() {
   const resetNewDispatchForm = () => {
     setNewStopPairs([])
     setNewDispatchForm({
-      loadNumber: generateAutomaticLoadNumber(),
+      loadNumber: generateAutomaticLoadNumber(dispatches),
       dispatcherName: '',
     dispatcherPhone: '',
       poNumber: '',
@@ -5653,6 +5669,46 @@ function App() {
       } as Record<DeviceStatus, number>
     )
 
+  const assetGroups =
+    Array.from(
+      assets.reduce(
+        (
+          groups: Map<string, number>,
+          asset
+        ) => {
+          const groupName =
+            String(
+              asset.groupName || ''
+            ).trim()
+
+          if (groupName) {
+            groups.set(
+              groupName,
+              (groups.get(groupName) || 0) + 1
+            )
+          }
+
+          return groups
+        },
+        new Map<string, number>()
+      )
+    )
+      .map(([name, count]) => ({
+        name,
+        count
+      }))
+      .sort((a, b) =>
+        a.name.localeCompare(b.name)
+      )
+
+  const unassignedGroupCount =
+    assets.filter(
+      (asset) =>
+        !String(
+          asset.groupName || ''
+        ).trim()
+    ).length
+
   const fleetMapAssets =
     assets
       .map((asset) => {
@@ -5764,6 +5820,19 @@ function App() {
             typeCode === 'TRK'
           )
 
+        const assetGroupName =
+          String(
+            asset.groupName || ''
+          ).trim()
+
+        const groupMatches =
+          groupFilter === 'all' ||
+          (
+            groupFilter === '__unassigned__' &&
+            !assetGroupName
+          ) ||
+          assetGroupName === groupFilter
+
         return {
           asset,
           item,
@@ -5777,7 +5846,8 @@ function App() {
             statusEnabled &&
             statusMatches &&
             searchMatches &&
-            assetTypeMatches
+            assetTypeMatches &&
+            groupMatches
         }
       })
       .filter(
@@ -6347,6 +6417,14 @@ function App() {
       .includes(
         normalizedSearch
       )
+    ||
+    String(
+      selectedAsset?.groupName || ''
+    )
+      .toLowerCase()
+      .includes(
+        normalizedSearch
+      )
 
   const matchesStatus =
     statusFilter === 'all' ||
@@ -6364,6 +6442,19 @@ function App() {
       selectedAssetType === 'TRK'
     )
 
+  const selectedAssetGroupName =
+    String(
+      selectedAsset?.groupName || ''
+    ).trim()
+
+  const matchesGroup =
+    groupFilter === 'all' ||
+    (
+      groupFilter === '__unassigned__' &&
+      !selectedAssetGroupName
+    ) ||
+    selectedAssetGroupName === groupFilter
+
   const statusToggleEnabled =
     deviceStatus === 'online'
       ? showOnline
@@ -6377,6 +6468,7 @@ function App() {
     matchesSearch &&
     matchesStatus &&
     matchesAssetType &&
+    matchesGroup &&
     statusToggleEnabled
 
   const markerVisible =
@@ -8397,6 +8489,7 @@ function App() {
     setSearchTerm('')
     setStatusFilter('all')
     setAssetTypeFilter('all')
+    setGroupFilter('all')
     setShowOnline(true)
     setShowDelayed(true)
     setShowOffline(true)
@@ -8457,6 +8550,7 @@ function App() {
     setSearchTerm('')
     setStatusFilter('all')
     setAssetTypeFilter('all')
+    setGroupFilter('all')
     setShowOnline(true)
     setShowDelayed(true)
     setShowOffline(true)
@@ -8889,6 +8983,18 @@ function App() {
                 </small>
               )
             }
+
+            {
+              selectedAsset && (
+                <small>
+                  Group: {
+                    String(
+                      selectedAsset.groupName || ''
+                    ).trim() || 'Unassigned'
+                  }
+                </small>
+              )
+            }
           </span>
 
           {
@@ -9203,6 +9309,19 @@ function App() {
                             }
                           }}
                         >
+                          <Tooltip
+                            direction="top"
+                            offset={[0, -18]}
+                          >
+                            <strong>{assetName}</strong>
+                            <br />
+                            Group: {
+                              String(
+                                asset.groupName || ''
+                              ).trim() || 'Unassigned'
+                            }
+                          </Tooltip>
+
                           <Popup>
                             <div
                               className={
@@ -9226,17 +9345,15 @@ function App() {
                                 )
                               }
 
-                              {
-                                asset.groupName && (
-                                  <>
-                                    <br />
-                                    Group / Company:{' '}
-                                    <strong>
-                                      {asset.groupName}
-                                    </strong>
-                                  </>
-                                )
-                              }
+                              <br />
+                              Group / Company:{' '}
+                              <strong>
+                                {
+                                  String(
+                                    asset.groupName || ''
+                                  ).trim() || 'Unassigned'
+                                }
+                              </strong>
 
                               <br />
                               Type:{' '}
@@ -9377,14 +9494,37 @@ function App() {
                     </div>
 
                     <select
-                      value="all"
-                      onChange={() =>
+                      value={groupFilter}
+                      onChange={(event) => {
+                        setGroupFilter(
+                          event.target.value
+                        )
                         setSearchTerm('')
-                      }
+                      }}
+                      aria-label="Filter map by asset group"
                     >
                       <option value="all">
-                        All Fleets
+                        All Fleets ({assets.length})
                       </option>
+
+                      {
+                        assetGroups.map((group) => (
+                          <option
+                            key={group.name}
+                            value={group.name}
+                          >
+                            {group.name} ({group.count})
+                          </option>
+                        ))
+                      }
+
+                      {
+                        unassignedGroupCount > 0 && (
+                          <option value="__unassigned__">
+                            Unassigned ({unassignedGroupCount})
+                          </option>
+                        )
+                      }
                     </select>
 
                     <div className="filter-search">
@@ -9770,6 +9910,17 @@ function App() {
                             </dt>
                             <dd>
                               {isSelectedTruck ? 'Phone GPS' : 'MAV2'}
+                            </dd>
+                          </div>
+
+                          <div>
+                            <dt>
+                              Group / Company
+                            </dt>
+                            <dd>
+                              <strong>
+                                {selectedAssetGroupName || 'Unassigned'}
+                              </strong>
                             </dd>
                           </div>
 
@@ -10375,8 +10526,11 @@ function App() {
                                     asset.groupName && (
                                       <>
                                         {' · '}
-                                        <span className="asset-source-label">
-                                          {asset.groupName}
+                                        <span
+                                          className="asset-source-label"
+                                          title={`Assigned group: ${asset.groupName}`}
+                                        >
+                                          Group: {asset.groupName}
                                         </span>
                                       </>
                                     )
@@ -10470,6 +10624,7 @@ function App() {
                                   setSearchTerm('')
                                   setStatusFilter('all')
                                   setAssetTypeFilter('all')
+                                  setGroupFilter('all')
                                   setShowOnline(true)
                                   setShowDelayed(true)
                                   setShowOffline(true)
@@ -11546,7 +11701,7 @@ function App() {
                                 ) * 0.621371
                               : 0
 
-                          const timelineEvents = [
+                          const recentTimelineEvents = [
                             ...(dispatch.statusEvents || [])
                           ]
                             .sort(
@@ -11555,6 +11710,73 @@ function App() {
                                 new Date(b.createdAt).getTime()
                             )
                             .slice(-7)
+
+                          const latestTimelineEventId =
+                            recentTimelineEvents[
+                              recentTimelineEvents.length - 1
+                            ]?.id
+
+                          const timelineEvents = [
+                            ...recentTimelineEvents
+                          ].sort((a, b) => {
+                            const getEventOrder = (
+                              event: DispatchStatusEvent
+                            ) => {
+                              const label =
+                                `${event.title || ''} ${event.eventType || ''}`
+                                  .toLowerCase()
+
+                              const stopTypeOrder =
+                                label.includes('pickup')
+                                  ? 1
+                                  : label.includes('drop')
+                                    ? 2
+                                    : event.status === 'ASSIGNED'
+                                      ? 0
+                                      : 3
+
+                              const stopNumberMatch =
+                                label.match(
+                                  /(?:pickup|drop)\s*(\d+)/
+                                )
+
+                              const stopNumber =
+                                stopNumberMatch
+                                  ? Number(stopNumberMatch[1])
+                                  : 0
+
+                              const eventStepOrder =
+                                label.includes('en route')
+                                  ? 0
+                                  : label.includes('arrived')
+                                    ? 1
+                                    : label.includes('completed')
+                                      ? 2
+                                      : 3
+
+                              return [
+                                stopTypeOrder,
+                                stopNumber,
+                                eventStepOrder,
+                                new Date(event.createdAt).getTime()
+                              ]
+                            }
+
+                            const aOrder = getEventOrder(a)
+                            const bOrder = getEventOrder(b)
+
+                            for (
+                              let index = 0;
+                              index < aOrder.length;
+                              index += 1
+                            ) {
+                              if (aOrder[index] !== bOrder[index]) {
+                                return aOrder[index] - bOrder[index]
+                              }
+                            }
+
+                            return 0
+                          })
 
                           const progressPercent =
                             dispatch.status === 'CANCELLED'
@@ -11897,10 +12119,10 @@ function App() {
                                     {
                                       timelineEvents.length > 0
                                         ? timelineEvents.map(
-                                            (event, index) => {
+                                            (event) => {
                                               const isLatest =
-                                                index ===
-                                                timelineEvents.length - 1
+                                                event.id ===
+                                                latestTimelineEventId
 
                                               return (
                                                 <div

@@ -10343,7 +10343,7 @@ function App() {
 
         {
           activeView === 'fleet' && (
-            <section className="workspace-page">
+            <section className="workspace-page fleet-page">
 
               <div className="page-header">
                 <div>

@@ -1118,12 +1118,98 @@ const driverInclude = {
   driverProfile: true
 } as const
 
+function normalizeDriverTrackingId(
+  value: unknown
+) {
+  const deviceId =
+    optionalString(value)
+
+  return deviceId
+    ? deviceId.toUpperCase()
+    : null
+}
+
+async function ensureDriverTrackingAsset(
+  companyId: number,
+  internalTrackingId: unknown
+) {
+  const deviceId =
+    normalizeDriverTrackingId(
+      internalTrackingId
+    )
+
+  if (!deviceId) {
+    return null
+  }
+
+  const existingAsset =
+    await prisma.asset.findUnique({
+      where: {
+        deviceId
+      },
+      select: {
+        id: true,
+        companyId: true,
+        deviceId: true,
+        assetType: true,
+        trackingSource: true,
+        active: true
+      }
+    })
+
+  if (existingAsset) {
+    if (
+      existingAsset.companyId !== companyId ||
+      existingAsset.assetType !== 'TRK' ||
+      existingAsset.trackingSource !== 'PHONE'
+    ) {
+      throw new Error(
+        'INVALID_DRIVER_TRACKING_ID'
+      )
+    }
+
+    if (!existingAsset.active) {
+      await prisma.asset.update({
+        where: {
+          id: existingAsset.id
+        },
+        data: {
+          active: true
+        }
+      })
+    }
+
+    return existingAsset.deviceId
+  }
+
+  const createdAsset =
+    await prisma.asset.create({
+      data: {
+        companyId,
+        deviceId,
+        name: deviceId,
+        description:
+          'MAVTRACK Driver phone tracking',
+        assetType: 'TRK',
+        trackingSource: 'PHONE',
+        active: true
+      },
+      select: {
+        deviceId: true
+      }
+    })
+
+  return createdAsset.deviceId
+}
+
 async function validateDriverEquipment(
   companyId: number,
-  currentTruckNumber: unknown
+  physicalTruckNumber: unknown
 ) {
   const truckNumber =
-    optionalString(currentTruckNumber)
+    optionalString(
+      physicalTruckNumber
+    )
 
   if (!truckNumber) {
     return null
@@ -1318,10 +1404,20 @@ app.post(
           12
         )
 
+      // Internal Tracking ID belongs to the driver's PHONE GPS asset.
+      // Create that TRK asset automatically when it does not exist yet.
       const currentTruckNumber =
-        await validateDriverEquipment(
+        await ensureDriverTrackingAsset(
           companyId,
           req.body?.currentTruckNumber
+        )
+
+      // Physical Truck is optional. Only validate it when the admin
+      // actually entered a truck number.
+      const physicalTruckNumber =
+        await validateDriverEquipment(
+          companyId,
+          req.body?.physicalTruckNumber
         )
 
       const driver =
@@ -1355,6 +1451,7 @@ app.post(
                     req.body?.profilePhotoUrl
                   ),
                 currentTruckNumber,
+                physicalTruckNumber,
                 currentTrailerNumber:
                   optionalString(
                     req.body?.currentTrailerNumber
@@ -1386,6 +1483,18 @@ app.post(
         'Create driver error:',
         error
       )
+
+      if (
+        error instanceof Error &&
+        error.message ===
+          'INVALID_DRIVER_TRACKING_ID'
+      ) {
+        return res.status(409).json({
+          ok: false,
+          message:
+            'Internal Tracking ID is already used by another asset or company'
+        })
+      }
 
       if (
         error instanceof Error &&
@@ -1494,9 +1603,20 @@ app.patch(
         undefined
       ) {
         profileData.currentTruckNumber =
-          await validateDriverEquipment(
+          await ensureDriverTrackingAsset(
             companyId,
             req.body.currentTruckNumber
+          )
+      }
+
+      if (
+        req.body?.physicalTruckNumber !==
+        undefined
+      ) {
+        profileData.physicalTruckNumber =
+          await validateDriverEquipment(
+            companyId,
+            req.body.physicalTruckNumber
           )
       }
 
@@ -1632,6 +1752,18 @@ app.patch(
       if (
         error instanceof Error &&
         error.message ===
+          'INVALID_DRIVER_TRACKING_ID'
+      ) {
+        return res.status(409).json({
+          ok: false,
+          message:
+            'Internal Tracking ID is already used by another asset or company'
+        })
+      }
+
+      if (
+        error instanceof Error &&
+        error.message ===
           'INVALID_DRIVER_TRUCK'
       ) {
         return res.status(400).json({
@@ -1759,6 +1891,7 @@ app.patch(
           'licenseState',
           'profilePhotoUrl',
           'currentTruckNumber',
+          'physicalTruckNumber',
           'currentTrailerNumber',
           'currentTrailerLicense'
         ] as const
@@ -1776,9 +1909,20 @@ app.patch(
         undefined
       ) {
         profileData.currentTruckNumber =
-          await validateDriverEquipment(
+          await ensureDriverTrackingAsset(
             existing.companyId,
             req.body.currentTruckNumber
+          )
+      }
+
+      if (
+        req.body?.physicalTruckNumber !==
+        undefined
+      ) {
+        profileData.physicalTruckNumber =
+          await validateDriverEquipment(
+            existing.companyId,
+            req.body.physicalTruckNumber
           )
       }
 
@@ -1857,6 +2001,18 @@ app.patch(
         'Update own driver profile error:',
         error
       )
+
+      if (
+        error instanceof Error &&
+        error.message ===
+          'INVALID_DRIVER_TRACKING_ID'
+      ) {
+        return res.status(409).json({
+          ok: false,
+          message:
+            'Internal Tracking ID is already used by another asset or company'
+        })
+      }
 
       if (
         error instanceof Error &&

@@ -38,6 +38,11 @@ type DeviceStatus =
   | 'delayed'
   | 'offline'
 
+type PhoneConnectionStatus =
+  | 'connected'
+  | 'stale'
+  | 'offline'
+
 type StatusFilter =
   | 'all'
   | DeviceStatus
@@ -282,6 +287,14 @@ const API_BASE =
   import.meta.env.DEV
     ? 'http://localhost:3000'
     : 'https://maverick-1z64.onrender.com'
+
+// PHONE connection is based on a recent request actually received by MAVTRACK.
+// trackingActive alone means the driver started a session; it is not proof
+// that the phone is communicating with the server right now.
+const PHONE_CONNECTED_MAX_AGE_MS =
+  2 * 60 * 1000
+const PHONE_STALE_MAX_AGE_MS =
+  10 * 60 * 1000
 
 const celsiusToFahrenheit = (
   value: number
@@ -3440,10 +3453,11 @@ function App() {
           currentTruckNumber:
             driverForm.currentTruckNumber
               .trim()
-              .toUpperCase(),
+              .toUpperCase() || null,
           physicalTruckNumber:
             driverForm.physicalTruckNumber
-              .trim(),
+              .trim()
+              .toUpperCase() || null,
           licenseNumber:
             driverForm.licenseNumber.trim(),
           licenseState:
@@ -5258,6 +5272,128 @@ function App() {
   // DEVICE STATUS
   // =====================================================
 
+  const getLatestValidTimestamp = (
+    values: Array<unknown>
+  ): string | null => {
+    const timestamps =
+      values
+        .map((value) =>
+          value
+            ? new Date(String(value)).getTime()
+            : NaN
+        )
+        .filter((value) =>
+          Number.isFinite(value)
+        )
+
+    if (timestamps.length === 0) {
+      return null
+    }
+
+    return new Date(
+      Math.max(...timestamps)
+    ).toISOString()
+  }
+
+  const getPhoneLastContactAt = (
+    item: any
+  ): string | null =>
+    getLatestValidTimestamp([
+      item?.lastContactAt,
+      item?.lastHeartbeatAt,
+      item?.lastPhoneGpsAt,
+      item?.receivedAt
+    ])
+
+  const getPhoneLastGpsAt = (
+    item: any
+  ): string | null =>
+    getLatestValidTimestamp([
+      item?.lastPhoneGpsAt,
+      item?.locationReceivedAt
+    ])
+
+  const getPhoneConnectionStatus = (
+    item: any
+  ): PhoneConnectionStatus => {
+    if (!item) {
+      return 'offline'
+    }
+
+    if (item?.trackingActive === false) {
+      return 'offline'
+    }
+
+    const lastContactAt =
+      getPhoneLastContactAt(item)
+
+    if (!lastContactAt) {
+      return item?.trackingActive === true
+        ? 'stale'
+        : 'offline'
+    }
+
+    const lastContactMs =
+      new Date(lastContactAt).getTime()
+
+    if (!Number.isFinite(lastContactMs)) {
+      return 'offline'
+    }
+
+    const ageMs =
+      Math.max(
+        0,
+        now - lastContactMs
+      )
+
+    if (
+      ageMs <
+      PHONE_CONNECTED_MAX_AGE_MS
+    ) {
+      return 'connected'
+    }
+
+    if (
+      ageMs <
+      PHONE_STALE_MAX_AGE_MS
+    ) {
+      return 'stale'
+    }
+
+    return 'offline'
+  }
+
+  const phoneConnectionToDeviceStatus = (
+    connection: PhoneConnectionStatus
+  ): DeviceStatus =>
+    connection === 'connected'
+      ? 'online'
+      : connection === 'stale'
+        ? 'delayed'
+        : 'offline'
+
+  const getPhoneConnectionLabel = (
+    item: any
+  ) => {
+    const connection =
+      getPhoneConnectionStatus(item)
+
+    return connection === 'connected'
+      ? 'Connected'
+      : connection === 'stale'
+        ? 'Stale'
+        : 'Offline'
+  }
+
+  const getTrackingSessionLabel = (
+    item: any
+  ) =>
+    item?.trackingActive === true
+      ? 'Active'
+      : item?.trackingActive === false
+        ? 'Stopped'
+        : 'Unknown'
+
   const getDeviceStatusForTelemetry =
     (item: any): DeviceStatus => {
       if (!item) {
@@ -5271,50 +5407,10 @@ function App() {
           ''
         ).toUpperCase()
 
-      // PHONE trackers are session-based. iOS can legitimately stop
-      // producing fresh GPS fixes while a phone is locked and stationary.
-      // Do not flip a driver OFFLINE just because receivedAt is old while
-      // MavDriver still has an active tracking session.
       if (trackingSource === 'PHONE') {
-        if (item?.trackingActive === false) {
-          return 'offline'
-        }
-
-        if (item?.trackingActive === true) {
-          const activityTimes = [
-            item?.lastHeartbeatAt,
-            item?.lastPhoneGpsAt,
-            item?.receivedAt,
-            item?.trackingStartedAt
-          ]
-            .map((value) =>
-              value ? new Date(value).getTime() : NaN
-            )
-            .filter((value) => Number.isFinite(value))
-
-          if (activityTimes.length === 0) {
-            return 'delayed'
-          }
-
-          const sessionAgeMs =
-            Math.max(
-              0,
-              now - Math.max(...activityTimes)
-            )
-
-          // A PHONE session is intentionally much more tolerant than a
-          // hardware tracker. This prevents lock-screen/stationary iPhones
-          // from bouncing Online -> Delayed -> Offline every few minutes.
-          if (sessionAgeMs < 12 * 60 * 60 * 1000) {
-            return 'online'
-          }
-
-          if (sessionAgeMs < 24 * 60 * 60 * 1000) {
-            return 'delayed'
-          }
-
-          return 'offline'
-        }
+        return phoneConnectionToDeviceStatus(
+          getPhoneConnectionStatus(item)
+        )
       }
 
       if (!item?.receivedAt) {
@@ -5341,9 +5437,6 @@ function App() {
           item?.movementStatus || ''
         ).toUpperCase()
 
-      // MAV2 intentionally reduces reporting frequency while PARKED
-      // to save battery. A normal 180-second parked interval must
-      // remain ONLINE instead of bouncing into DELAYED.
       if (backendMovement === 'PARKED') {
         if (ageMs < 240000) {
           return 'online'
@@ -5356,7 +5449,6 @@ function App() {
         return 'offline'
       }
 
-      // Moving / acquiring / normal MAV2 reporting.
       if (ageMs < 120000) {
         return 'online'
       }
@@ -5367,6 +5459,27 @@ function App() {
 
       return 'offline'
     }
+
+  const getStatusLabelForAsset = (
+    asset: any,
+    item: any,
+    status: DeviceStatus
+  ) =>
+    trackingSourceCode(asset) === 'PHONE'
+      ? getPhoneConnectionLabel(item)
+      : status === 'online'
+        ? 'Online'
+        : status === 'delayed'
+          ? 'Delayed'
+          : 'Offline'
+
+  const getLastContactAtForAsset = (
+    asset: any,
+    item: any
+  ): string | null =>
+    trackingSourceCode(asset) === 'PHONE'
+      ? getPhoneLastContactAt(item)
+      : item?.receivedAt || null
 
   const isAssetAssignableToDispatch = (
     _asset: any
@@ -5534,13 +5647,24 @@ function App() {
       telemetry
     )
 
+  const selectedTelemetryIsPhone =
+    String(
+      telemetry?.trackingSource ||
+      telemetry?.source ||
+      ''
+    ).toUpperCase() === 'PHONE'
+
   const statusLabel =
-    deviceStatus === 'online'
-      ? 'Online'
-      : deviceStatus ===
-          'delayed'
-        ? 'Delayed'
-        : 'Offline'
+    selectedTelemetryIsPhone
+      ? getPhoneConnectionLabel(
+          telemetry
+        )
+      : deviceStatus === 'online'
+        ? 'Online'
+        : deviceStatus ===
+            'delayed'
+          ? 'Delayed'
+          : 'Offline'
 
   const getMovementStatusForTelemetry = (
     item: any,
@@ -6180,6 +6304,32 @@ function App() {
 
   const isSelectedTrailer =
     selectedAssetType === 'TRL'
+
+  const isSelectedPhoneTracker =
+    trackingSourceCode(
+      selectedAsset
+    ) === 'PHONE'
+
+  const selectedPhoneConnection =
+    isSelectedPhoneTracker
+      ? getPhoneConnectionStatus(
+          telemetry
+        )
+      : null
+
+  const selectedPhoneLastContactAt =
+    isSelectedPhoneTracker
+      ? getPhoneLastContactAt(
+          telemetry
+        )
+      : null
+
+  const selectedPhoneLastGpsAt =
+    isSelectedPhoneTracker
+      ? getPhoneLastGpsAt(
+          telemetry
+        )
+      : null
 
   const hasLocation =
     telemetry?.latitude != null &&
@@ -8788,11 +8938,11 @@ function App() {
 
                               <em>
                                 {
-                                  status === 'online'
-                                    ? 'Online'
-                                    : status === 'delayed'
-                                      ? 'Delayed'
-                                      : 'Offline'
+                                  getStatusLabelForAsset(
+                                    asset,
+                                    item,
+                                    status
+                                  )
                                 }
                               </em>
                             </button>
@@ -9283,11 +9433,17 @@ function App() {
                         asset.deviceId
 
                       const statusText =
-                        status === 'online'
-                          ? 'Online'
-                          : status === 'delayed'
-                            ? 'Delayed'
-                            : 'Offline'
+                        getStatusLabelForAsset(
+                          asset,
+                          item,
+                          status
+                        )
+
+                      const lastContactAt =
+                        getLastContactAtForAsset(
+                          asset,
+                          item
+                        )
 
                       const movementText =
                         movement === 'moving'
@@ -9491,13 +9647,29 @@ function App() {
                               }
 
                               <br />
-                              Last Ping:{' '}
                               {
-                                item?.receivedAt
+                                trackingSourceCode(asset) === 'PHONE'
+                                  ? 'Last Contact: '
+                                  : 'Last Ping: '
+                              }
+                              {
+                                lastContactAt
                                   ? formatAge(
-                                      item.receivedAt
+                                      lastContactAt
                                     )
                                   : 'No data'
+                              }
+
+                              {
+                                trackingSourceCode(asset) === 'PHONE' && (
+                                  <>
+                                    <br />
+                                    Tracking Session:{' '}
+                                    <strong>
+                                      {getTrackingSessionLabel(item)}
+                                    </strong>
+                                  </>
+                                )
                               }
 
                             </div>
@@ -9968,9 +10140,81 @@ function App() {
                               Tracking Source
                             </dt>
                             <dd>
-                              {isSelectedTruck ? 'Phone GPS' : 'MAV2'}
+                              {isSelectedPhoneTracker ? 'Phone GPS' : 'MAV2'}
                             </dd>
                           </div>
+
+                          {
+                            isSelectedPhoneTracker && (
+                              <>
+                                <div>
+                                  <dt>
+                                    Tracking Session
+                                  </dt>
+                                  <dd>
+                                    <strong>
+                                      {getTrackingSessionLabel(telemetry)}
+                                    </strong>
+                                  </dd>
+                                </div>
+
+                                <div>
+                                  <dt>
+                                    Connection
+                                  </dt>
+                                  <dd>
+                                    <span
+                                      className={
+                                        `inline-status ${
+                                          selectedPhoneConnection === 'connected'
+                                            ? 'online'
+                                            : selectedPhoneConnection === 'stale'
+                                              ? 'delayed'
+                                              : 'offline'
+                                        }`
+                                      }
+                                    >
+                                      {getPhoneConnectionLabel(telemetry)}
+                                    </span>
+                                  </dd>
+                                </div>
+
+                                <div>
+                                  <dt>
+                                    Last Confirmed Contact
+                                  </dt>
+                                  <dd>
+                                    {
+                                      selectedPhoneLastContactAt
+                                        ? `${formatDateTime(
+                                            selectedPhoneLastContactAt
+                                          )} · ${formatAge(
+                                            selectedPhoneLastContactAt
+                                          )}`
+                                        : 'No confirmed contact'
+                                    }
+                                  </dd>
+                                </div>
+
+                                <div>
+                                  <dt>
+                                    Last Phone GPS
+                                  </dt>
+                                  <dd>
+                                    {
+                                      selectedPhoneLastGpsAt
+                                        ? `${formatDateTime(
+                                            selectedPhoneLastGpsAt
+                                          )} · ${formatAge(
+                                            selectedPhoneLastGpsAt
+                                          )}`
+                                        : 'No phone GPS received'
+                                    }
+                                  </dd>
+                                </div>
+                              </>
+                            )
+                          }
 
                           <div>
                             <dt>
@@ -10283,13 +10527,19 @@ function App() {
 
                           <div>
                             <dt>
-                              Last Ping
+                              {
+                                isSelectedPhoneTracker
+                                  ? 'Last Contact'
+                                  : 'Last Ping'
+                              }
                             </dt>
 
                             <dd>
                               {
                                 formatDateTime(
-                                  telemetry.receivedAt
+                                  isSelectedPhoneTracker
+                                    ? selectedPhoneLastContactAt
+                                    : telemetry.receivedAt
                                 )
                               }
                             </dd>
@@ -10473,15 +10723,24 @@ function App() {
                         const rowIsTruck =
                           rowAssetType === 'TRK'
 
+                        const rowIsPhone =
+                          trackingSourceCode(asset) === 'PHONE'
+
                         const rowStatus =
                           getDeviceStatusForTelemetry(item)
 
                         const rowStatusLabel =
-                          rowStatus === 'online'
-                            ? 'Online'
-                            : rowStatus === 'delayed'
-                              ? 'Delayed'
-                              : 'Offline'
+                          getStatusLabelForAsset(
+                            asset,
+                            item,
+                            rowStatus
+                          )
+
+                        const rowLastContactAt =
+                          getLastContactAtForAsset(
+                            asset,
+                            item
+                          )
 
                         const rowDispatch =
                           activeDispatches.find(
@@ -10668,10 +10927,20 @@ function App() {
                               }
                             </div>
 
-                            <span>
-                              {item?.receivedAt
-                                ? formatDateTime(item.receivedAt)
-                                : 'No telemetry'}
+                            <span
+                              title={
+                                rowLastContactAt
+                                  ? `${formatDateTime(rowLastContactAt)} · ${formatAge(rowLastContactAt)}`
+                                  : 'No telemetry'
+                              }
+                            >
+                              {
+                                rowLastContactAt
+                                  ? rowIsPhone
+                                    ? `Contact ${formatAge(rowLastContactAt)}`
+                                    : formatDateTime(rowLastContactAt)
+                                  : 'No telemetry'
+                              }
                             </span>
 
                             <div className="row-actions">
@@ -11144,8 +11413,8 @@ function App() {
                               'password'
                             ],
                             ['Phone', 'phone', 'tel'],
-                            ['Internal Tracking ID', 'currentTruckNumber', 'text'],
-                            ['Physical Truck #', 'physicalTruckNumber', 'text'],
+                            ['Internal Tracking ID (Phone GPS)', 'currentTruckNumber', 'text'],
+                            ['Physical Truck # (optional)', 'physicalTruckNumber', 'text'],
                             ['License #', 'licenseNumber', 'text'],
                             ['License State', 'licenseState', 'text'],
                             ['Trailer #', 'currentTrailerNumber', 'text'],
@@ -11185,6 +11454,7 @@ function App() {
                                                 event.target.value
                                               )
                                             : field === 'currentTruckNumber' ||
+                                                field === 'physicalTruckNumber' ||
                                                 field === 'licenseState'
                                               ? event.target.value.toUpperCase()
                                               : event.target.value
@@ -11193,7 +11463,7 @@ function App() {
                                   }
                                   placeholder={
                                     field === 'currentTruckNumber'
-                                      ? 'TRK-TEST-002'
+                                      ? 'TRK 106'
                                       : field === 'physicalTruckNumber'
                                         ? 'TRK 126'
                                         : ''
@@ -11219,7 +11489,7 @@ function App() {
                           lineHeight: 1.5
                         }}
                       >
-                        The Internal Tracking ID is the PHONE asset used by MAVTRACK for this driver's GPS. If it does not exist yet, MAVTRACK will create it automatically.
+                        The Internal Tracking ID is the PHONE asset used by MAVTRACK for this driver's GPS. MAVTRACK creates that TRK asset automatically if it does not exist. Physical Truck # is optional and is validated only when you enter one.
                       </div>
 
                       {
@@ -11519,6 +11789,19 @@ function App() {
                             const rowStatus =
                               getDeviceStatusForTelemetry(item)
 
+                            const rowStatusLabel =
+                              getStatusLabelForAsset(
+                                dispatch.asset,
+                                item,
+                                rowStatus
+                              )
+
+                            const rowLastContactAt =
+                              getLastContactAtForAsset(
+                                dispatch.asset,
+                                item
+                              )
+
                             const rowTempF =
                               item?.temperature != null
                                 ? celsiusToFahrenheit(
@@ -11621,13 +11904,7 @@ function App() {
                                       `operations-device-state ${rowStatus}`
                                     }
                                   >
-                                    {
-                                      rowStatus === 'online'
-                                        ? 'Online'
-                                        : rowStatus === 'delayed'
-                                          ? 'Delayed'
-                                          : 'Offline'
-                                    }
+                                    {rowStatusLabel}
                                   </small>
                                 </div>
 
@@ -11635,8 +11912,10 @@ function App() {
                                   <strong>{movementText}</strong>
                                   <small>
                                     {
-                                      item?.receivedAt
-                                        ? formatAge(item.receivedAt)
+                                      rowLastContactAt
+                                        ? trackingSourceCode(dispatch.asset) === 'PHONE'
+                                          ? `Contact ${formatAge(rowLastContactAt)}`
+                                          : formatAge(rowLastContactAt)
                                         : 'No telemetry'
                                     }
                                   </small>
@@ -11771,6 +12050,19 @@ function App() {
                           const detailStatus =
                             getDeviceStatusForTelemetry(item)
 
+                          const detailStatusLabel =
+                            getStatusLabelForAsset(
+                              dispatch.asset,
+                              item,
+                              detailStatus
+                            )
+
+                          const detailLastContactAt =
+                            getLastContactAtForAsset(
+                              dispatch.asset,
+                              item
+                            )
+
                           const detailTempF =
                             item?.temperature != null
                               ? celsiusToFahrenheit(
@@ -11899,21 +12191,17 @@ function App() {
                                         `operations-device-state ${detailStatus}`
                                       }
                                     >
-                                      {
-                                        detailStatus === 'online'
-                                          ? 'Online'
-                                          : detailStatus === 'delayed'
-                                            ? 'Delayed'
-                                            : 'Offline'
-                                      }
+                                      {detailStatusLabel}
                                     </span>
                                   </div>
 
                                   <small>
                                     Updated{' '}
                                     {
-                                      item?.receivedAt
-                                        ? formatAge(item.receivedAt)
+                                      detailLastContactAt
+                                        ? trackingSourceCode(dispatch.asset) === 'PHONE'
+                                          ? `confirmed contact ${formatAge(detailLastContactAt)}`
+                                          : formatAge(detailLastContactAt)
                                         : 'without live telemetry'
                                     }
                                   </small>
@@ -12289,13 +12577,7 @@ function App() {
                                           `inline-status ${detailStatus}`
                                         }
                                       >
-                                        {
-                                          detailStatus === 'online'
-                                            ? 'Online'
-                                            : detailStatus === 'delayed'
-                                              ? 'Delayed'
-                                              : 'Offline'
-                                        }
+                                        {detailStatusLabel}
                                       </span>
                                     </div>
 
@@ -13910,6 +14192,34 @@ function App() {
                   </strong>
                 </article>
 
+                {
+                  isSelectedPhoneTracker && (
+                    <>
+                      <article className="page-card monitor-card">
+                        <span>
+                          Tracking Session
+                        </span>
+                        <strong>
+                          {getTrackingSessionLabel(telemetry)}
+                        </strong>
+                      </article>
+
+                      <article className="page-card monitor-card">
+                        <span>
+                          Last Confirmed Contact
+                        </span>
+                        <strong>
+                          {
+                            selectedPhoneLastContactAt
+                              ? formatAge(selectedPhoneLastContactAt)
+                              : 'No contact'
+                          }
+                        </strong>
+                      </article>
+                    </>
+                  )
+                }
+
                 <article className="page-card monitor-card">
                   <span>
                     Movement
@@ -14035,17 +14345,56 @@ function App() {
 
                   <div>
                     <dt>
-                      Last telemetry
+                      {
+                        isSelectedPhoneTracker
+                          ? 'Last confirmed contact'
+                          : 'Last telemetry'
+                      }
                     </dt>
 
                     <dd>
                       {
                         formatDateTime(
-                          telemetry?.receivedAt
+                          isSelectedPhoneTracker
+                            ? selectedPhoneLastContactAt
+                            : telemetry?.receivedAt
                         )
                       }
                     </dd>
                   </div>
+
+                  {
+                    isSelectedPhoneTracker && (
+                      <>
+                        <div>
+                          <dt>
+                            Tracking session
+                          </dt>
+                          <dd>
+                            {getTrackingSessionLabel(telemetry)}
+                          </dd>
+                        </div>
+
+                        <div>
+                          <dt>
+                            Connection
+                          </dt>
+                          <dd>
+                            {getPhoneConnectionLabel(telemetry)}
+                          </dd>
+                        </div>
+
+                        <div>
+                          <dt>
+                            Last phone GPS
+                          </dt>
+                          <dd>
+                            {formatDateTime(selectedPhoneLastGpsAt)}
+                          </dd>
+                        </div>
+                      </>
+                    )
+                  }
 
                   <div>
                     <dt>

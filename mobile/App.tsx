@@ -23,6 +23,14 @@ import * as SecureStore from "expo-secure-store";
 import * as ImagePicker from "expo-image-picker";
 import * as DocumentPicker from "expo-document-picker";
 import * as FileSystem from "expo-file-system/legacy";
+import {
+  nativeGpsAvailable,
+  startNativeGps,
+  stopNativeGps,
+  nativeGpsDiagnostics,
+  resumeNativeGps,
+  type NativeGpsDiagnostics,
+} from "./modules/mavtrack-native-gps/src";
 
 
 (Text as any).defaultProps = {
@@ -62,6 +70,10 @@ const LAST_BACKGROUND_SEND_KEY =
   "mavtrack_last_background_send";
 const LAST_BACKGROUND_ERROR_KEY =
   "mavtrack_last_background_error";
+const LAST_BACKGROUND_EVENT_KEY =
+  "mavtrack_last_background_event";
+const BACKGROUND_CALLBACK_COUNT_KEY =
+  "mavtrack_background_callback_count";
 
 const DEFAULT_TRACKING_DEVICE_ID =
   "TRK-TEST-001";
@@ -332,17 +344,36 @@ async function postTrackingStateToMavtrack(
 TaskManager.defineTask(
   BACKGROUND_LOCATION_TASK,
   async ({ data, error }) => {
+    const eventAt = new Date().toISOString();
+
     if (error) {
+      const message = String(
+        (error as any)?.message || error
+      );
+
       await SecureStore.setItemAsync(
         LAST_BACKGROUND_ERROR_KEY,
-        `${new Date().toISOString()} · ${String(
-          (error as any)?.message || error
-        )}`
+        `${eventAt} · ${message}`
+      );
+      await SecureStore.setItemAsync(
+        LAST_BACKGROUND_EVENT_KEY,
+        JSON.stringify({
+          at: eventAt,
+          status: "task_error",
+          message,
+        })
       );
       return;
     }
 
     if (!data) {
+      await SecureStore.setItemAsync(
+        LAST_BACKGROUND_EVENT_KEY,
+        JSON.stringify({
+          at: eventAt,
+          status: "no_data",
+        })
+      );
       return;
     }
 
@@ -356,14 +387,44 @@ TaskManager.defineTask(
       )) || "";
 
     if (!deviceId) {
+      await SecureStore.setItemAsync(
+        LAST_BACKGROUND_EVENT_KEY,
+        JSON.stringify({
+          at: eventAt,
+          status: "no_device",
+        })
+      );
       return;
     }
 
     const locations = payload.locations || [];
 
     if (!locations.length) {
+      await SecureStore.setItemAsync(
+        LAST_BACKGROUND_EVENT_KEY,
+        JSON.stringify({
+          at: eventAt,
+          status: "no_locations",
+          deviceId,
+        })
+      );
       return;
     }
+
+    const previousCountRaw =
+      await SecureStore.getItemAsync(
+        BACKGROUND_CALLBACK_COUNT_KEY
+      );
+    const previousCount =
+      previousCountRaw &&
+      Number.isFinite(Number(previousCountRaw))
+        ? Number(previousCountRaw)
+        : 0;
+
+    await SecureStore.setItemAsync(
+      BACKGROUND_CALLBACK_COUNT_KEY,
+      String(previousCount + 1)
+    );
 
     const latestLocation =
       locations[locations.length - 1];
@@ -371,19 +432,26 @@ TaskManager.defineTask(
     await SecureStore.setItemAsync(
       LAST_BACKGROUND_FIX_KEY,
       JSON.stringify({
-        at: new Date().toISOString(),
+        at: eventAt,
         latitude: latestLocation.coords.latitude,
         longitude: latestLocation.coords.longitude,
         accuracy: latestLocation.coords.accuracy,
+        speed: latestLocation.coords.speed,
+        heading: latestLocation.coords.heading,
         timestamp: latestLocation.timestamp,
+        batchSize: locations.length,
       })
     );
 
     try {
+      // Every native background callback is valuable. Force the latest
+      // coordinate to the server instead of letting the foreground
+      // throttling rules suppress it while the screen is locked.
       const result =
         await postLocationToMavtrack(
           latestLocation,
-          deviceId
+          deviceId,
+          true
         );
 
       if (result.sent) {
@@ -393,23 +461,61 @@ TaskManager.defineTask(
         );
       }
 
+      await SecureStore.setItemAsync(
+        LAST_BACKGROUND_EVENT_KEY,
+        JSON.stringify({
+          at: new Date().toISOString(),
+          status: result.sent
+            ? "sent"
+            : result.ok
+              ? "callback_no_send"
+              : "send_failed",
+          deviceId,
+          batchSize: locations.length,
+        })
+      );
+
       if (result.ok) {
         await SecureStore.deleteItemAsync(
           LAST_BACKGROUND_ERROR_KEY
         );
       }
     } catch (err) {
+      const message =
+        err instanceof Error
+          ? err.message
+          : "Background POST failed";
+
       await SecureStore.setItemAsync(
         LAST_BACKGROUND_ERROR_KEY,
-        `${new Date().toISOString()} · ${
-          err instanceof Error
-            ? err.message
-            : "Background POST failed"
-        }`
+        `${new Date().toISOString()} · ${message}`
+      );
+      await SecureStore.setItemAsync(
+        LAST_BACKGROUND_EVENT_KEY,
+        JSON.stringify({
+          at: new Date().toISOString(),
+          status: "post_error",
+          deviceId,
+          message,
+        })
       );
     }
   }
 );
+
+function formatNativeAge(value?: string | null): string {
+  if (!value) return "NO ACK / FIX";
+  const ms = Date.now() - new Date(value).getTime();
+  if (!Number.isFinite(ms)) return "UNKNOWN";
+  if (ms < 60_000) return `${Math.max(0, Math.floor(ms / 1000))} sec ago`;
+  return `${Math.floor(ms / 60_000)} min ago`;
+}
+
+function formatNativeTime(value?: string | null): string {
+  if (!value) return "—";
+  const date = new Date(value);
+  return Number.isFinite(date.getTime()) ? date.toLocaleTimeString() : "—";
+}
 
 function formatDateTime(
   value?: string | null
@@ -559,6 +665,27 @@ export default function App() {
   const [backgroundLastError, setBackgroundLastError] =
     useState<string>("");
 
+  const [backgroundLastEvent, setBackgroundLastEvent] =
+    useState<string>("—");
+
+  const [backgroundCallbackCount, setBackgroundCallbackCount] =
+    useState<number>(0);
+
+  const [backgroundTaskStarted, setBackgroundTaskStarted] =
+    useState<boolean | null>(null);
+
+  const [backgroundPermission, setBackgroundPermission] =
+    useState<string>("UNKNOWN");
+
+  const [preciseLocationStatus, setPreciseLocationStatus] =
+    useState<string>("UNKNOWN");
+
+  const [nativeDiagnostics, setNativeDiagnostics] =
+    useState<NativeGpsDiagnostics | null>(null);
+
+  const [currentAppState, setCurrentAppState] =
+    useState<string>(AppState.currentState);
+
   const [
     trackingMode,
     setTrackingMode
@@ -608,25 +735,81 @@ export default function App() {
   }, [token]);
 
   useEffect(() => {
-    void checkBackgroundTracking();
+    if (Platform.OS !== "ios") void checkBackgroundTracking();
   }, []);
 
 
   useEffect(() => {
+    if (Platform.OS !== "ios" || !token || !nativeGpsAvailable) return;
+    void resumeNativeGps().then((diag) => {
+      setNativeDiagnostics(diag);
+      if (diag.running) {
+        setTracking(true);
+        setTrackingMode("background");
+        setTrackingStatus("NATIVE iOS GPS ACTIVE");
+      }
+    }).catch((err) => setAppError(String(err)));
+  }, [token]);
+
+  useEffect(() => {
     const loadBackgroundDiagnostics = async () => {
+      if (Platform.OS === "ios") {
+        try {
+          const diag = await nativeGpsDiagnostics();
+          setNativeDiagnostics(diag);
+          setBackgroundTaskStarted(diag.running);
+          if (diag.running) {
+            const ackAge = diag.lastAck ? Date.now() - new Date(diag.lastAck).getTime() : Infinity;
+            setServerStatus(ackAge < 120_000 ? "CONNECTED · SERVER ACK" :
+              ackAge < 300_000 ? "DELAYED · SERVER ACK" :
+              Number.isFinite(ackAge) ? "STALE · NO RECENT SERVER ACK" : "WAITING FOR SERVER ACK");
+          }
+          setBackgroundLastFix(formatNativeTime(diag.lastFix));
+          setBackgroundLastSend(formatNativeTime(diag.lastAck));
+          setBackgroundLastEvent(`HTTP ${diag.lastHttpStatus || "—"} · QUEUED ${diag.queued}`);
+          setBackgroundCallbackCount(diag.callbacks);
+          setBackgroundLastError(diag.lastError);
+          setBackgroundPermission(diag.permission);
+          setPreciseLocationStatus(diag.precision);
+          if (diag.running && diag.lastLatitude != null && diag.lastLongitude != null) {
+            setGps({
+              latitude: diag.lastLatitude,
+              longitude: diag.lastLongitude,
+              accuracy: null,
+              speedMps: diag.lastSpeedKph == null ? null : diag.lastSpeedKph / 3.6,
+              heading: null,
+              timestamp: diag.lastFix ? new Date(diag.lastFix).getTime() : Date.now(),
+            });
+          }
+        } catch (err) {
+          setBackgroundLastError(`NATIVE DIAGNOSTICS: ${String(err)}`);
+        }
+        return;
+      }
       try {
-        const rawFix =
-          await SecureStore.getItemAsync(
+        const [
+          rawFix,
+          rawSend,
+          rawError,
+          rawEvent,
+          rawCount,
+        ] = await Promise.all([
+          SecureStore.getItemAsync(
             LAST_BACKGROUND_FIX_KEY
-          );
-        const rawSend =
-          await SecureStore.getItemAsync(
+          ),
+          SecureStore.getItemAsync(
             LAST_BACKGROUND_SEND_KEY
-          );
-        const rawError =
-          await SecureStore.getItemAsync(
+          ),
+          SecureStore.getItemAsync(
             LAST_BACKGROUND_ERROR_KEY
-          );
+          ),
+          SecureStore.getItemAsync(
+            LAST_BACKGROUND_EVENT_KEY
+          ),
+          SecureStore.getItemAsync(
+            BACKGROUND_CALLBACK_COUNT_KEY
+          ),
+        ]);
 
         if (rawFix) {
           try {
@@ -661,8 +844,79 @@ export default function App() {
         setBackgroundLastError(
           rawError || ""
         );
+
+        if (rawEvent) {
+          try {
+            const parsed = JSON.parse(rawEvent);
+            const at = parsed?.at
+              ? new Date(parsed.at)
+              : null;
+            const when =
+              at && !Number.isNaN(at.getTime())
+                ? at.toLocaleTimeString()
+                : "—";
+
+            setBackgroundLastEvent(
+              `${String(parsed?.status || "unknown").toUpperCase()} · ${when}`
+            );
+          } catch {
+            setBackgroundLastEvent(rawEvent);
+          }
+        } else {
+          setBackgroundLastEvent("—");
+        }
+
+        const count = Number(rawCount || 0);
+        setBackgroundCallbackCount(
+          Number.isFinite(count)
+            ? Math.max(0, count)
+            : 0
+        );
+
+        try {
+          const [
+            foregroundPermission,
+            backgroundPermissionResult,
+            started,
+          ] = await Promise.all([
+            Location.getForegroundPermissionsAsync(),
+            Location.getBackgroundPermissionsAsync(),
+            Location.hasStartedLocationUpdatesAsync(
+              BACKGROUND_LOCATION_TASK
+            ),
+          ]);
+
+          setBackgroundTaskStarted(started);
+
+          const bgScope =
+            String(
+              (backgroundPermissionResult as any)
+                ?.ios?.scope ||
+              backgroundPermissionResult.status ||
+              "unknown"
+            ).toUpperCase();
+
+          setBackgroundPermission(bgScope);
+
+          const accuracy =
+            String(
+              (foregroundPermission as any)
+                ?.ios?.accuracy ||
+              "unknown"
+            ).toUpperCase();
+
+          setPreciseLocationStatus(
+            accuracy === "FULL"
+              ? "FULL / PRECISE"
+              : accuracy === "REDUCED"
+                ? "REDUCED"
+                : accuracy
+          );
+        } catch {
+          setBackgroundTaskStarted(null);
+        }
       } catch {
-        // Diagnostics are optional.
+        // Diagnostics are intentionally non-fatal.
       }
     };
 
@@ -675,8 +929,21 @@ export default function App() {
         5000
       );
 
-    return () =>
+    const subscription =
+      AppState.addEventListener(
+        "change",
+        (nextState) => {
+          setCurrentAppState(nextState);
+          if (nextState === "active") {
+            void loadBackgroundDiagnostics();
+          }
+        }
+      );
+
+    return () => {
       clearInterval(interval);
+      subscription.remove();
+    };
   }, []);
 
   async function restoreSession() {
@@ -825,6 +1092,12 @@ export default function App() {
   }
 
   async function logout() {
+    if (Platform.OS === "ios" && nativeGpsAvailable) {
+      try {
+        const state = await nativeGpsDiagnostics();
+        if (state.running) await stopTracking();
+      } catch { /* stop status is shown in App */ }
+    }
     await SecureStore.deleteItemAsync(
       TOKEN_KEY
     );
@@ -1292,6 +1565,7 @@ export default function App() {
     DEFAULT_TRACKING_DEVICE_ID;
 
   useEffect(() => {
+    if (Platform.OS === "ios") return;
     if (heartbeatRef.current) {
       clearInterval(heartbeatRef.current);
       heartbeatRef.current = null;
@@ -1454,6 +1728,43 @@ export default function App() {
         "Configuration missing",
         "The mobile telemetry key is not configured."
       );
+      return;
+    }
+
+    // iOS V4: one GPS producer and one network sender, both native Swift.
+    // Do not start expo-location's TaskManager or a JS watch on iOS.
+    if (Platform.OS === "ios") {
+      try {
+        setTrackingStatus("REQUESTING ALWAYS LOCATION...");
+        const fg = await Location.requestForegroundPermissionsAsync();
+        if (fg.status !== "granted") throw new Error("Location access was denied");
+        const bg = await Location.requestBackgroundPermissionsAsync();
+        if (bg.status !== "granted") {
+          throw new Error("MavDriver needs Allow Location Access: Always for background GPS");
+        }
+        if (!nativeGpsAvailable) throw new Error("Native GPS module missing; install the new iOS TestFlight build");
+        // Stop older Expo native subscription persisted by an earlier build.
+        if (await Location.hasStartedLocationUpdatesAsync(BACKGROUND_LOCATION_TASK)) {
+          await Location.stopLocationUpdatesAsync(BACKGROUND_LOCATION_TASK);
+        }
+        foregroundWatchRef.current?.remove();
+        foregroundWatchRef.current = null;
+        const diag = await startNativeGps(trackingDeviceId, API_URL, MOBILE_TELEMETRY_KEY);
+        setNativeDiagnostics(diag);
+        await SecureStore.setItemAsync(TRACKING_DEVICE_KEY, trackingDeviceId);
+        const stateAck = await postTrackingStateToMavtrack(trackingDeviceId, true);
+        setTracking(true);
+        setTrackingMode("background");
+        setTrackingStatus("NATIVE iOS GPS ACTIVE");
+        setServerStatus(stateAck ? "SESSION ACK" : "SESSION PENDING · WATCH HTTP ACK");
+      } catch (err) {
+        setTracking(false);
+        setTrackingMode("off");
+        setTrackingStatus("NATIVE GPS START FAILED");
+        const message = err instanceof Error ? err.message : String(err);
+        setAppError(message);
+        Alert.alert("Native GPS did not start", message);
+      }
       return;
     }
 
@@ -1647,6 +1958,25 @@ export default function App() {
   }
 
   async function stopTracking() {
+    if (Platform.OS === "ios") {
+      try {
+        const previous = await nativeGpsDiagnostics();
+        const device = previous.deviceId || (await SecureStore.getItemAsync(TRACKING_DEVICE_KEY)) || trackingDeviceId;
+        const diag = await stopNativeGps();
+        setNativeDiagnostics(diag);
+        const acknowledged = await postTrackingStateToMavtrack(device, false);
+        if (!acknowledged) setAppError("STOP completed on this phone, but server STOP acknowledgement failed; retry while online.");
+        await SecureStore.deleteItemAsync(TRACKING_DEVICE_KEY);
+        await SecureStore.deleteItemAsync(LAST_GPS_PING_KEY);
+        setTracking(false);
+        setTrackingMode("off");
+        setTrackingStatus("GPS OFF");
+        setServerStatus(acknowledged ? "SERVER STOP ACK" : "SERVER STOP UNCONFIRMED");
+      } catch (err) {
+        setAppError(`Unable to stop native GPS: ${String(err)}`);
+      }
+      return;
+    }
     try {
       foregroundWatchRef.current?.remove();
       foregroundWatchRef.current = null;
@@ -2013,7 +2343,16 @@ export default function App() {
           trackingStatus={trackingStatus}
           serverStatus={serverStatus}
           gps={gps}
+          nativeDiagnostics={nativeDiagnostics}
+          backgroundLastFix={backgroundLastFix}
+          backgroundLastSend={backgroundLastSend}
           backgroundLastError={backgroundLastError}
+          backgroundLastEvent={backgroundLastEvent}
+          backgroundCallbackCount={backgroundCallbackCount}
+          backgroundTaskStarted={backgroundTaskStarted}
+          backgroundPermission={backgroundPermission}
+          preciseLocationStatus={preciseLocationStatus}
+          currentAppState={currentAppState}
           onOpenLoad={(load) =>
             setSelectedLoad(load)
           }
@@ -2080,7 +2419,16 @@ function HomeScreen({
   trackingStatus,
   serverStatus,
   gps,
+  nativeDiagnostics,
+  backgroundLastFix,
+  backgroundLastSend,
   backgroundLastError,
+  backgroundLastEvent,
+  backgroundCallbackCount,
+  backgroundTaskStarted,
+  backgroundPermission,
+  preciseLocationStatus,
+  currentAppState,
   onOpenLoad,
   onOpenPending,
   onStartTracking,
@@ -2098,7 +2446,16 @@ function HomeScreen({
   trackingStatus: string;
   serverStatus: string;
   gps: GPSData | null;
+  nativeDiagnostics: NativeGpsDiagnostics | null;
+  backgroundLastFix: string;
+  backgroundLastSend: string;
   backgroundLastError: string;
+  backgroundLastEvent: string;
+  backgroundCallbackCount: number;
+  backgroundTaskStarted: boolean | null;
+  backgroundPermission: string;
+  preciseLocationStatus: string;
+  currentAppState: string;
   onOpenLoad: (load: Dispatch) => void;
   onOpenPending: () => void;
   onStartTracking: () => void;
@@ -2351,6 +2708,103 @@ function HomeScreen({
         </Text>
       </View>
 
+      {tracking ? (
+        <View style={styles.gpsDiagnosticsCard}>
+          <View style={styles.gpsDiagnosticsHeader}>
+            <Text style={styles.gpsDiagnosticsTitle}>
+              BACKGROUND GPS DIAGNOSTICS
+            </Text>
+            <View
+              style={[
+                styles.gpsDiagnosticsPill,
+                backgroundTaskStarted
+                  ? styles.gpsDiagnosticsPillOn
+                  : styles.gpsDiagnosticsPillOff,
+              ]}
+            >
+              <Text
+                style={styles.gpsDiagnosticsPillText}
+              >
+                {backgroundTaskStarted === true
+                  ? (Platform.OS === "ios" ? "SWIFT GPS ACTIVE" : "NATIVE TASK ACTIVE")
+                  : backgroundTaskStarted === false
+                    ? (Platform.OS === "ios" ? "SWIFT GPS INACTIVE" : "NATIVE TASK INACTIVE")
+                    : "TASK UNKNOWN"}
+              </Text>
+            </View>
+          </View>
+
+          <View style={styles.gpsDiagnosticsGrid}>
+            {Platform.OS === "ios" && nativeDiagnostics ? (
+              <>
+                <DiagnosticItem label="DEVICE" value={nativeDiagnostics.deviceId || "—"} />
+                <DiagnosticItem label="LAST HTTP ATTEMPT" value={formatNativeTime(nativeDiagnostics.lastAttempt)} />
+                <DiagnosticItem label="LAST SERVER ACK" value={formatNativeTime(nativeDiagnostics.lastAck)} />
+                <DiagnosticItem label="HTTP STATUS" value={String(nativeDiagnostics.lastHttpStatus || "—")} />
+                <DiagnosticItem label="PENDING GPS POINTS" value={String(nativeDiagnostics.queued)} />
+                <DiagnosticItem
+                  label="BACKGROUND SESSION"
+                  value={nativeDiagnostics.backgroundActivitySession ? "ACTIVE" : "INACTIVE"}
+                />
+                <DiagnosticItem
+                  label="SIGNIFICANT CHANGE"
+                  value={nativeDiagnostics.significantChanges ? "ARMED" : "OFF"}
+                />
+                <DiagnosticItem
+                  label="LAST NATIVE APP STATE"
+                  value={nativeDiagnostics.lastAppState || "—"}
+                />
+                <DiagnosticItem
+                  label="LIFECYCLE RESTORE"
+                  value={nativeDiagnostics.lastLifecycle || "—"}
+                />
+                <DiagnosticItem label="GPS AGE" value={formatNativeAge(nativeDiagnostics.lastFix)} />
+                <DiagnosticItem label="SERVER ACK AGE" value={formatNativeAge(nativeDiagnostics.lastAck)} />
+              </>
+            ) : null}
+            <DiagnosticItem
+              label="LAST NATIVE FIX"
+              value={backgroundLastFix}
+            />
+            <DiagnosticItem
+              label="LAST SERVER ACK"
+              value={backgroundLastSend}
+            />
+            <DiagnosticItem
+              label="CALLBACKS"
+              value={String(backgroundCallbackCount)}
+            />
+            <DiagnosticItem
+              label="LAST EVENT"
+              value={backgroundLastEvent}
+            />
+            <DiagnosticItem
+              label="LOCATION ACCESS"
+              value={backgroundPermission}
+            />
+            <DiagnosticItem
+              label="PRECISION"
+              value={preciseLocationStatus}
+            />
+            <DiagnosticItem
+              label="APP STATE"
+              value={currentAppState.toUpperCase()}
+            />
+            <DiagnosticItem
+              label="TRACKING MODE"
+              value={trackingMode.toUpperCase()}
+            />
+          </View>
+
+          <Text style={styles.gpsDiagnosticsHint}>
+            Lock the iPhone while the vehicle is moving. After unlocking,
+            LAST NATIVE FIX and CALLBACKS should have advanced. If they did
+            but LAST SERVER ACK did not, Core Location is working and the network
+            upload is the failing step. BACKGROUND SESSION should remain ACTIVE on iOS.
+          </Text>
+        </View>
+      ) : null}
+
       {backgroundLastError ? (
         <View
           style={{
@@ -2374,6 +2828,28 @@ function HomeScreen({
         </View>
       ) : null}
     </ScrollView>
+  );
+}
+
+function DiagnosticItem({
+  label,
+  value,
+}: {
+  label: string;
+  value: string;
+}) {
+  return (
+    <View style={styles.gpsDiagnosticItem}>
+      <Text style={styles.gpsDiagnosticLabel}>
+        {label}
+      </Text>
+      <Text
+        style={styles.gpsDiagnosticValue}
+        numberOfLines={2}
+      >
+        {value || "—"}
+      </Text>
+    </View>
   );
 }
 
@@ -6542,6 +7018,88 @@ const styles = StyleSheet.create({
     color: COLORS.muted,
     fontSize: 10,
     textAlign: "center",
+  },
+
+  gpsDiagnosticsCard: {
+    marginTop: 12,
+    padding: 13,
+    borderWidth: 1,
+    borderColor: "#244A70",
+    borderRadius: 14,
+    backgroundColor: "#0A192A",
+  },
+
+  gpsDiagnosticsHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 8,
+  },
+
+  gpsDiagnosticsTitle: {
+    flex: 1,
+    color: "#DCEBFF",
+    fontSize: 9,
+    fontWeight: "900",
+    letterSpacing: 0.8,
+  },
+
+  gpsDiagnosticsPill: {
+    paddingHorizontal: 7,
+    paddingVertical: 4,
+    borderRadius: 999,
+  },
+
+  gpsDiagnosticsPillOn: {
+    backgroundColor: "#0E2D20",
+  },
+
+  gpsDiagnosticsPillOff: {
+    backgroundColor: "#35161B",
+  },
+
+  gpsDiagnosticsPillText: {
+    color: "#D8E7F7",
+    fontSize: 7,
+    fontWeight: "900",
+  },
+
+  gpsDiagnosticsGrid: {
+    marginTop: 10,
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 8,
+  },
+
+  gpsDiagnosticItem: {
+    width: "48%",
+    minHeight: 48,
+    padding: 8,
+    borderWidth: 1,
+    borderColor: COLORS.borderSoft,
+    borderRadius: 10,
+    backgroundColor: "#081421",
+  },
+
+  gpsDiagnosticLabel: {
+    color: COLORS.muted,
+    fontSize: 7,
+    fontWeight: "900",
+    letterSpacing: 0.5,
+  },
+
+  gpsDiagnosticValue: {
+    marginTop: 4,
+    color: COLORS.text,
+    fontSize: 10,
+    fontWeight: "800",
+  },
+
+  gpsDiagnosticsHint: {
+    marginTop: 10,
+    color: COLORS.muted,
+    fontSize: 8,
+    lineHeight: 12,
   },
 
   foregroundModeNotice: {

@@ -12532,3 +12532,203 @@ button:disabled {
     grid-template-columns: 1fr !important;
   }
 }
+
+/* =====================================================
+   MAVTRACK FLEET GROUPS + OPERATIONS HEADER CLEANUP V1
+   Final desktop overrides.
+   ===================================================== */
+
+/* Fleet: keep every data column readable and separate. */
+.workspace-page.fleet-page .table-header,
+.workspace-page.fleet-page .fleet-row {
+  min-width: 1360px !important;
+  grid-template-columns:
+    minmax(290px, 1.45fr)
+    minmax(140px, 0.72fr)
+    minmax(250px, 1.22fr)
+    minmax(145px, 0.72fr)
+    minmax(210px, 0.98fr)
+    minmax(360px, 1.58fr) !important;
+  column-gap: 20px !important;
+}
+
+.workspace-page.fleet-page .fleet-row {
+  min-height: 104px !important;
+}
+
+.workspace-page.fleet-page .inline-status {
+  max-width: 100%;
+  white-space: nowrap;
+}
+
+.workspace-page.fleet-page .inline-movement {
+  min-width: 0;
+  max-width: 100%;
+  display: block;
+  white-space: normal !important;
+  overflow-wrap: anywhere;
+  line-height: 1.4;
+}
+
+.workspace-page.fleet-page .fleet-row > span:nth-child(5) {
+  min-width: 0;
+  white-space: normal !important;
+  line-height: 1.35;
+}
+
+/* Group divider inside Fleet. */
+.workspace-page.fleet-page .fleet-group-header {
+  width: 100%;
+  min-height: 48px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 10px 22px;
+  border-top: 1px solid rgba(96, 165, 250, 0.22);
+  border-bottom: 1px solid rgba(148, 163, 184, 0.1);
+  background:
+    linear-gradient(90deg, rgba(37, 99, 235, 0.12), rgba(15, 31, 50, 0.72) 42%, rgba(15, 31, 50, 0.48));
+}
+
+.workspace-page.fleet-page .table-header + .fleet-group-header {
+  border-top: 0;
+}
+
+.workspace-page.fleet-page .fleet-group-header > div {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.workspace-page.fleet-page .fleet-group-mark {
+  width: 27px;
+  height: 27px;
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  border: 1px solid rgba(96, 165, 250, 0.28);
+  border-radius: 8px;
+  background: rgba(37, 99, 235, 0.13);
+  color: #93c5fd;
+  font-size: 0.72rem;
+}
+
+.workspace-page.fleet-page .fleet-group-header strong {
+  overflow: hidden;
+  color: #edf5ff;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.82rem;
+  font-weight: 850;
+  letter-spacing: 0.035em;
+  text-transform: uppercase;
+}
+
+.workspace-page.fleet-page .fleet-group-header > span {
+  flex: 0 0 auto;
+  padding: 4px 8px;
+  border-radius: 999px;
+  background: rgba(148, 163, 184, 0.09);
+  color: #93a5ba;
+  font-size: 0.62rem;
+  font-weight: 750;
+}
+
+/* Operations: left navigation, truly centered title, controls on the right. */
+.workspace-page.operations-master-detail .operations-commandbar {
+  min-height: 82px !important;
+  grid-template-columns:
+    minmax(210px, 1fr)
+    minmax(300px, auto)
+    minmax(430px, 1fr) !important;
+  grid-template-areas: "nav title actions" !important;
+  align-items: center !important;
+  gap: 16px !important;
+  padding-bottom: 10px !important;
+}
+
+.workspace-page.operations-master-detail .operations-nav-block {
+  grid-area: nav;
+  min-width: 0;
+  justify-self: start;
+  align-self: center;
+}
+
+.workspace-page.operations-master-detail .operations-nav-block .operations-section-tabs {
+  margin: 0 !important;
+}
+
+.workspace-page.operations-master-detail .operations-title-block {
+  grid-area: title !important;
+  min-width: 300px;
+  align-items: center !important;
+  justify-content: center !important;
+  text-align: center !important;
+}
+
+.workspace-page.operations-master-detail .operations-title-block h1 {
+  margin: 2px 0 0 !important;
+}
+
+.workspace-page.operations-master-detail .operations-command-actions {
+  grid-area: actions !important;
+  justify-self: end;
+}
+
+/* Center TODAY and the date inside its own box. */
+.workspace-page.operations-master-detail .operations-date-chip {
+  min-width: 126px;
+  height: 42px;
+  display: grid !important;
+  place-content: center !important;
+  justify-items: center !important;
+  align-items: center !important;
+  gap: 2px !important;
+  padding: 4px 12px !important;
+  text-align: center !important;
+}
+
+.workspace-page.operations-master-detail .operations-date-chip span,
+.workspace-page.operations-master-detail .operations-date-chip strong {
+  width: 100%;
+  display: block;
+  text-align: center !important;
+  line-height: 1.15;
+}
+
+@media (max-width: 1180px) {
+  .workspace-page.operations-master-detail .operations-commandbar {
+    grid-template-columns: 1fr !important;
+    grid-template-areas:
+      "nav"
+      "title"
+      "actions" !important;
+  }
+
+  .workspace-page.operations-master-detail .operations-nav-block,
+  .workspace-page.operations-master-detail .operations-title-block,
+  .workspace-page.operations-master-detail .operations-command-actions {
+    justify-self: stretch;
+  }
+
+  .workspace-page.operations-master-detail .operations-nav-block {
+    display: flex;
+    justify-content: flex-start;
+  }
+
+  .workspace-page.operations-master-detail .operations-command-actions {
+    justify-content: center;
+  }
+}
+
+@media (max-width: 760px) {
+  .workspace-page.fleet-page .fleet-group-header {
+    padding: 9px 12px;
+  }
+
+  .workspace-page.fleet-page .fleet-group-header strong {
+    font-size: 0.74rem;
+  }
+}

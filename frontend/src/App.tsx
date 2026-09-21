@@ -14,6 +14,7 @@ import markerIcon from 'leaflet/dist/images/marker-icon.png'
 import markerShadow from 'leaflet/dist/images/marker-shadow.png'
 
 import {
+  Fragment,
   useCallback,
   useEffect,
   useRef,
@@ -294,10 +295,6 @@ const API_BASE =
 const PHONE_CONNECTED_MAX_AGE_MS =
   2 * 60 * 1000
 const PHONE_STALE_MAX_AGE_MS =
-  10 * 60 * 1000
-const PHONE_GPS_LIVE_MAX_AGE_MS =
-  2 * 60 * 1000
-const PHONE_GPS_RECENT_MAX_AGE_MS =
   10 * 60 * 1000
 
 const celsiusToFahrenheit = (
@@ -910,33 +907,19 @@ function MapController({
   const lastFocusedAssetRef = useRef<string | null>(null)
 
   useEffect(() => {
-    // Selecting an asset is an explicit user action: focus it once and then
-    // leave the map completely under the user's control. Fleet telemetry may
-    // continue refreshing every few seconds, but it must never snap the map
-    // back or reset the user's zoom while the same asset remains selected.
+    // Focus a selected asset only once when the selection changes.
+    // Keep the user's current zoom instead of forcing zoom 13, and
+    // do not keep re-centering as new GPS packets arrive.
     if (
       selectedAssetKey &&
       latitude != null &&
       longitude != null &&
-      Number.isFinite(latitude) &&
-      Number.isFinite(longitude) &&
       lastFocusedAssetRef.current !== selectedAssetKey
     ) {
       lastFocusedAssetRef.current = selectedAssetKey
-      map.stop()
-
-      // A fleet-wide zoom (for example zoom 4 over the US) made selection
-      // look like it did not center. Jump to a useful street-level zoom on
-      // first selection, while preserving any closer zoom the user already has.
-      const targetZoom =
-        Math.max(
-          14,
-          map.getZoom()
-        )
-
       map.setView(
         [latitude, longitude],
-        targetZoom,
+        map.getZoom(),
         { animate: false }
       )
       return
@@ -3471,10 +3454,11 @@ function App() {
           currentTruckNumber:
             driverForm.currentTruckNumber
               .trim()
-              .toUpperCase(),
+              .toUpperCase() || null,
           physicalTruckNumber:
             driverForm.physicalTruckNumber
-              .trim(),
+              .trim()
+              .toUpperCase() || null,
           licenseNumber:
             driverForm.licenseNumber.trim(),
           licenseState:
@@ -5395,68 +5379,11 @@ function App() {
     const connection =
       getPhoneConnectionStatus(item)
 
-    if (connection === 'connected') {
-      return 'Connected'
-    }
-
-    if (connection === 'stale') {
-      return 'Stale'
-    }
-
-    return item?.trackingActive === true
-      ? 'No recent contact'
-      : 'Offline'
-  }
-
-  const getPhoneGpsAgeMs = (
-    item: any
-  ): number | null => {
-    const lastGpsAt =
-      getPhoneLastGpsAt(item)
-
-    if (!lastGpsAt) {
-      return null
-    }
-
-    const gpsMs =
-      new Date(lastGpsAt).getTime()
-
-    if (!Number.isFinite(gpsMs)) {
-      return null
-    }
-
-    return Math.max(0, now - gpsMs)
-  }
-
-  const isPhoneGpsLive = (
-    item: any
-  ) => {
-    const ageMs = getPhoneGpsAgeMs(item)
-
-    return (
-      ageMs != null &&
-      ageMs < PHONE_GPS_LIVE_MAX_AGE_MS
-    )
-  }
-
-  const getPhoneGpsLabel = (
-    item: any
-  ) => {
-    const ageMs = getPhoneGpsAgeMs(item)
-
-    if (ageMs == null) {
-      return 'GPS unavailable'
-    }
-
-    if (ageMs < PHONE_GPS_LIVE_MAX_AGE_MS) {
-      return 'Live GPS'
-    }
-
-    if (ageMs < PHONE_GPS_RECENT_MAX_AGE_MS) {
-      return 'Last GPS'
-    }
-
-    return 'Last known GPS'
+    return connection === 'connected'
+      ? 'Connected'
+      : connection === 'stale'
+        ? 'Stale'
+        : 'Offline'
   }
 
   const getTrackingSessionLabel = (
@@ -6373,6 +6300,9 @@ function App() {
       selectedAsset
     )
 
+  const isSelectedTruck =
+    selectedAssetType === 'TRK'
+
   const isSelectedTrailer =
     selectedAssetType === 'TRL'
 
@@ -6414,37 +6344,41 @@ function App() {
   // acquiring a fresh fix. In that case MAVTRACK keeps
   // the previous valid position only as "last known".
 
-  const selectedGpsIsLive =
-    isSelectedPhoneTracker
-      ? isPhoneGpsLive(telemetry)
-      : Boolean(telemetry?.hasCurrentGps)
-
   const gpsAcquiring =
     deviceStatus === 'online' &&
-    !selectedGpsIsLive &&
-    !hasLocation
+    !Boolean(
+      telemetry?.hasCurrentGps
+    )
 
   const gpsStatusText =
-    isSelectedPhoneTracker
-      ? getPhoneGpsLabel(telemetry)
-      : selectedGpsIsLive
-        ? 'Current'
-        : gpsAcquiring
-          ? '🟡 Acquiring location...'
-          : hasLocation
-            ? 'Last known'
-            : 'Unavailable'
+    telemetry?.hasCurrentGps
+      ? 'Current'
+      : gpsAcquiring
+        ? '🟡 Acquiring location...'
+        : hasLocation
+          ? 'Last known'
+          : 'Unavailable'
 
   const gpsDetailText =
-    isSelectedPhoneTracker
-      ? getPhoneGpsLabel(telemetry)
-      : selectedGpsIsLive
-        ? 'Current GPS'
-        : gpsAcquiring
-          ? '🟡 Acquiring GPS location...'
-          : hasLocation
-            ? 'Last known GPS'
-            : 'No GPS'
+    telemetry?.hasCurrentGps
+      ? 'Current GPS'
+      : gpsAcquiring
+        ? '🟡 Acquiring GPS location...'
+        : hasLocation
+          ? 'Last known GPS'
+          : 'No GPS'
+
+  const locationLabel =
+    telemetry?.hasCurrentGps
+      ? 'Location'
+      : hasLocation
+        ? 'Last known location'
+        : 'Location'
+
+  const locationTimeLabel =
+    telemetry?.hasCurrentGps
+      ? 'Location Updated'
+      : 'Last Valid Location'
 
   const speedKphRaw =
     telemetry?.speedKph != null
@@ -6719,40 +6653,9 @@ function App() {
     matchesGroup &&
     statusToggleEnabled
 
-  // Use the already-loaded fleet telemetry to focus a clicked asset
-  // immediately. Waiting for the selected-asset request caused the map to
-  // feel jumpy and sometimes left the user at the fleet-wide zoom.
-  const selectedMapTelemetry =
-    selectedDeviceId
-      ? (
-          fleetTelemetry[selectedDeviceId] ??
-          (telemetry?.deviceId === selectedDeviceId
-            ? telemetry
-            : null)
-        )
-      : null
-
-  const selectedMapLatitudeRaw =
-    selectedMapTelemetry?.latitude != null
-      ? Number(selectedMapTelemetry.latitude)
-      : null
-
-  const selectedMapLongitudeRaw =
-    selectedMapTelemetry?.longitude != null
-      ? Number(selectedMapTelemetry.longitude)
-      : null
-
-  const selectedMapLatitude =
-    selectedMapLatitudeRaw != null &&
-    Number.isFinite(selectedMapLatitudeRaw)
-      ? selectedMapLatitudeRaw
-      : null
-
-  const selectedMapLongitude =
-    selectedMapLongitudeRaw != null &&
-    Number.isFinite(selectedMapLongitudeRaw)
-      ? selectedMapLongitudeRaw
-      : null
+  const markerVisible =
+    hasLocation &&
+    assetVisible
 
   const currentTemperatureC =
     telemetry?.temperature != null
@@ -9434,10 +9337,16 @@ function App() {
 
                 <MapController
                   latitude={
-                    selectedMapLatitude
+                    markerVisible
+                      ? telemetry?.latitude ??
+                        null
+                      : null
                   }
                   longitude={
-                    selectedMapLongitude
+                    markerVisible
+                      ? telemetry?.longitude ??
+                        null
+                      : null
                   }
                   fleetPoints={
                     fleetMapPoints
@@ -9565,11 +9474,6 @@ function App() {
                             )
                           : null
 
-                      const itemGpsIsLive =
-                        trackingSourceCode(asset) === 'PHONE'
-                          ? isPhoneGpsLive(item)
-                          : Boolean(item?.hasCurrentGps)
-
                       return (
                         <Marker
                           key={
@@ -9600,7 +9504,7 @@ function App() {
                                 )
                           }
                           opacity={
-                            itemGpsIsLive
+                            item?.hasCurrentGps
                               ? 1
                               : 0.62
                           }
@@ -9738,11 +9642,9 @@ function App() {
 
                               <br />
                               {
-                                itemGpsIsLive
-                                  ? 'Live GPS location'
-                                  : trackingSourceCode(asset) === 'PHONE'
-                                    ? `${getPhoneGpsLabel(item)} · last known location`
-                                    : 'Last known location'
+                                item?.hasCurrentGps
+                                  ? 'Current GPS location'
+                                  : 'Last known location'
                               }
 
                               <br />
@@ -10247,7 +10149,9 @@ function App() {
                             isSelectedPhoneTracker && (
                               <>
                                 <div>
-                                  <dt>Session</dt>
+                                  <dt>
+                                    Tracking Session
+                                  </dt>
                                   <dd>
                                     <strong>
                                       {getTrackingSessionLabel(telemetry)}
@@ -10256,7 +10160,9 @@ function App() {
                                 </div>
 
                                 <div>
-                                  <dt>Connection</dt>
+                                  <dt>
+                                    Connection
+                                  </dt>
                                   <dd>
                                     <span
                                       className={
@@ -10275,14 +10181,35 @@ function App() {
                                 </div>
 
                                 <div>
-                                  <dt>Last Contact</dt>
+                                  <dt>
+                                    Last Confirmed Contact
+                                  </dt>
                                   <dd>
                                     {
                                       selectedPhoneLastContactAt
-                                        ? formatAge(
+                                        ? `${formatDateTime(
                                             selectedPhoneLastContactAt
-                                          )
+                                          )} · ${formatAge(
+                                            selectedPhoneLastContactAt
+                                          )}`
                                         : 'No confirmed contact'
+                                    }
+                                  </dd>
+                                </div>
+
+                                <div>
+                                  <dt>
+                                    Last Phone GPS
+                                  </dt>
+                                  <dd>
+                                    {
+                                      selectedPhoneLastGpsAt
+                                        ? `${formatDateTime(
+                                            selectedPhoneLastGpsAt
+                                          )} · ${formatAge(
+                                            selectedPhoneLastGpsAt
+                                          )}`
+                                        : 'No phone GPS received'
                                     }
                                   </dd>
                                 </div>
@@ -10529,6 +10456,42 @@ function App() {
                             )
                           }
 
+                          {
+                            isSelectedTruck && (
+                              <>
+                                <div>
+                                  <dt>
+                                    GPS Accuracy
+                                  </dt>
+                                  <dd>
+                                    {
+                                      telemetry?.accuracyMeters != null
+                                        ? `${Number(
+                                            telemetry.accuracyMeters
+                                          ).toFixed(1)} m`
+                                        : 'Unavailable'
+                                    }
+                                  </dd>
+                                </div>
+
+                                <div>
+                                  <dt>
+                                    Heading
+                                  </dt>
+                                  <dd>
+                                    {
+                                      telemetry?.headingDegrees != null
+                                        ? `${Number(
+                                            telemetry.headingDegrees
+                                          ).toFixed(0)}°`
+                                        : 'Unavailable'
+                                    }
+                                  </dd>
+                                </div>
+                              </>
+                            )
+                          }
+
                           <div>
                             <dt>
                               Movement
@@ -10567,24 +10530,64 @@ function App() {
                             <dt>
                               {
                                 isSelectedPhoneTracker
-                                  ? 'GPS Updated'
+                                  ? 'Last Contact'
                                   : 'Last Ping'
                               }
                             </dt>
 
                             <dd>
                               {
-                                isSelectedPhoneTracker
+                                formatDateTime(
+                                  isSelectedPhoneTracker
+                                    ? selectedPhoneLastContactAt
+                                    : telemetry.receivedAt
+                                )
+                              }
+                            </dd>
+                          </div>
+
+                          <div>
+                            <dt>
+                              {
+                                locationLabel
+                              }
+                            </dt>
+
+                            <dd className="location-value">
+                              {
+                                hasLocation
                                   ? (
-                                      selectedPhoneLastGpsAt
-                                        ? formatAge(
-                                            selectedPhoneLastGpsAt
-                                          )
-                                        : 'No GPS received'
-                                    )
-                                  : formatAge(
-                                      telemetry.receivedAt
-                                    )
+                                    <>
+                                      {
+                                        telemetry.latitude.toFixed(
+                                          6
+                                        )
+                                      }
+                                      ,{' '}
+                                      {
+                                        telemetry.longitude.toFixed(
+                                          6
+                                        )
+                                      }
+                                    </>
+                                  )
+                                  : 'No GPS location'
+                              }
+                            </dd>
+                          </div>
+
+                          <div>
+                            <dt>
+                              {
+                                locationTimeLabel
+                              }
+                            </dt>
+
+                            <dd>
+                              {
+                                formatDateTime(
+                                  telemetry.locationReceivedAt
+                                )
                               }
                             </dd>
                           </div>
@@ -10708,7 +10711,22 @@ function App() {
 
                 {
                   assets.length > 0
-                    ? assets.map((asset) => {
+                    ? [...assets]
+                        .sort((a, b) => {
+                          const groupA = (a.groupName || 'Ungrouped').trim()
+                          const groupB = (b.groupName || 'Ungrouped').trim()
+
+                          if (groupA === 'Ungrouped' && groupB !== 'Ungrouped') return 1
+                          if (groupB === 'Ungrouped' && groupA !== 'Ungrouped') return -1
+
+                          const groupCompare = groupA.localeCompare(groupB)
+                          if (groupCompare !== 0) return groupCompare
+
+                          return (a.name || a.deviceId).localeCompare(
+                            b.name || b.deviceId
+                          )
+                        })
+                        .map((asset, assetIndex, sortedAssets) => {
                         const item =
                           fleetTelemetry[asset.deviceId] ??
                           (telemetry?.deviceId === asset.deviceId
@@ -10802,10 +10820,44 @@ function App() {
                             rowBatteryPercent
                           )
 
+                        const rowGroupName =
+                          (asset.groupName || 'Ungrouped').trim() || 'Ungrouped'
+
+                        const previousGroupName =
+                          assetIndex > 0
+                            ? ((sortedAssets[assetIndex - 1].groupName || 'Ungrouped').trim() || 'Ungrouped')
+                            : null
+
+                        const startsNewGroup =
+                          assetIndex === 0 ||
+                          previousGroupName !== rowGroupName
+
+                        const rowGroupCount =
+                          startsNewGroup
+                            ? sortedAssets.filter(
+                                (entry) =>
+                                  ((entry.groupName || 'Ungrouped').trim() || 'Ungrouped') === rowGroupName
+                              ).length
+                            : 0
+
                         return (
+                          <Fragment key={asset.id}>
+                            {
+                              startsNewGroup && (
+                                <div className="fleet-group-header">
+                                  <div>
+                                    <span className="fleet-group-mark">▦</span>
+                                    <strong>{rowGroupName}</strong>
+                                  </div>
+                                  <span>
+                                    {rowGroupCount} {rowGroupCount === 1 ? 'asset' : 'assets'}
+                                  </span>
+                                </div>
+                              )
+                            }
+
                           <div
                             className="fleet-row"
-                            key={asset.id}
                           >
                             <div className="fleet-asset-name">
                               <span
@@ -11078,6 +11130,7 @@ function App() {
                               }
                             </div>
                           </div>
+                          </Fragment>
                         )
                       })
                     : (
@@ -11411,8 +11464,8 @@ function App() {
                               'password'
                             ],
                             ['Phone', 'phone', 'tel'],
-                            ['Internal Tracking ID', 'currentTruckNumber', 'text'],
-                            ['Physical Truck #', 'physicalTruckNumber', 'text'],
+                            ['Internal Tracking ID (Phone GPS)', 'currentTruckNumber', 'text'],
+                            ['Physical Truck # (optional)', 'physicalTruckNumber', 'text'],
                             ['License #', 'licenseNumber', 'text'],
                             ['License State', 'licenseState', 'text'],
                             ['Trailer #', 'currentTrailerNumber', 'text'],
@@ -11452,6 +11505,7 @@ function App() {
                                                 event.target.value
                                               )
                                             : field === 'currentTruckNumber' ||
+                                                field === 'physicalTruckNumber' ||
                                                 field === 'licenseState'
                                               ? event.target.value.toUpperCase()
                                               : event.target.value
@@ -11460,7 +11514,7 @@ function App() {
                                   }
                                   placeholder={
                                     field === 'currentTruckNumber'
-                                      ? 'TRK-TEST-002'
+                                      ? 'TRK 106'
                                       : field === 'physicalTruckNumber'
                                         ? 'TRK 126'
                                         : ''
@@ -11486,7 +11540,7 @@ function App() {
                           lineHeight: 1.5
                         }}
                       >
-                        The Internal Tracking ID is the PHONE asset used by MAVTRACK for this driver's GPS. If it does not exist yet, MAVTRACK will create it automatically.
+                        The Internal Tracking ID is the PHONE asset used by MAVTRACK for this driver's GPS. MAVTRACK creates that TRK asset automatically if it does not exist. Physical Truck # is optional and is validated only when you enter one.
                       </div>
 
                       {
@@ -11556,7 +11610,7 @@ function App() {
             <section className="workspace-page operations-page operations-master-detail">
 
               <div className="operations-commandbar">
-                <div className="operations-title-block">
+                <div className="operations-nav-block">
                   <div className="operations-section-tabs" role="tablist" aria-label="Operations sections">
                     <button
                       type="button"
@@ -11574,6 +11628,9 @@ function App() {
                       </button>
                     )}
                   </div>
+                </div>
+
+                <div className="operations-title-block">
                   <span className="page-kicker">
                     Operations
                   </span>
@@ -11581,10 +11638,6 @@ function App() {
                   <h1>
                     Dispatch Center
                   </h1>
-
-                  <p>
-                    Live view of loads, assets and trailer activity.
-                  </p>
                 </div>
 
                 <div className="operations-command-actions">
@@ -15478,7 +15531,7 @@ function App() {
                 <div>
                   <dt>
                     {
-                      selectedGpsIsLive
+                      telemetry?.hasCurrentGps
                         ? 'Location updated'
                         : 'Last valid location'
                     }
@@ -15496,7 +15549,7 @@ function App() {
                 <div>
                   <dt>
                     {
-                      selectedGpsIsLive
+                      telemetry?.hasCurrentGps
                         ? 'Coordinates'
                         : hasLocation
                           ? 'Last known coordinates'

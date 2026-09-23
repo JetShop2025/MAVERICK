@@ -7697,11 +7697,30 @@ app.post(
           }
         })
 
-      // Force TRAILER-001 to the same company as the already working
-      // TRAILER-002. This repairs an old/inactive/wrong-company asset too.
-      if (
-        normalizedDeviceId === 'TRAILER-001'
-      ) {
+      // Automatically provision the physical MAV2 fleet that we are
+      // programming now. Keep the already-existing TRAILER-002 untouched,
+      // and auto-register/repair TRAILER-001 plus TRAILER-003..012.
+      const mav2FleetMatch =
+        /^TRAILER-(\d{3})$/.exec(
+          normalizedDeviceId
+        )
+
+      const mav2FleetNumber =
+        mav2FleetMatch
+          ? Number(mav2FleetMatch[1])
+          : null
+
+      const shouldAutoProvisionMav2 =
+        mav2FleetNumber !== null &&
+        (
+          mav2FleetNumber === 1 ||
+          (
+            mav2FleetNumber >= 3 &&
+            mav2FleetNumber <= 12
+          )
+        )
+
+      if (shouldAutoProvisionMav2) {
         const trailer002 =
           await prisma.asset.findUnique({
             where: {
@@ -7713,6 +7732,9 @@ app.post(
           })
 
         if (trailer002) {
+          const fleetName =
+            `TRL ${String(mav2FleetNumber).padStart(2, '0')}`
+
           asset =
             await prisma.asset.upsert({
               where: {
@@ -7722,7 +7744,8 @@ app.post(
               update: {
                 companyId:
                   trailer002.companyId,
-                name: 'TRL 01',
+                name:
+                  fleetName,
                 description:
                   'Maverick T-SIM7670G-S3 tracking unit',
                 assetType: 'TRL',
@@ -7735,7 +7758,8 @@ app.post(
                   trailer002.companyId,
                 deviceId:
                   normalizedDeviceId,
-                name: 'TRL 01',
+                name:
+                  fleetName,
                 description:
                   'Maverick T-SIM7670G-S3 tracking unit',
                 assetType: 'TRL',
@@ -7745,8 +7769,7 @@ app.post(
               }
             })
 
-          // Re-link every older TRAILER-001 telemetry row that was stored
-          // before the asset was correctly assigned.
+          // Re-link telemetry that may have arrived before Fleet registration.
           await prisma.telemetry.updateMany({
             where: {
               deviceId:
@@ -7770,7 +7793,7 @@ app.post(
           })
 
           console.log(
-            'TRAILER-001 Fleet assignment confirmed:',
+            'MAV2 Fleet assignment confirmed:',
             {
               deviceId:
                 asset.deviceId,
@@ -7786,7 +7809,7 @@ app.post(
           )
         } else {
           console.warn(
-            'TRAILER-001 telemetry received, but TRAILER-002 was not found; Fleet assignment could not be repaired.'
+            `${normalizedDeviceId} telemetry received, but TRAILER-002 was not found; Fleet assignment could not be completed.`
           )
         }
       }

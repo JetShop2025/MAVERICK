@@ -7697,11 +7697,9 @@ app.post(
           }
         })
 
-      // Auto-register the new physical MAV2 once, so its telemetry is
-      // linked to Fleet immediately instead of being stored with assetId=null.
-      // Company ownership is copied from the already-provisioned TRAILER-002.
+      // Force TRAILER-001 to the same company as the already working
+      // TRAILER-002. This repairs an old/inactive/wrong-company asset too.
       if (
-        !asset &&
         normalizedDeviceId === 'TRAILER-001'
       ) {
         const trailer002 =
@@ -7721,7 +7719,17 @@ app.post(
                 deviceId:
                   normalizedDeviceId
               },
-              update: {},
+              update: {
+                companyId:
+                  trailer002.companyId,
+                name: 'TRL 01',
+                description:
+                  'Maverick T-SIM7670G-S3 tracking unit',
+                assetType: 'TRL',
+                trackingSource: 'MAV2',
+                groupName: 'GA LOGISTICS',
+                active: true
+              },
               create: {
                 companyId:
                   trailer002.companyId,
@@ -7737,12 +7745,23 @@ app.post(
               }
             })
 
-          // Attach any telemetry that arrived before the asset existed.
+          // Re-link every older TRAILER-001 telemetry row that was stored
+          // before the asset was correctly assigned.
           await prisma.telemetry.updateMany({
             where: {
               deviceId:
                 normalizedDeviceId,
-              assetId: null
+              OR: [
+                {
+                  assetId: null
+                },
+                {
+                  assetId: {
+                    not:
+                      asset.id
+                  }
+                }
+              ]
             },
             data: {
               assetId:
@@ -7751,7 +7770,7 @@ app.post(
           })
 
           console.log(
-            'MAV2 asset auto-registered:',
+            'TRAILER-001 Fleet assignment confirmed:',
             {
               deviceId:
                 asset.deviceId,
@@ -7760,12 +7779,14 @@ app.post(
               groupName:
                 asset.groupName,
               companyId:
-                asset.companyId
+                asset.companyId,
+              active:
+                asset.active
             }
           )
         } else {
           console.warn(
-            'TRAILER-001 telemetry received, but TRAILER-002 was not found; asset was not auto-registered.'
+            'TRAILER-001 telemetry received, but TRAILER-002 was not found; Fleet assignment could not be repaired.'
           )
         }
       }

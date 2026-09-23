@@ -7689,12 +7689,86 @@ app.post(
       // GUARDAR
       // ---------------------------------
       
-      const asset =
+      let asset =
         await prisma.asset.findUnique({
           where: {
-            deviceId
+            deviceId:
+              normalizedDeviceId
           }
         })
+
+      // Auto-register the new physical MAV2 once, so its telemetry is
+      // linked to Fleet immediately instead of being stored with assetId=null.
+      // Company ownership is copied from the already-provisioned TRAILER-002.
+      if (
+        !asset &&
+        normalizedDeviceId === 'TRAILER-001'
+      ) {
+        const trailer002 =
+          await prisma.asset.findUnique({
+            where: {
+              deviceId: 'TRAILER-002'
+            },
+            select: {
+              companyId: true
+            }
+          })
+
+        if (trailer002) {
+          asset =
+            await prisma.asset.upsert({
+              where: {
+                deviceId:
+                  normalizedDeviceId
+              },
+              update: {},
+              create: {
+                companyId:
+                  trailer002.companyId,
+                deviceId:
+                  normalizedDeviceId,
+                name: 'TRL 01',
+                description:
+                  'Maverick T-SIM7670G-S3 tracking unit',
+                assetType: 'TRL',
+                trackingSource: 'MAV2',
+                groupName: 'GA LOGISTICS',
+                active: true
+              }
+            })
+
+          // Attach any telemetry that arrived before the asset existed.
+          await prisma.telemetry.updateMany({
+            where: {
+              deviceId:
+                normalizedDeviceId,
+              assetId: null
+            },
+            data: {
+              assetId:
+                asset.id
+            }
+          })
+
+          console.log(
+            'MAV2 asset auto-registered:',
+            {
+              deviceId:
+                asset.deviceId,
+              name:
+                asset.name,
+              groupName:
+                asset.groupName,
+              companyId:
+                asset.companyId
+            }
+          )
+        } else {
+          console.warn(
+            'TRAILER-001 telemetry received, but TRAILER-002 was not found; asset was not auto-registered.'
+          )
+        }
+      }
 
       const previousLiveTelemetry =
         (

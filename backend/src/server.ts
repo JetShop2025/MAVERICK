@@ -7560,7 +7560,7 @@ app.post(
 
       if (
         typeof deviceId !== 'string' ||
-        typeof temperature !== 'number'
+        !deviceId.trim()
       ) {
         return res.status(400).json({
           ok: false,
@@ -7569,22 +7569,40 @@ app.post(
         })
       }
 
+      const normalizedDeviceId =
+        deviceId.trim()
+
+      const safeTemperature =
+        typeof temperature === 'number' &&
+        Number.isFinite(temperature) &&
+        temperature >= -55 &&
+        temperature <= 125
+          ? temperature
+          : null
+
       // ---------------------------------
       // GPS SEGURO
       // ---------------------------------
 
       const safeLatitude =
-        typeof latitude === 'number'
+        typeof latitude === 'number' &&
+        Number.isFinite(latitude) &&
+        latitude >= -90 &&
+        latitude <= 90
           ? latitude
           : null
 
       const safeLongitude =
-        typeof longitude === 'number'
+        typeof longitude === 'number' &&
+        Number.isFinite(longitude) &&
+        longitude >= -180 &&
+        longitude <= 180
           ? longitude
           : null
 
       const safeAltitude =
-        typeof altitude === 'number'
+        typeof altitude === 'number' &&
+        Number.isFinite(altitude)
           ? altitude
           : null
 
@@ -7703,8 +7721,11 @@ app.post(
 
       await prisma.telemetry.create({
   data: {
-    deviceId,
-    temperature,
+    deviceId:
+      normalizedDeviceId,
+
+    temperature:
+      safeTemperature,
 
     latitude:
       safeLatitude,
@@ -7749,7 +7770,8 @@ app.post(
 
       if (
         asset &&
-        !safeIsBackfill
+        !safeIsBackfill &&
+        safeTemperature !== null
       ) {
         await processTemperatureAlertTransition({
           asset,
@@ -7757,7 +7779,7 @@ app.post(
             previousLiveTelemetry
               ?.temperature ?? null,
           currentTemperatureC:
-            temperature
+            safeTemperature
         })
       }
 
@@ -7766,24 +7788,29 @@ app.post(
       // ---------------------------------
 
       const temperatureF =
-        (
-          temperature *
-          9
-        ) /
-        5 +
-        32
+        safeTemperature !== null
+          ? (
+              safeTemperature *
+              9
+            ) /
+            5 +
+            32
+          : null
 
       console.log(
         'Telemetry received:',
         {
-          deviceId,
+          deviceId:
+            normalizedDeviceId,
 
           temperatureF:
-            Number(
-              temperatureF.toFixed(
-                1
-              )
-            ),
+            temperatureF !== null
+              ? Number(
+                  temperatureF.toFixed(
+                    1
+                  )
+                )
+              : null,
 
           latitude:
             safeLatitude,

@@ -737,7 +737,7 @@ type BootstrapUser = {
 
 const bootstrapUsers: BootstrapUser[] = [
   {
-    email: 'mario@ga-logistics.su',
+    email: 'mario@ga-logistics.us',
     name: 'Mario',
     phone: null,
     role: 'company_admin',
@@ -770,10 +770,86 @@ const bootstrapUsers: BootstrapUser[] = [
     phone: '(831) 901-7018',
     role: 'dispatch',
     passwordEnv: 'MAVTRACK_AUGIE_PASSWORD'
+  },
+  {
+    email: 'david@jetshop.us',
+    name: 'David Cruz',
+    phone: null,
+    role: 'company_admin',
+    passwordEnv: 'MAVTRACK_DAVID_PASSWORD'
+  },
+  {
+    email: 'jetjoseluis@live.com',
+    name: 'Jose Luis Tinajero',
+    phone: null,
+    role: 'company_admin',
+    passwordEnv: 'MAVTRACK_JOSE_LUIS_PASSWORD'
+  },
+  {
+    email: 'andrea@ga-logistics.us',
+    name: 'Andrea Aguilar',
+    phone: null,
+    role: 'company_admin',
+    passwordEnv: 'MAVTRACK_ANDREA_PASSWORD'
+  },
+  {
+    email: 'ap-compu@outlook.com',
+    name: 'Gaby Tinajero',
+    phone: null,
+    role: 'dispatch',
+    passwordEnv: 'MAVTRACK_GABY_PASSWORD'
   }
 ]
 
 async function ensureBootstrapUsers() {
+  // One-time repair for the original Mario email typo (.su -> .us).
+  // Preserve the existing user ID and related records whenever possible.
+  const legacyMario =
+    await prisma.user.findUnique({
+      where: {
+        email: 'mario@ga-logistics.su'
+      },
+      select: {
+        id: true
+      }
+    })
+
+  const correctedMario =
+    await prisma.user.findUnique({
+      where: {
+        email: 'mario@ga-logistics.us'
+      },
+      select: {
+        id: true
+      }
+    })
+
+  if (legacyMario && !correctedMario) {
+    await prisma.user.update({
+      where: {
+        id: legacyMario.id
+      },
+      data: {
+        email: 'mario@ga-logistics.us'
+      }
+    })
+
+    console.log(
+      'Mario email corrected: mario@ga-logistics.us'
+    )
+  } else if (legacyMario && correctedMario) {
+    // If both addresses somehow exist, keep the corrected account authoritative
+    // and disable the legacy typo so it cannot still be used to sign in.
+    await prisma.user.update({
+      where: {
+        id: legacyMario.id
+      },
+      data: {
+        active: false
+      }
+    })
+  }
+
   const company =
     await prisma.company.upsert({
       where: {

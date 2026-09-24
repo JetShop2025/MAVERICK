@@ -12732,3 +12732,96 @@ button:disabled {
     font-size: 0.74rem;
   }
 }
+
+/* =====================================================
+   MAVTRACK MAP HEADER + SELECTED ASSET CHIP — 2026-09-24
+   Keep the selected asset compact, aligned, and inside the status bar.
+   ===================================================== */
+.mav-statusbar {
+  min-height: 54px;
+  overflow-y: visible;
+}
+
+.selected-asset-chip {
+  width: clamp(220px, 18vw, 300px) !important;
+  min-width: 220px !important;
+  max-width: 300px !important;
+  height: 42px !important;
+  min-height: 42px !important;
+  display: grid !important;
+  grid-template-columns: 18px minmax(0, 1fr) 24px;
+  align-items: center !important;
+  gap: 7px !important;
+  padding: 5px 7px 5px 10px !important;
+  overflow: hidden;
+}
+
+.selected-asset-chip.empty {
+  grid-template-columns: 18px minmax(0, 1fr);
+}
+
+.selected-asset-chip-icon {
+  display: grid;
+  place-items: center;
+  align-self: center;
+}
+
+.selected-asset-chip-copy {
+  min-width: 0;
+  display: grid !important;
+  align-content: center;
+  gap: 2px !important;
+  line-height: 1.05;
+}
+
+.selected-asset-chip-copy strong {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.69rem !important;
+  line-height: 1.05;
+}
+
+.selected-asset-chip-meta {
+  min-width: 0;
+  display: flex !important;
+  align-items: center;
+  gap: 5px;
+  overflow: hidden;
+  color: #8292a7;
+  font-size: 0.56rem !important;
+  line-height: 1.05;
+  white-space: nowrap;
+}
+
+.selected-asset-chip-meta span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.selected-asset-chip-meta span:last-child {
+  color: #9fb0c4;
+}
+
+.selected-asset-chip-meta i {
+  flex: 0 0 auto;
+  color: #506178;
+  font-style: normal;
+}
+
+.selected-asset-chip > button {
+  align-self: center;
+  justify-self: end;
+  margin: 0 !important;
+}
+
+@media (max-width: 1024px) {
+  .selected-asset-chip {
+    width: 220px !important;
+    min-width: 220px !important;
+  }
+}

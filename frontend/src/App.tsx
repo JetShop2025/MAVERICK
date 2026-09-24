@@ -894,22 +894,23 @@ function MapController({
   latitude,
   longitude,
   fleetPoints,
-  fleetBoundsKey,
+  fleetViewKey,
   selectedAssetKey
 }: {
   latitude: number | null
   longitude: number | null
   fleetPoints: [number, number][]
-  fleetBoundsKey: string
+  fleetViewKey: string
   selectedAssetKey: string | null
 }) {
   const map = useMap()
   const lastFocusedAssetRef = useRef<string | null>(null)
+  const lastFleetViewKeyRef = useRef<string | null>(null)
+  const hadSelectedAssetRef = useRef(false)
 
   useEffect(() => {
     // Focus a selected asset only once when the selection changes.
-    // Keep the user's current zoom instead of forcing zoom 13, and
-    // do not keep re-centering as new GPS packets arrive.
+    // Live telemetry updates must never steal the user's manual zoom/pan.
     if (
       selectedAssetKey &&
       latitude != null &&
@@ -917,6 +918,8 @@ function MapController({
       lastFocusedAssetRef.current !== selectedAssetKey
     ) {
       lastFocusedAssetRef.current = selectedAssetKey
+      hadSelectedAssetRef.current = true
+
       map.setView(
         [latitude, longitude],
         map.getZoom(),
@@ -925,35 +928,51 @@ function MapController({
       return
     }
 
-    // Once the asset is deselected, allow the fleet view to auto-fit again.
-    if (!selectedAssetKey) {
-      lastFocusedAssetRef.current = null
+    if (selectedAssetKey) {
+      hadSelectedAssetRef.current = true
+      return
+    }
 
-      if (fleetPoints.length === 1) {
-        map.setView(
-          fleetPoints[0],
-          map.getZoom(),
-          { animate: false }
-        )
-        return
-      }
+    // Fleet mode: auto-fit only when entering fleet mode or when the SET of
+    // visible assets changes (filters/search). Coordinate refreshes alone do
+    // not re-fit the map, so manual zoom and pan behave like a normal map.
+    const returningToFleet = hadSelectedAssetRef.current
+    hadSelectedAssetRef.current = false
+    lastFocusedAssetRef.current = null
 
-      if (fleetPoints.length > 1) {
-        map.fitBounds(
-          L.latLngBounds(fleetPoints),
-          {
-            padding: [70, 70],
-            maxZoom: 9,
-            animate: false
-          }
-        )
-      }
+    const visibleFleetChanged =
+      lastFleetViewKeyRef.current !== fleetViewKey
+
+    if (!returningToFleet && !visibleFleetChanged) {
+      return
+    }
+
+    lastFleetViewKeyRef.current = fleetViewKey
+
+    if (fleetPoints.length === 1) {
+      map.setView(
+        fleetPoints[0],
+        Math.min(map.getZoom(), 16),
+        { animate: false }
+      )
+      return
+    }
+
+    if (fleetPoints.length > 1) {
+      map.fitBounds(
+        L.latLngBounds(fleetPoints),
+        {
+          padding: [70, 70],
+          maxZoom: 16,
+          animate: false
+        }
+      )
     }
   }, [
     selectedAssetKey,
     latitude,
     longitude,
-    fleetBoundsKey,
+    fleetViewKey,
     fleetPoints,
     map
   ])
@@ -2096,6 +2115,24 @@ function PublicLoadTrackingPage({
 }
 
 function App() {
+  useEffect(() => {
+    document.title = 'MAVTRACK'
+
+    let favicon =
+      document.querySelector<HTMLLinkElement>(
+        "link[rel~='icon']"
+      )
+
+    if (!favicon) {
+      favicon = document.createElement('link')
+      favicon.rel = 'icon'
+      document.head.appendChild(favicon)
+    }
+
+    favicon.type = 'image/jpeg'
+    favicon.href = maverickLogo
+  }, [])
+
   // =====================================================
   // LOGIN / SESSION
   // =====================================================
@@ -6030,12 +6067,16 @@ function App() {
         ] as [number, number]
     )
 
-  const fleetMapBoundsKey =
-    fleetMapPoints
-      .map(
-        ([latitude, longitude]) =>
-          `${latitude.toFixed(5)},${longitude.toFixed(5)}`
+  const fleetMapViewKey =
+    visibleFleetMapAssets
+      .map((entry) =>
+        String(
+          entry.asset?.id ??
+          entry.asset?.deviceId ??
+          ''
+        )
       )
+      .sort()
       .join('|')
 
   const formatDateTime = (
@@ -9157,23 +9198,31 @@ function App() {
             </strong>
 
             {
-              selectedAsset &&
-              selectedAsset.name !==
-                selectedAsset.deviceId && (
-                <small>
-                  {selectedAsset.deviceId}
-                </small>
-              )
-            }
-
-            {
               selectedAsset && (
-                <small>
-                  Group: {
-                    String(
-                      selectedAsset.groupName || ''
-                    ).trim() || 'Unassigned'
+                <small className="selected-asset-chip-meta">
+                  {
+                    selectedAsset.name !==
+                      selectedAsset.deviceId && (
+                      <span>
+                        {selectedAsset.deviceId}
+                      </span>
+                    )
                   }
+
+                  {
+                    selectedAsset.name !==
+                      selectedAsset.deviceId && (
+                      <i aria-hidden="true">•</i>
+                    )
+                  }
+
+                  <span>
+                    {
+                      String(
+                        selectedAsset.groupName || ''
+                      ).trim() || 'Unassigned'
+                    }
+                  </span>
                 </small>
               )
             }
@@ -9351,8 +9400,8 @@ function App() {
                   fleetPoints={
                     fleetMapPoints
                   }
-                  fleetBoundsKey={
-                    fleetMapBoundsKey
+                  fleetViewKey={
+                    fleetMapViewKey
                   }
                   selectedAssetKey={
                     selectedDeviceId || null

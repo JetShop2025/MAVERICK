@@ -5342,6 +5342,99 @@ app.post(
         authorizedSignerEmail
       )
 
+      // Send the load confirmation automatically to the authorized signer.
+      // Email delivery must never roll back or invalidate a successfully
+      // created dispatch, so failures are recorded but remain non-fatal.
+      try {
+        const signerEmailResult =
+          await sendMaverickEmail({
+            to: [authorizedSignerEmail],
+            subject:
+              `MAVTRACK | Load ${dispatch.loadNumber} Confirmation`,
+            html: `
+              <!DOCTYPE html>
+              <html>
+                <body style="margin:0;padding:0;background:#f3f6fa;font-family:Arial,Helvetica,sans-serif;color:#0f172a;">
+                  <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="background:#f3f6fa;padding:32px 12px;">
+                    <tr>
+                      <td align="center">
+                        <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="max-width:640px;background:#ffffff;border:1px solid #e2e8f0;border-radius:14px;overflow:hidden;">
+                          <tr>
+                            <td style="padding:24px 30px;background:#071426;color:#ffffff;">
+                              <div style="font-size:16px;font-weight:800;letter-spacing:1px;">MAVTRACK LLC</div>
+                              <div style="margin-top:6px;color:#94a3b8;font-size:12px;">Load Confirmation</div>
+                            </td>
+                          </tr>
+                          <tr>
+                            <td style="padding:30px;">
+                              <h2 style="margin:0 0 8px;font-size:22px;">Load ${escapeHtml(dispatch.loadNumber)}</h2>
+                              <p style="margin:0 0 22px;color:#475569;line-height:1.55;">A new load has been created in MAVTRACK and you are listed as the owner / authorized signer for this load.</p>
+
+                              <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="border-collapse:collapse;">
+                                <tr>
+                                  <td style="padding:10px 0;border-bottom:1px solid #e2e8f0;color:#64748b;">Pickup</td>
+                                  <td style="padding:10px 0;border-bottom:1px solid #e2e8f0;text-align:right;font-weight:700;">${escapeHtml(dispatch.pickupName)}</td>
+                                </tr>
+                                <tr>
+                                  <td style="padding:10px 0;border-bottom:1px solid #e2e8f0;color:#64748b;">Pickup Address</td>
+                                  <td style="padding:10px 0;border-bottom:1px solid #e2e8f0;text-align:right;font-weight:700;">${escapeHtml(dispatch.pickupAddress)}</td>
+                                </tr>
+                                <tr>
+                                  <td style="padding:10px 0;border-bottom:1px solid #e2e8f0;color:#64748b;">Delivery</td>
+                                  <td style="padding:10px 0;border-bottom:1px solid #e2e8f0;text-align:right;font-weight:700;">${escapeHtml(dispatch.deliveryName)}</td>
+                                </tr>
+                                <tr>
+                                  <td style="padding:10px 0;border-bottom:1px solid #e2e8f0;color:#64748b;">Delivery Address</td>
+                                  <td style="padding:10px 0;border-bottom:1px solid #e2e8f0;text-align:right;font-weight:700;">${escapeHtml(dispatch.deliveryAddress)}</td>
+                                </tr>
+                                <tr>
+                                  <td style="padding:10px 0;border-bottom:1px solid #e2e8f0;color:#64748b;">Carrier</td>
+                                  <td style="padding:10px 0;border-bottom:1px solid #e2e8f0;text-align:right;font-weight:700;">${escapeHtml(dispatch.carrierName || '—')}</td>
+                                </tr>
+                                <tr>
+                                  <td style="padding:10px 0;color:#64748b;">Lessor</td>
+                                  <td style="padding:10px 0;text-align:right;font-weight:700;">${escapeHtml(dispatch.lessorName || '—')}</td>
+                                </tr>
+                              </table>
+
+                              <p style="margin:24px 0 0;color:#64748b;font-size:12px;line-height:1.5;">This email was sent automatically when the dispatch was created in MAVTRACK.</p>
+                            </td>
+                          </tr>
+                        </table>
+                      </td>
+                    </tr>
+                  </table>
+                </body>
+              </html>
+            `
+          })
+
+        await createNotificationEvent({
+          companyId,
+          assetId: dispatch.assetId,
+          dispatchId: dispatch.id,
+          type: signerEmailResult.ok
+            ? 'AUTHORIZED_SIGNER_EMAIL_SENT'
+            : 'AUTHORIZED_SIGNER_EMAIL_FAILED',
+          severity: signerEmailResult.ok
+            ? 'success'
+            : 'warning',
+          title: signerEmailResult.ok
+            ? 'Authorized signer email sent'
+            : 'Authorized signer email not sent',
+          message: signerEmailResult.ok
+            ? `Load ${dispatch.loadNumber} confirmation was emailed to ${authorizedSignerEmail}.`
+            : `Load ${dispatch.loadNumber} was created, but the confirmation email to ${authorizedSignerEmail} could not be sent.`,
+          recipients: signerEmailResult.recipients,
+          emailSent: signerEmailResult.ok
+        })
+      } catch (signerEmailError) {
+        console.error(
+          'Authorized signer email error:',
+          signerEmailError
+        )
+      }
+
       if (
         dispatch.driverId != null &&
         dispatch.assignmentStatus === 'PENDING'

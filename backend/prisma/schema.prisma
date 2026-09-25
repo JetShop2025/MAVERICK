@@ -116,10 +116,11 @@ model Asset {
   companyId Int
   company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
 
-  telemetry     Telemetry[]
-  dispatches    Dispatch[]
-  notifications NotificationEvent[]
-  cameras       Camera[]
+  telemetry         Telemetry[]
+  dispatches        Dispatch[]
+  notifications     NotificationEvent[]
+  signatureRequests DispatchSignatureRequest[]
+  cameras           Camera[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -298,11 +299,12 @@ model Dispatch {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  statusEvents  DispatchStatusEvent[]
-  stops         DispatchStop[]
-  documents     DispatchDocument[]
-  shares        DispatchShare[]
-  notifications NotificationEvent[]
+  statusEvents      DispatchStatusEvent[]
+  stops             DispatchStop[]
+  documents         DispatchDocument[]
+  shares            DispatchShare[]
+  notifications     NotificationEvent[]
+  signatureRequests DispatchSignatureRequest[]
 
   @@unique([companyId, loadNumber])
   @@index([companyId, status])
@@ -434,6 +436,34 @@ model DispatchShare {
   @@index([dispatchId])
   @@index([customerEmail])
   @@index([expiresAt])
+}
+
+model DispatchSignatureRequest {
+  id Int @id @default(autoincrement())
+
+  dispatchId Int
+  dispatch   Dispatch @relation(fields: [dispatchId], references: [id], onDelete: Cascade)
+
+  token       String  @unique
+  signerEmail String
+  signerName  String?
+  signerTitle String?
+  status      String  @default("PENDING")
+
+  sentAt             DateTime?
+  viewedAt           DateTime?
+  signedAt           DateTime?
+  changesRequestedAt DateTime?
+  changesNote        String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  asset     Asset?   @relation(fields: [assetId], references: [id])
+  assetId   Int?
+
+  @@index([dispatchId, createdAt])
+  @@index([signerEmail])
+  @@index([status])
 }
 
 model NotificationEvent {

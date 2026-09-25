@@ -2534,6 +2534,12 @@ app.get(
               orderBy: {
                 createdAt: 'desc'
               }
+            },
+            signatureRequests: {
+              orderBy: {
+                createdAt: 'desc'
+              },
+              take: 1
             }
           },
           orderBy: [
@@ -2604,6 +2610,12 @@ async function respondToDriverAssignment({
             include: {
               driverProfile: true
             }
+          },
+          signatureRequests: {
+            orderBy: {
+              createdAt: 'desc'
+            },
+            take: 1
           }
         }
       })
@@ -2635,6 +2647,25 @@ async function respondToDriverAssignment({
         message:
           `Assignment is already ${existing.assignmentStatus.toLowerCase()}`
       })
+    }
+
+    if (action === 'ACCEPTED') {
+      const ownerAuthorization =
+        existing.signatureRequests[0]
+
+      if (
+        !ownerAuthorization ||
+        ownerAuthorization.status !== 'SIGNED'
+      ) {
+        return res.status(409).json({
+          ok: false,
+          code: 'OWNER_AUTHORIZATION_REQUIRED',
+          message:
+            ownerAuthorization?.status === 'CHANGES_REQUESTED'
+              ? 'This load cannot be accepted because the owner requested changes. Wait for a new signed authorization.'
+              : 'This load cannot be accepted yet because owner authorization is still pending.'
+        })
+      }
     }
 
     const profile =
@@ -4529,6 +4560,25 @@ app.get(
               orderBy: {
                 createdAt: 'desc'
               }
+            },
+            signatureRequests: {
+              orderBy: {
+                createdAt: 'desc'
+              },
+              take: 1,
+              select: {
+                id: true,
+                signerEmail: true,
+                signerName: true,
+                signerTitle: true,
+                status: true,
+                sentAt: true,
+                viewedAt: true,
+                signedAt: true,
+                changesRequestedAt: true,
+                changesNote: true,
+                createdAt: true
+              }
             }
           },
           orderBy: [
@@ -5342,15 +5392,32 @@ app.post(
         authorizedSignerEmail
       )
 
-      // Send the load confirmation automatically to the authorized signer.
-      // Email delivery must never roll back or invalidate a successfully
-      // created dispatch, so failures are recorded but remain non-fatal.
+      // Create a secure owner-signature request and email it automatically.
+      // Email delivery remains non-fatal: a created dispatch is never rolled back
+      // because of an email-provider problem.
       try {
+        const signatureToken =
+          randomBytes(32).toString('hex')
+
+        const signatureRequest =
+          await prisma.dispatchSignatureRequest.create({
+            data: {
+              dispatchId: dispatch.id,
+              token: signatureToken,
+              signerEmail: authorizedSignerEmail,
+              status: 'PENDING',
+              sentAt: new Date()
+            }
+          })
+
+        const signUrl =
+          `${PUBLIC_FRONTEND_URL}/sign/${signatureRequest.token}`
+
         const signerEmailResult =
           await sendMaverickEmail({
             to: [authorizedSignerEmail],
             subject:
-              `MAVTRACK | Load ${dispatch.loadNumber} Confirmation`,
+              `MAVTRACK | Load ${dispatch.loadNumber} - Review & Sign`,
             html: `
               <!DOCTYPE html>
               <html>
@@ -5362,42 +5429,27 @@ app.post(
                           <tr>
                             <td style="padding:24px 30px;background:#071426;color:#ffffff;">
                               <div style="font-size:16px;font-weight:800;letter-spacing:1px;">MAVTRACK LLC</div>
-                              <div style="margin-top:6px;color:#94a3b8;font-size:12px;">Load Confirmation</div>
+                              <div style="margin-top:6px;color:#94a3b8;font-size:12px;">Load Confirmation · Signature Required</div>
                             </td>
                           </tr>
                           <tr>
                             <td style="padding:30px;">
                               <h2 style="margin:0 0 8px;font-size:22px;">Load ${escapeHtml(dispatch.loadNumber)}</h2>
-                              <p style="margin:0 0 22px;color:#475569;line-height:1.55;">A new load has been created in MAVTRACK and you are listed as the owner / authorized signer for this load.</p>
+                              <p style="margin:0 0 22px;color:#475569;line-height:1.55;">You are listed as the owner / authorized signer for this load. Please review the information below and sign electronically.</p>
 
                               <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="border-collapse:collapse;">
-                                <tr>
-                                  <td style="padding:10px 0;border-bottom:1px solid #e2e8f0;color:#64748b;">Pickup</td>
-                                  <td style="padding:10px 0;border-bottom:1px solid #e2e8f0;text-align:right;font-weight:700;">${escapeHtml(dispatch.pickupName)}</td>
-                                </tr>
-                                <tr>
-                                  <td style="padding:10px 0;border-bottom:1px solid #e2e8f0;color:#64748b;">Pickup Address</td>
-                                  <td style="padding:10px 0;border-bottom:1px solid #e2e8f0;text-align:right;font-weight:700;">${escapeHtml(dispatch.pickupAddress)}</td>
-                                </tr>
-                                <tr>
-                                  <td style="padding:10px 0;border-bottom:1px solid #e2e8f0;color:#64748b;">Delivery</td>
-                                  <td style="padding:10px 0;border-bottom:1px solid #e2e8f0;text-align:right;font-weight:700;">${escapeHtml(dispatch.deliveryName)}</td>
-                                </tr>
-                                <tr>
-                                  <td style="padding:10px 0;border-bottom:1px solid #e2e8f0;color:#64748b;">Delivery Address</td>
-                                  <td style="padding:10px 0;border-bottom:1px solid #e2e8f0;text-align:right;font-weight:700;">${escapeHtml(dispatch.deliveryAddress)}</td>
-                                </tr>
-                                <tr>
-                                  <td style="padding:10px 0;border-bottom:1px solid #e2e8f0;color:#64748b;">Carrier</td>
-                                  <td style="padding:10px 0;border-bottom:1px solid #e2e8f0;text-align:right;font-weight:700;">${escapeHtml(dispatch.carrierName || '—')}</td>
-                                </tr>
-                                <tr>
-                                  <td style="padding:10px 0;color:#64748b;">Lessor</td>
-                                  <td style="padding:10px 0;text-align:right;font-weight:700;">${escapeHtml(dispatch.lessorName || '—')}</td>
-                                </tr>
+                                <tr><td style="padding:10px 0;border-bottom:1px solid #e2e8f0;color:#64748b;">Pickup</td><td style="padding:10px 0;border-bottom:1px solid #e2e8f0;text-align:right;font-weight:700;">${escapeHtml(dispatch.pickupName)}</td></tr>
+                                <tr><td style="padding:10px 0;border-bottom:1px solid #e2e8f0;color:#64748b;">Pickup Address</td><td style="padding:10px 0;border-bottom:1px solid #e2e8f0;text-align:right;font-weight:700;">${escapeHtml(dispatch.pickupAddress)}</td></tr>
+                                <tr><td style="padding:10px 0;border-bottom:1px solid #e2e8f0;color:#64748b;">Delivery</td><td style="padding:10px 0;border-bottom:1px solid #e2e8f0;text-align:right;font-weight:700;">${escapeHtml(dispatch.deliveryName)}</td></tr>
+                                <tr><td style="padding:10px 0;border-bottom:1px solid #e2e8f0;color:#64748b;">Delivery Address</td><td style="padding:10px 0;border-bottom:1px solid #e2e8f0;text-align:right;font-weight:700;">${escapeHtml(dispatch.deliveryAddress)}</td></tr>
+                                <tr><td style="padding:10px 0;border-bottom:1px solid #e2e8f0;color:#64748b;">Carrier</td><td style="padding:10px 0;border-bottom:1px solid #e2e8f0;text-align:right;font-weight:700;">${escapeHtml(dispatch.carrierName || '—')}</td></tr>
+                                <tr><td style="padding:10px 0;color:#64748b;">Lessor</td><td style="padding:10px 0;text-align:right;font-weight:700;">${escapeHtml(dispatch.lessorName || '—')}</td></tr>
                               </table>
 
-                              <p style="margin:24px 0 0;color:#64748b;font-size:12px;line-height:1.5;">This email was sent automatically when the dispatch was created in MAVTRACK.</p>
+                              <p style="margin:26px 0 8px;text-align:center;">
+                                <a href="${signUrl}" style="display:inline-block;background:#2563eb;color:#ffffff;text-decoration:none;padding:14px 22px;border-radius:9px;font-weight:800;">Review &amp; Sign</a>
+                              </p>
+                              <p style="margin:12px 0 0;color:#64748b;font-size:12px;line-height:1.5;text-align:center;">This secure link is unique to this load and signer.</p>
                             </td>
                           </tr>
                         </table>
@@ -5414,23 +5466,21 @@ app.post(
           assetId: dispatch.assetId,
           dispatchId: dispatch.id,
           type: signerEmailResult.ok
-            ? 'AUTHORIZED_SIGNER_EMAIL_SENT'
-            : 'AUTHORIZED_SIGNER_EMAIL_FAILED',
-          severity: signerEmailResult.ok
-            ? 'success'
-            : 'warning',
+            ? 'AUTHORIZED_SIGNATURE_SENT'
+            : 'AUTHORIZED_SIGNATURE_EMAIL_FAILED',
+          severity: signerEmailResult.ok ? 'success' : 'warning',
           title: signerEmailResult.ok
-            ? 'Authorized signer email sent'
-            : 'Authorized signer email not sent',
+            ? 'Signature request sent'
+            : 'Signature request email not sent',
           message: signerEmailResult.ok
-            ? `Load ${dispatch.loadNumber} confirmation was emailed to ${authorizedSignerEmail}.`
-            : `Load ${dispatch.loadNumber} was created, but the confirmation email to ${authorizedSignerEmail} could not be sent.`,
+            ? `Load ${dispatch.loadNumber} signature request was emailed to ${authorizedSignerEmail}.`
+            : `Load ${dispatch.loadNumber} was created, but the signature request email to ${authorizedSignerEmail} could not be sent.`,
           recipients: signerEmailResult.recipients,
           emailSent: signerEmailResult.ok
         })
       } catch (signerEmailError) {
         console.error(
-          'Authorized signer email error:',
+          'Authorized signer signature request error:',
           signerEmailError
         )
       }
@@ -6177,6 +6227,302 @@ app.post(
 )
 
 
+
+
+// =====================================================
+// PUBLIC AUTHORIZED-SIGNER SIGNATURE
+// =====================================================
+
+app.get(
+  '/api/public/sign/:token',
+  async (req: Request, res: Response) => {
+    try {
+      const token =
+        String(req.params.token || '').trim()
+
+      if (!/^[a-f0-9]{64}$/i.test(token)) {
+        return res.status(400).json({
+          ok: false,
+          message: 'Invalid signature link'
+        })
+      }
+
+      const request =
+        await prisma.dispatchSignatureRequest.findUnique({
+          where: { token },
+          include: {
+            dispatch: {
+              select: {
+                id: true,
+                loadNumber: true,
+                pickupName: true,
+                pickupAddress: true,
+                pickupScheduledAt: true,
+                deliveryName: true,
+                deliveryAddress: true,
+                deliveryScheduledAt: true,
+                commodity: true,
+                carrierName: true,
+                lessorName: true,
+                truckNumber: true,
+                trailerNumber: true,
+                referenceNumber: true,
+                poNumber: true,
+                bolNumber: true,
+                status: true
+              }
+            }
+          }
+        })
+
+      if (!request) {
+        return res.status(404).json({
+          ok: false,
+          message: 'Signature request not found'
+        })
+      }
+
+      if (!request.viewedAt) {
+        await prisma.dispatchSignatureRequest.update({
+          where: { id: request.id },
+          data: { viewedAt: new Date() }
+        })
+      }
+
+      return res.json({
+        ok: true,
+        request: {
+          id: request.id,
+          signerEmail: request.signerEmail,
+          signerName: request.signerName,
+          signerTitle: request.signerTitle,
+          status: request.status,
+          sentAt: request.sentAt,
+          viewedAt: request.viewedAt || new Date(),
+          signedAt: request.signedAt,
+          changesRequestedAt: request.changesRequestedAt,
+          changesNote: request.changesNote
+        },
+        dispatch: request.dispatch
+      })
+    } catch (error) {
+      console.error('Public signature request error:', error)
+      return res.status(500).json({
+        ok: false,
+        message: 'Unable to load signature request'
+      })
+    }
+  }
+)
+
+app.post(
+  '/api/public/sign/:token',
+  async (req: Request, res: Response) => {
+    try {
+      const token =
+        String(req.params.token || '').trim()
+
+      const action =
+        String(req.body?.action || '').trim().toUpperCase()
+
+      if (
+        !/^[a-f0-9]{64}$/i.test(token) ||
+        !['SIGN', 'REQUEST_CHANGES'].includes(action)
+      ) {
+        return res.status(400).json({
+          ok: false,
+          message: 'Invalid signature request'
+        })
+      }
+
+      const request =
+        await prisma.dispatchSignatureRequest.findUnique({
+          where: { token },
+          include: {
+            dispatch: true
+          }
+        })
+
+      if (!request) {
+        return res.status(404).json({
+          ok: false,
+          message: 'Signature request not found'
+        })
+      }
+
+      if (request.status === 'SIGNED') {
+        return res.status(409).json({
+          ok: false,
+          message: 'This confirmation has already been signed'
+        })
+      }
+
+      if (request.status === 'CHANGES_REQUESTED') {
+        return res.status(409).json({
+          ok: false,
+          message: 'Changes were already requested for this confirmation'
+        })
+      }
+
+      const now = new Date()
+
+      if (action === 'REQUEST_CHANGES') {
+        const changesNote =
+          optionalString(req.body?.changesNote)
+
+        if (!changesNote || changesNote.length < 3) {
+          return res.status(400).json({
+            ok: false,
+            message: 'Please describe the requested changes'
+          })
+        }
+
+        const updated =
+          await prisma.$transaction(async (tx) => {
+            const signatureRequest =
+              await tx.dispatchSignatureRequest.update({
+                where: { id: request.id },
+                data: {
+                  status: 'CHANGES_REQUESTED',
+                  changesRequestedAt: now,
+                  changesNote
+                }
+              })
+
+            await tx.dispatchStatusEvent.create({
+              data: {
+                dispatchId: request.dispatchId,
+                status: request.dispatch.status,
+                eventType: 'OWNER_CHANGES_REQUESTED',
+                title: 'Owner requested changes',
+                notes: changesNote
+              }
+            })
+
+            return signatureRequest
+          })
+
+        await createNotificationEvent({
+          companyId: request.dispatch.companyId,
+          assetId: request.dispatch.assetId,
+          dispatchId: request.dispatchId,
+          type: 'OWNER_CHANGES_REQUESTED',
+          severity: 'warning',
+          title: `Load ${request.dispatch.loadNumber}: changes requested`,
+          message: `${request.signerEmail} requested changes to the load confirmation: ${changesNote}`
+        })
+
+        return res.json({
+          ok: true,
+          request: updated
+        })
+      }
+
+      const signerName =
+        optionalString(req.body?.signerName)
+      const signerTitle =
+        optionalString(req.body?.signerTitle)
+      const signatureDataBase64 =
+        optionalString(req.body?.signatureDataBase64)
+      const signatureBuffer =
+        decodeBase64File(signatureDataBase64)
+
+      if (!signerName || signerName.length < 2) {
+        return res.status(400).json({
+          ok: false,
+          message: 'Signer name is required'
+        })
+      }
+
+      if (
+        !signatureDataBase64 ||
+        !signatureBuffer ||
+        signatureBuffer.length < 100
+      ) {
+        return res.status(400).json({
+          ok: false,
+          message: 'Signature is required'
+        })
+      }
+
+      if (signatureBuffer.length > 512 * 1024) {
+        return res.status(413).json({
+          ok: false,
+          message: 'Signature is too large'
+        })
+      }
+
+      const updated =
+        await prisma.$transaction(async (tx) => {
+          const signatureRequest =
+            await tx.dispatchSignatureRequest.update({
+              where: { id: request.id },
+              data: {
+                status: 'SIGNED',
+                signerName,
+                signerTitle,
+                signedAt: now
+              }
+            })
+
+          await tx.dispatchDocument.create({
+            data: {
+              dispatchId: request.dispatchId,
+              originalName:
+                `Load-${request.dispatch.loadNumber}-Owner-Signature.png`,
+              mimeType: 'image/png',
+              sizeBytes: signatureBuffer.length,
+              category: 'SIGNATURE',
+              dataBase64: signatureDataBase64,
+              uploadedByRole: 'authorized_signer',
+              uploadedByName: signerName,
+              customerVisible: true,
+              isSignature: true,
+              signedBy: signerName,
+              signedAt: now,
+              description:
+                `Owner / authorized signer acceptance for load ${request.dispatch.loadNumber} (${request.signerEmail})`
+            }
+          })
+
+          await tx.dispatchStatusEvent.create({
+            data: {
+              dispatchId: request.dispatchId,
+              status: request.dispatch.status,
+              eventType: 'OWNER_SIGNED',
+              title: 'Owner signed confirmation',
+              notes:
+                `${signerName}${signerTitle ? ` · ${signerTitle}` : ''} signed as authorized representative.`
+            }
+          })
+
+          return signatureRequest
+        })
+
+      await createNotificationEvent({
+        companyId: request.dispatch.companyId,
+        assetId: request.dispatch.assetId,
+        dispatchId: request.dispatchId,
+        type: 'OWNER_SIGNATURE_COMPLETED',
+        severity: 'success',
+        title: `Load ${request.dispatch.loadNumber}: confirmation signed`,
+        message:
+          `${signerName} (${request.signerEmail}) signed the load confirmation.`
+      })
+
+      return res.json({
+        ok: true,
+        request: updated
+      })
+    } catch (error) {
+      console.error('Public signature submission error:', error)
+      return res.status(500).json({
+        ok: false,
+        message: 'Unable to submit signature'
+      })
+    }
+  }
+)
 
 
 // =====================================================

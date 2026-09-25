@@ -182,6 +182,19 @@ type SignaturePoint = {
   y: number;
 };
 
+type DispatchSignatureRequest = {
+  id: number;
+  signerEmail: string;
+  signerName?: string | null;
+  signerTitle?: string | null;
+  status: string;
+  sentAt?: string | null;
+  viewedAt?: string | null;
+  signedAt?: string | null;
+  changesRequestedAt?: string | null;
+  changesNote?: string | null;
+};
+
 type Dispatch = {
   id: number;
   loadNumber: string;
@@ -223,6 +236,7 @@ type Dispatch = {
   asset?: Asset | null;
   stops?: DispatchStop[];
   documents?: DispatchDocument[];
+  signatureRequests?: DispatchSignatureRequest[];
 };
 
 type GPSData = {
@@ -3870,6 +3884,19 @@ function LoadDetailScreen({
   const pending =
     load.assignmentStatus === "PENDING";
 
+  const ownerAuthorization =
+    load.signatureRequests?.[0] || null;
+
+  const ownerAuthorized =
+    ownerAuthorization?.status === "SIGNED";
+
+  const ownerAuthorizationLabel =
+    ownerAuthorized
+      ? "SIGNED · DRIVER MAY ACCEPT"
+      : ownerAuthorization?.status === "CHANGES_REQUESTED"
+        ? "CHANGES REQUESTED · ACCEPTANCE BLOCKED"
+        : "PENDING SIGNATURE · ACCEPTANCE BLOCKED";
+
   return (
     <SafeAreaView style={styles.app}>
       <StatusBar
@@ -4254,6 +4281,53 @@ function LoadDetailScreen({
         </View>
 
         {pending ? (
+          <View
+            style={{
+              marginTop: 14,
+              marginBottom: 4,
+              padding: 14,
+              borderRadius: 12,
+              borderWidth: 1,
+              borderColor: ownerAuthorized ? "#166534" : "#92400E",
+              backgroundColor: ownerAuthorized ? "#0D2818" : "#2A1B08",
+            }}
+          >
+            <Text
+              style={{
+                color: ownerAuthorized ? "#86EFAC" : "#FCD34D",
+                fontSize: 11,
+                fontWeight: "800",
+                letterSpacing: 0.6,
+              }}
+            >
+              OWNER AUTHORIZATION
+            </Text>
+            <Text
+              style={{
+                marginTop: 6,
+                color: "#F8FAFC",
+                fontSize: 14,
+                fontWeight: "800",
+              }}
+            >
+              {ownerAuthorizationLabel}
+            </Text>
+            {!ownerAuthorized ? (
+              <Text
+                style={{
+                  marginTop: 7,
+                  color: "#CBD5E1",
+                  fontSize: 12,
+                  lineHeight: 18,
+                }}
+              >
+                This load cannot be accepted until the company owner / authorized signer approves it.
+              </Text>
+            ) : null}
+          </View>
+        ) : null}
+
+        {pending ? (
           <View style={styles.responseRow}>
             <Pressable
               onPress={onDecline}
@@ -4269,8 +4343,12 @@ function LoadDetailScreen({
             </Pressable>
 
             <Pressable
-              onPress={onAccept}
-              style={styles.acceptButton}
+              onPress={ownerAuthorized ? onAccept : undefined}
+              disabled={!ownerAuthorized}
+              style={[
+                styles.acceptButton,
+                !ownerAuthorized && styles.buttonDisabled,
+              ]}
             >
               <Text
                 style={

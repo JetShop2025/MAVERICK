@@ -139,6 +139,20 @@ type DispatchShareRecord = {
   trackingUrl?: string
 }
 
+type DispatchSignatureRequestRecord = {
+  id: number
+  signerEmail: string
+  signerName?: string | null
+  signerTitle?: string | null
+  status: 'PENDING' | 'SIGNED' | 'CHANGES_REQUESTED' | string
+  sentAt?: string | null
+  viewedAt?: string | null
+  signedAt?: string | null
+  changesRequestedAt?: string | null
+  changesNote?: string | null
+  createdAt: string
+}
+
 type NotificationRecord = {
   id: number
   type: string
@@ -230,6 +244,7 @@ type DispatchRecord = {
   stops?: DispatchStopRecord[]
   documents?: DispatchDocumentRecord[]
   shares?: DispatchShareRecord[]
+  signatureRequests?: DispatchSignatureRequestRecord[]
 }
 
 type RoutePoint = {
@@ -2111,6 +2126,259 @@ function PublicLoadTrackingPage({
             </div>
           )
         }
+      </main>
+    </div>
+  )
+}
+
+function PublicSignaturePage({
+  token
+}: {
+  token: string
+}) {
+  const [data, setData] = useState<any>(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
+  const [signerName, setSignerName] = useState('')
+  const [signerTitle, setSignerTitle] = useState('')
+  const [changesNote, setChangesNote] = useState('')
+  const [submitting, setSubmitting] = useState(false)
+  const [signatureReady, setSignatureReady] = useState(false)
+  const canvasRef = useRef<HTMLCanvasElement | null>(null)
+  const drawingRef = useRef(false)
+
+  const loadRequest = useCallback(async () => {
+    try {
+      const response = await fetch(
+        `${API_BASE}/api/public/sign/${encodeURIComponent(token)}`
+      )
+      const payload = await response.json()
+      if (!response.ok || !payload.ok) {
+        throw new Error(payload.message || 'Signature request unavailable.')
+      }
+      setData(payload)
+      setSignerName(payload.request?.signerName || '')
+      setSignerTitle(payload.request?.signerTitle || '')
+      setError('')
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Unable to load signature request.')
+    } finally {
+      setLoading(false)
+    }
+  }, [token])
+
+  useEffect(() => {
+    void loadRequest()
+  }, [loadRequest])
+
+  useEffect(() => {
+    const canvas = canvasRef.current
+    if (!canvas || data?.request?.status !== 'PENDING') return
+    const rect = canvas.getBoundingClientRect()
+    const ratio = window.devicePixelRatio || 1
+    canvas.width = Math.max(1, Math.floor(rect.width * ratio))
+    canvas.height = Math.max(1, Math.floor(rect.height * ratio))
+    const ctx = canvas.getContext('2d')
+    if (!ctx) return
+    ctx.scale(ratio, ratio)
+    ctx.lineWidth = 2.4
+    ctx.lineCap = 'round'
+    ctx.lineJoin = 'round'
+    ctx.strokeStyle = '#0f172a'
+  }, [data?.request?.status])
+
+  const pointForEvent = (event: React.PointerEvent<HTMLCanvasElement>) => {
+    const canvas = canvasRef.current!
+    const rect = canvas.getBoundingClientRect()
+    return {
+      x: event.clientX - rect.left,
+      y: event.clientY - rect.top
+    }
+  }
+
+  const beginStroke = (event: React.PointerEvent<HTMLCanvasElement>) => {
+    const canvas = canvasRef.current
+    const ctx = canvas?.getContext('2d')
+    if (!canvas || !ctx) return
+    drawingRef.current = true
+    canvas.setPointerCapture(event.pointerId)
+    const point = pointForEvent(event)
+    ctx.beginPath()
+    ctx.moveTo(point.x, point.y)
+  }
+
+  const drawStroke = (event: React.PointerEvent<HTMLCanvasElement>) => {
+    if (!drawingRef.current) return
+    const ctx = canvasRef.current?.getContext('2d')
+    if (!ctx) return
+    const point = pointForEvent(event)
+    ctx.lineTo(point.x, point.y)
+    ctx.stroke()
+    setSignatureReady(true)
+  }
+
+  const endStroke = () => {
+    drawingRef.current = false
+  }
+
+  const clearSignature = () => {
+    const canvas = canvasRef.current
+    const ctx = canvas?.getContext('2d')
+    if (!canvas || !ctx) return
+    ctx.clearRect(0, 0, canvas.width, canvas.height)
+    setSignatureReady(false)
+  }
+
+  const submitAction = async (action: 'SIGN' | 'REQUEST_CHANGES') => {
+    if (action === 'SIGN') {
+      if (!signerName.trim()) {
+        setError('Enter the authorized signer name.')
+        return
+      }
+      if (!signatureReady || !canvasRef.current) {
+        setError('Sign in the signature box before submitting.')
+        return
+      }
+    } else if (changesNote.trim().length < 3) {
+      setError('Describe the changes you are requesting.')
+      return
+    }
+
+    setSubmitting(true)
+    setError('')
+    try {
+      const signatureDataBase64 =
+        action === 'SIGN' && canvasRef.current
+          ? canvasRef.current.toDataURL('image/png').split(',')[1]
+          : undefined
+
+      const response = await fetch(
+        `${API_BASE}/api/public/sign/${encodeURIComponent(token)}`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            action,
+            signerName: signerName.trim(),
+            signerTitle: signerTitle.trim(),
+            signatureDataBase64,
+            changesNote: changesNote.trim()
+          })
+        }
+      )
+      const payload = await response.json()
+      if (!response.ok || !payload.ok) {
+        throw new Error(payload.message || 'Unable to submit response.')
+      }
+      await loadRequest()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Unable to submit response.')
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  if (loading) {
+    return (
+      <div className="signature-public-shell">
+        <div className="signature-public-card signature-public-message">Loading secure confirmation…</div>
+      </div>
+    )
+  }
+
+  if (error && !data) {
+    return (
+      <div className="signature-public-shell">
+        <div className="signature-public-card signature-public-message">
+          <img src={maverickLogo} alt="MAVTRACK" />
+          <h2>Signature link unavailable</h2>
+          <p>{error}</p>
+        </div>
+      </div>
+    )
+  }
+
+  const request = data?.request
+  const dispatch = data?.dispatch
+  const status = String(request?.status || 'PENDING')
+
+  return (
+    <div className="signature-public-shell">
+      <main className="signature-public-card">
+        <header className="signature-public-header">
+          <div className="signature-public-brand">
+            <img src={maverickLogo} alt="MAVTRACK" />
+            <div><strong>MAVTRACK</strong><span>Secure Load Confirmation</span></div>
+          </div>
+          <span className={`signature-status ${status.toLowerCase()}`}>
+            {status === 'SIGNED' ? 'Signed' : status === 'CHANGES_REQUESTED' ? 'Changes Requested' : 'Pending Signature'}
+          </span>
+        </header>
+
+        <section className="signature-public-title">
+          <span>LOAD CONFIRMATION</span>
+          <h1>Load {dispatch?.loadNumber}</h1>
+          <p>Review the load details below before signing as the owner / authorized representative.</p>
+        </section>
+
+        <section className="signature-summary-grid">
+          <div><span>Pickup</span><strong>{dispatch?.pickupName}</strong><small>{dispatch?.pickupAddress}</small></div>
+          <div><span>Delivery</span><strong>{dispatch?.deliveryName}</strong><small>{dispatch?.deliveryAddress}</small></div>
+          <div><span>Carrier</span><strong>{dispatch?.carrierName || '—'}</strong></div>
+          <div><span>Lessor</span><strong>{dispatch?.lessorName || '—'}</strong></div>
+          <div><span>Truck</span><strong>{dispatch?.truckNumber || '—'}</strong></div>
+          <div><span>Trailer</span><strong>{dispatch?.trailerNumber || '—'}</strong></div>
+          <div><span>PO #</span><strong>{dispatch?.poNumber || '—'}</strong></div>
+          <div><span>B/L #</span><strong>{dispatch?.bolNumber || '—'}</strong></div>
+        </section>
+
+        {status === 'SIGNED' ? (
+          <section className="signature-complete-panel">
+            <div>✓</div>
+            <h2>Confirmation Signed</h2>
+            <p>{request?.signerName || request?.signerEmail} signed this load confirmation.</p>
+            {request?.signedAt && <small>{new Date(request.signedAt).toLocaleString()}</small>}
+          </section>
+        ) : status === 'CHANGES_REQUESTED' ? (
+          <section className="signature-complete-panel changes">
+            <div>!</div>
+            <h2>Changes Requested</h2>
+            <p>{request?.changesNote}</p>
+          </section>
+        ) : (
+          <>
+            <section className="signature-form-section">
+              <div className="signature-form-grid">
+                <label><span>Authorized Signer Name *</span><input value={signerName} onChange={(e) => setSignerName(e.target.value)} placeholder="Full legal name" /></label>
+                <label><span>Title / Position</span><input value={signerTitle} onChange={(e) => setSignerTitle(e.target.value)} placeholder="Owner, President, Manager…" /></label>
+                <label className="wide"><span>Signer Email</span><input value={request?.signerEmail || ''} readOnly /></label>
+              </div>
+
+              <div className="signature-pad-heading"><span>Electronic Signature *</span><button type="button" onClick={clearSignature}>Clear</button></div>
+              <canvas
+                ref={canvasRef}
+                className="signature-pad-canvas"
+                onPointerDown={beginStroke}
+                onPointerMove={drawStroke}
+                onPointerUp={endStroke}
+                onPointerCancel={endStroke}
+                onPointerLeave={endStroke}
+              />
+              <small className="signature-consent">By selecting “Sign Confirmation”, you confirm that you are authorized to sign for the company and agree that this electronic signature represents your approval of this load confirmation.</small>
+            </section>
+
+            <section className="signature-change-section">
+              <label><span>Need a correction?</span><textarea value={changesNote} onChange={(e) => setChangesNote(e.target.value)} placeholder="Describe the changes needed before you can sign…" /></label>
+            </section>
+
+            {error && <div className="signature-public-error">{error}</div>}
+
+            <div className="signature-public-actions">
+              <button type="button" className="signature-change-button" disabled={submitting} onClick={() => void submitAction('REQUEST_CHANGES')}>Request Changes</button>
+              <button type="button" className="signature-sign-button" disabled={submitting} onClick={() => void submitAction('SIGN')}>{submitting ? 'Submitting…' : 'Sign Confirmation'}</button>
+            </div>
+          </>
+        )}
       </main>
     </div>
   )
@@ -8864,6 +9132,19 @@ function App() {
     }
   }
 
+  const publicSignatureMatch =
+    window.location.pathname.match(
+      /^\/sign\/([a-f0-9]{64})$/i
+    )
+
+  if (publicSignatureMatch) {
+    return (
+      <PublicSignaturePage
+        token={publicSignatureMatch[1]}
+      />
+    )
+  }
+
   const publicTrackingMatch =
     window.location.pathname.match(
       /^\/track\/([a-f0-9]{32,})$/i
@@ -12512,6 +12793,25 @@ function App() {
                                   }
                                 </section>
 
+                                {(() => {
+                                  const ownerSignatureDocument =
+                                    (dispatch.documents || []).find(
+                                      (document) =>
+                                        document.isSignature &&
+                                        String(document.description || '').toLowerCase().includes('owner / authorized signer')
+                                    )
+
+                                  const driverSignatureDocument =
+                                    (dispatch.documents || []).find(
+                                      (document) =>
+                                        document.isSignature &&
+                                        String(document.description || '').toLowerCase().includes('driver acceptance signature')
+                                    )
+
+                                  const ownerSignatureStatus =
+                                    dispatch.signatureRequests?.[0]?.status || 'PENDING'
+
+                                  return (
                                 <section className="operations-progress-card operations-documents-card">
                                   <div className="operations-card-heading-row">
                                     <div>
@@ -12522,6 +12822,22 @@ function App() {
                                         Documents & Signatures
                                       </h3>
                                     </div>
+
+                                    {
+                                      dispatch.signatureRequests?.[0] && (
+                                        <div className={`operations-signature-state ${String(dispatch.signatureRequests[0].status).toLowerCase()}`}>
+                                          <span>Owner Confirmation</span>
+                                          <strong>
+                                            {dispatch.signatureRequests[0].status === 'SIGNED'
+                                              ? 'Signed'
+                                              : dispatch.signatureRequests[0].status === 'CHANGES_REQUESTED'
+                                                ? 'Changes Requested'
+                                                : 'Pending Signature'}
+                                          </strong>
+                                          <small>{dispatch.signatureRequests[0].signerEmail}</small>
+                                        </div>
+                                      )
+                                    }
 
                                     <label className="secondary-action dispatch-document-upload">
                                       {
@@ -12550,6 +12866,38 @@ function App() {
                                         }}
                                       />
                                     </label>
+                                  </div>
+
+                                  <div className="operations-signature-packet">
+                                    <div className={`operations-signature-page ${ownerSignatureDocument ? 'complete' : 'pending'}`}>
+                                      <div>
+                                        <span>PAGE 1</span>
+                                        <strong>Owner Authorization</strong>
+                                        <small>
+                                          {ownerSignatureStatus === 'SIGNED'
+                                            ? `Signed${dispatch.signatureRequests?.[0]?.signerName ? ` by ${dispatch.signatureRequests[0].signerName}` : ''}`
+                                            : ownerSignatureStatus === 'CHANGES_REQUESTED'
+                                              ? 'Changes requested'
+                                              : 'Waiting for owner signature'}
+                                        </small>
+                                      </div>
+                                      <b>{ownerSignatureDocument ? 'SIGNED ✓' : ownerSignatureStatus === 'CHANGES_REQUESTED' ? 'CHANGES' : 'PENDING'}</b>
+                                    </div>
+
+                                    <div className={`operations-signature-page ${driverSignatureDocument ? 'complete' : ownerSignatureStatus === 'SIGNED' ? 'ready' : 'blocked'}`}>
+                                      <div>
+                                        <span>PAGE 2</span>
+                                        <strong>Driver Acceptance</strong>
+                                        <small>
+                                          {driverSignatureDocument
+                                            ? `Signed${driverSignatureDocument.signedBy ? ` by ${driverSignatureDocument.signedBy}` : ''}`
+                                            : ownerSignatureStatus === 'SIGNED'
+                                              ? 'Owner approved · waiting for driver acceptance'
+                                              : 'Blocked until owner authorization is signed'}
+                                        </small>
+                                      </div>
+                                      <b>{driverSignatureDocument ? 'SIGNED ✓' : ownerSignatureStatus === 'SIGNED' ? 'READY' : 'BLOCKED'}</b>
+                                    </div>
                                   </div>
 
                                   {
@@ -12610,6 +12958,8 @@ function App() {
                                       )
                                   }
                                 </section>
+                                  )
+                                })()}
 
                                 <section className="operations-progress-card">
                                   <div className="operations-card-heading-row">

@@ -212,6 +212,7 @@ type DispatchRecord = {
 
   driverId?: number | null
   manualDriverName?: string | null
+  authorizedSignerEmail?: string | null
   assignmentStatus?: 'UNASSIGNED' | 'PENDING' | 'ACCEPTED' | 'DECLINED'
   acceptedAt?: string | null
   declinedAt?: string | null
@@ -492,6 +493,7 @@ type CustomerLocationSuggestion = {
   customerName: string
   address: string
   phone?: string | null
+  authorizedSignerEmail?: string | null
   latitude?: number | null
   longitude?: number | null
 }
@@ -2385,6 +2387,7 @@ function App() {
     trailerLicense: '',
     carrierName: '',
     lessorName: '',
+    authorizedSignerEmail: '',
     pickupCustomerCode: '',
     pickupName: '',
     pickupAddress: '',
@@ -2511,6 +2514,7 @@ function App() {
     trailerLicense: '',
     carrierName: '',
     lessorName: '',
+    authorizedSignerEmail: '',
     pickupCustomerCode: '',
     pickupName: '',
     pickupAddress: '',
@@ -4255,6 +4259,7 @@ function App() {
       trailerLicense: '',
       carrierName: '',
       lessorName: '',
+      authorizedSignerEmail: '',
       pickupCustomerCode: '',
       pickupName: '',
       pickupAddress: '',
@@ -4321,6 +4326,23 @@ function App() {
       ) {
         setDispatchError(
           'Load number, pickup and delivery are required.'
+        )
+        return
+      }
+
+      const authorizedSignerEmail =
+        newDispatchForm.authorizedSignerEmail
+          .trim()
+          .toLowerCase()
+
+      if (
+        !authorizedSignerEmail ||
+        !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(
+          authorizedSignerEmail
+        )
+      ) {
+        setDispatchError(
+          'Owner / authorized signer email is required.'
         )
         return
       }
@@ -4425,6 +4447,7 @@ function App() {
                   newDispatchForm.carrierName,
                 lessorName:
                   newDispatchForm.lessorName,
+                authorizedSignerEmail,
                 pickupPhone:
                   newDispatchForm.pickupPhone,
                 pickupReference:
@@ -4616,6 +4639,8 @@ function App() {
         dispatch.carrierName || '',
       lessorName:
         dispatch.lessorName || '',
+      authorizedSignerEmail:
+        dispatch.authorizedSignerEmail || '',
       pickupCustomerCode:
         primaryPickupStop?.customerCode || '',
       pickupName:
@@ -4799,6 +4824,23 @@ function App() {
         return
       }
 
+      const authorizedSignerEmail =
+        editDispatchForm.authorizedSignerEmail
+          .trim()
+          .toLowerCase()
+
+      if (
+        !authorizedSignerEmail ||
+        !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(
+          authorizedSignerEmail
+        )
+      ) {
+        setDispatchError(
+          'Owner / authorized signer email is required.'
+        )
+        return
+      }
+
       const minF =
         editDispatchForm
           .temperatureMinF.trim()
@@ -4914,6 +4956,7 @@ function App() {
                   editDispatchForm.carrierName,
                 lessorName:
                   editDispatchForm.lessorName,
+                authorizedSignerEmail,
                 pickupPhone:
                   editDispatchForm.pickupPhone,
                 pickupReference:
@@ -13243,6 +13286,23 @@ function App() {
                                 placeholder="Carrier / lessor"
                               />
                             </label>
+                            <label className="wide">
+                              <span>Owner / Authorized Signer Email *</span>
+                              <input
+                                type="email"
+                                value={newDispatchForm.authorizedSignerEmail}
+                                onChange={(event) =>
+                                  setNewDispatchForm((current) => ({
+                                    ...current,
+                                    authorizedSignerEmail:
+                                      event.target.value
+                                  }))
+                                }
+                                placeholder="owner@company.com"
+                                autoCapitalize="none"
+                                autoComplete="email"
+                              />
+                            </label>
                           </div>
                         </section>
                         <section className="dispatch-form-group dispatch-pair-primary pickup">
@@ -13264,6 +13324,9 @@ function App() {
                                     pickupName: location.customerName,
                                     pickupAddress: location.address,
                                     pickupPhone: formatDispatchPhone(location.phone || ''),
+                                    authorizedSignerEmail:
+                                      location.authorizedSignerEmail ||
+                                      current.authorizedSignerEmail,
                                     pickupLatitude: location.latitude ?? null,
                                     pickupLongitude: location.longitude ?? null
                                   }))
@@ -13897,6 +13960,23 @@ function App() {
                                 placeholder="Carrier / lessor"
                               />
                             </label>
+                            <label className="wide">
+                              <span>Owner / Authorized Signer Email *</span>
+                              <input
+                                type="email"
+                                value={editDispatchForm.authorizedSignerEmail}
+                                onChange={(event) =>
+                                  setEditDispatchForm((current) => ({
+                                    ...current,
+                                    authorizedSignerEmail:
+                                      event.target.value
+                                  }))
+                                }
+                                placeholder="owner@company.com"
+                                autoCapitalize="none"
+                                autoComplete="email"
+                              />
+                            </label>
                           </div>
                         </section>
                         <section className="dispatch-form-group dispatch-pair-primary pickup">
@@ -13918,6 +13998,9 @@ function App() {
                                     pickupName: location.customerName,
                                     pickupAddress: location.address,
                                     pickupPhone: formatDispatchPhone(location.phone || ''),
+                                    authorizedSignerEmail:
+                                      location.authorizedSignerEmail ||
+                                      current.authorizedSignerEmail,
                                     pickupLatitude: location.latitude ?? null,
                                     pickupLongitude: location.longitude ?? null
                                   }))

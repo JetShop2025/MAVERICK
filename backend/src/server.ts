@@ -3946,9 +3946,25 @@ function internalAddressCode(address: string) {
 
 async function rememberCustomerLocations(
   companyId: number,
-  stops: DispatchStopInput[]
+  stops: DispatchStopInput[],
+  authorizedSignerEmail?: string | null
 ) {
+  const primaryPickup =
+    [...stops]
+      .filter((stop) => stop.type === 'PICKUP')
+      .sort(
+        (a, b) =>
+          (a.pairNumber || a.sequence) -
+          (b.pairNumber || b.sequence)
+      )[0] || null
+
   for (const stop of stops) {
+    const shouldRememberSigner =
+      Boolean(
+        authorizedSignerEmail &&
+        primaryPickup &&
+        stop.sequence === primaryPickup.sequence
+      )
     if (!stop.name || !stop.address) continue
 
     const requestedCode = normalizeCustomerCode(stop.customerCode)
@@ -3995,6 +4011,12 @@ async function rememberCustomerLocations(
             customerName: stop.name,
             address: stop.address,
             phone: stop.phone,
+            ...(shouldRememberSigner
+              ? {
+                  authorizedSignerEmail:
+                  authorizedSignerEmail ?? null
+                }
+              : {}),
             latitude: stop.latitude,
             longitude: stop.longitude,
             lastUsedAt: new Date()
@@ -4015,6 +4037,12 @@ async function rememberCustomerLocations(
         customerName: stop.name,
         address: stop.address,
         phone: stop.phone,
+        ...(shouldRememberSigner
+          ? {
+              authorizedSignerEmail:
+                  authorizedSignerEmail ?? null
+            }
+          : {}),
         latitude: stop.latitude,
         longitude: stop.longitude,
         lastUsedAt: new Date()
@@ -4025,6 +4053,12 @@ async function rememberCustomerLocations(
         customerName: stop.name,
         address: stop.address,
         phone: stop.phone,
+        ...(shouldRememberSigner
+          ? {
+              authorizedSignerEmail:
+                  authorizedSignerEmail ?? null
+            }
+          : {}),
         latitude: stop.latitude,
         longitude: stop.longitude,
         lastUsedAt: new Date()
@@ -4144,6 +4178,8 @@ app.get(
             : location.code,
           customerName: location.customerName,
           phone: location.phone,
+          authorizedSignerEmail:
+            location.authorizedSignerEmail,
           city: location.city,
           state: null,
           postcode: null,
@@ -4783,6 +4819,24 @@ app.post(
           req.body?.deliveryAddress
         )
 
+      const authorizedSignerEmail =
+        optionalString(
+          req.body?.authorizedSignerEmail
+        )?.toLowerCase()
+
+      if (
+        !authorizedSignerEmail ||
+        !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(
+          authorizedSignerEmail
+        )
+      ) {
+        return res.status(400).json({
+          ok: false,
+          message:
+            'Owner / authorized signer email is required and must be valid'
+        })
+      }
+
       if (
         !pickupName ||
         !pickupAddress ||
@@ -5074,6 +5128,7 @@ app.post(
                 : 'UNASSIGNED',
             acceptedAt: null,
             declinedAt: null,
+            authorizedSignerEmail,
             loadNumber,
             status: requestedStatus,
 
@@ -5283,7 +5338,8 @@ app.post(
 
       await rememberCustomerLocations(
         companyId,
-        dispatchStops
+        dispatchStops,
+        authorizedSignerEmail
       )
 
       if (
@@ -5541,6 +5597,32 @@ app.patch(
         }
       }
 
+      if (
+        req.body?.authorizedSignerEmail !==
+        undefined
+      ) {
+        const authorizedSignerEmail =
+          optionalString(
+            req.body.authorizedSignerEmail
+          )?.toLowerCase()
+
+        if (
+          !authorizedSignerEmail ||
+          !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(
+            authorizedSignerEmail
+          )
+        ) {
+          return res.status(400).json({
+            ok: false,
+            message:
+              'Owner / authorized signer email is required and must be valid'
+          })
+        }
+
+        data.authorizedSignerEmail =
+          authorizedSignerEmail
+      }
+
       const stringFields = [
         'loadNumber',
         'manualDriverName',
@@ -5720,10 +5802,15 @@ app.patch(
           }
         })
 
-      if (updatedStopsForCatalog) {
+      if (
+        updatedStopsForCatalog ||
+        req.body?.authorizedSignerEmail !==
+          undefined
+      ) {
         await rememberCustomerLocations(
           companyId,
-          updatedStopsForCatalog
+          updated.stops,
+          updated.authorizedSignerEmail
         )
       }
 

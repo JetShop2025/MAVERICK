@@ -246,6 +246,8 @@ model Dispatch {
   declinedAt       DateTime?
   manualDriverName String?
 
+  authorizedSignerEmail String?
+
   pickupName        String
   pickupAddress     String
   pickupLatitude    Float?
@@ -362,14 +364,15 @@ model CustomerLocation {
   companyId Int
   company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
 
-  code         String
-  customerName String
-  address      String
-  phone        String?
-  city         String?
-  latitude     Float?
-  longitude    Float?
-  lastUsedAt   DateTime @default(now())
+  code                  String
+  customerName          String
+  address               String
+  phone                 String?
+  authorizedSignerEmail String?
+  city                  String?
+  latitude              Float?
+  longitude             Float?
+  lastUsedAt            DateTime @default(now())
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

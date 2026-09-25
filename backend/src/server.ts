@@ -239,6 +239,213 @@ async function createNotificationEvent({
   })
 }
 
+
+const EXPO_PUSH_ACCESS_TOKEN =
+  process.env.EXPO_PUSH_ACCESS_TOKEN?.trim() || ''
+
+function isExpoPushToken(
+  value: unknown
+) {
+  return (
+    typeof value === 'string' &&
+    /^(Expo|Exponent)PushToken\[[^\]]+\]$/.test(
+      value.trim()
+    )
+  )
+}
+
+async function sendExpoPushToUser({
+  userId,
+  title,
+  body,
+  data,
+  badge
+}: {
+  userId: number
+  title: string
+  body: string
+  data: Record<string, string>
+  badge?: number
+}) {
+  try {
+    const devices =
+      await prisma.pushDevice.findMany({
+        where: {
+          userId,
+          active: true
+        },
+        select: {
+          id: true,
+          token: true
+        }
+      })
+
+    const validDevices =
+      devices.filter((device) =>
+        isExpoPushToken(device.token)
+      )
+
+    if (validDevices.length === 0) {
+      return {
+        ok: false,
+        skipped: true,
+        sent: 0
+      }
+    }
+
+    const messages =
+      validDevices.map((device) => ({
+        to: device.token,
+        sound: 'default',
+        title,
+        body,
+        data,
+        badge:
+          typeof badge === 'number'
+            ? Math.max(0, Math.floor(badge))
+            : undefined,
+        priority: 'high'
+      }))
+
+    const response =
+      await fetch(
+        'https://exp.host/--/api/v2/push/send',
+        {
+          method: 'POST',
+          headers: {
+            Accept: 'application/json',
+            'Content-Type': 'application/json',
+            ...(EXPO_PUSH_ACCESS_TOKEN
+              ? {
+                  Authorization:
+                    `Bearer ${EXPO_PUSH_ACCESS_TOKEN}`
+                }
+              : {})
+          },
+          body: JSON.stringify(messages)
+        }
+      )
+
+    const payload =
+      await response.json().catch(() => null)
+
+    if (!response.ok) {
+      console.error(
+        'Expo push delivery failed:',
+        response.status,
+        payload
+      )
+
+      return {
+        ok: false,
+        skipped: false,
+        sent: 0
+      }
+    }
+
+    const tickets =
+      Array.isArray(payload?.data)
+        ? payload.data
+        : payload?.data
+          ? [payload.data]
+          : []
+
+    const disabledDeviceIds: number[] = []
+
+    tickets.forEach(
+      (ticket: any, index: number) => {
+        if (
+          ticket?.status === 'error' &&
+          ticket?.details?.error ===
+            'DeviceNotRegistered'
+        ) {
+          const device =
+            validDevices[index]
+
+          if (device) {
+            disabledDeviceIds.push(
+              device.id
+            )
+          }
+        }
+      }
+    )
+
+    if (disabledDeviceIds.length > 0) {
+      await prisma.pushDevice.updateMany({
+        where: {
+          id: {
+            in: disabledDeviceIds
+          }
+        },
+        data: {
+          active: false
+        }
+      })
+    }
+
+    return {
+      ok: true,
+      skipped: false,
+      sent:
+        validDevices.length -
+        disabledDeviceIds.length
+    }
+  } catch (error) {
+    console.error(
+      'Expo push delivery error:',
+      error
+    )
+
+    return {
+      ok: false,
+      skipped: false,
+      sent: 0
+    }
+  }
+}
+
+async function sendLoadAssignmentPush({
+  driverId,
+  dispatchId,
+  loadNumber,
+  pickupName,
+  deliveryName
+}: {
+  driverId: number
+  dispatchId: number
+  loadNumber: string
+  pickupName: string
+  deliveryName: string
+}) {
+  const pendingCount =
+    await prisma.dispatch.count({
+      where: {
+        driverId,
+        assignmentStatus: 'PENDING',
+        status: {
+          notIn: [
+            'DELIVERED',
+            'CANCELLED'
+          ]
+        }
+      }
+    })
+
+  return sendExpoPushToUser({
+    userId: driverId,
+    title: 'New Load Assigned',
+    body:
+      `Load ${loadNumber} is pending acceptance. ${pickupName} → ${deliveryName}`,
+    badge: Math.max(1, pendingCount),
+    data: {
+      type: 'LOAD_ASSIGNMENT',
+      dispatchId: String(dispatchId),
+      loadNumber
+    }
+  })
+}
+
 function normalizeCustomerCode(value: unknown) {
   return String(value ?? '')
     .toUpperCase()
@@ -2106,6 +2313,152 @@ app.patch(
         ok: false,
         message:
           'Unable to update driver profile'
+      })
+    }
+  }
+)
+
+
+app.post(
+  '/api/driver/push-token',
+  requireAuth,
+  async (
+    req: AuthenticatedRequest,
+    res: Response
+  ) => {
+    try {
+      if (!isDriver(req.user?.role)) {
+        return res.status(403).json({
+          ok: false,
+          message: 'Driver account required'
+        })
+      }
+
+      const token =
+        optionalString(
+          req.body?.token
+        )
+
+      const platform =
+        optionalString(
+          req.body?.platform
+        )?.toLowerCase() || 'ios'
+
+      if (
+        !token ||
+        !isExpoPushToken(token) ||
+        token.length > 512
+      ) {
+        return res.status(400).json({
+          ok: false,
+          message:
+            'Invalid push notification token'
+        })
+      }
+
+      const pushDevice =
+        await prisma.pushDevice.upsert({
+          where: {
+            token
+          },
+          update: {
+            userId:
+              req.user!.userId,
+            platform:
+              platform.slice(0, 20),
+            active: true,
+            lastRegisteredAt:
+              new Date()
+          },
+          create: {
+            token,
+            userId:
+              req.user!.userId,
+            platform:
+              platform.slice(0, 20),
+            active: true,
+            lastRegisteredAt:
+              new Date()
+          },
+          select: {
+            id: true,
+            platform: true,
+            active: true,
+            lastRegisteredAt: true
+          }
+        })
+
+      return res.json({
+        ok: true,
+        pushDevice
+      })
+    } catch (error) {
+      console.error(
+        'Register driver push token error:',
+        error
+      )
+
+      return res.status(500).json({
+        ok: false,
+        message:
+          'Unable to register notifications'
+      })
+    }
+  }
+)
+
+app.delete(
+  '/api/driver/push-token',
+  requireAuth,
+  async (
+    req: AuthenticatedRequest,
+    res: Response
+  ) => {
+    try {
+      if (!isDriver(req.user?.role)) {
+        return res.status(403).json({
+          ok: false,
+          message: 'Driver account required'
+        })
+      }
+
+      const token =
+        optionalString(
+          req.body?.token
+        )
+
+      if (!token) {
+        return res.status(400).json({
+          ok: false,
+          message:
+            'Push notification token is required'
+        })
+      }
+
+      await prisma.pushDevice.updateMany({
+        where: {
+          userId:
+            req.user!.userId,
+          token
+        },
+        data: {
+          active: false
+        }
+      })
+
+      return res.json({
+        ok: true
+      })
+    } catch (error) {
+      console.error(
+        'Disable driver push token error:',
+        error
+      )
+
+      return res.status(500).json({
+        ok: false,
+        message:
+          'Unable to disable notifications'
       })
     }
   }
@@ -4933,6 +5286,24 @@ app.post(
         dispatchStops
       )
 
+      if (
+        dispatch.driverId != null &&
+        dispatch.assignmentStatus === 'PENDING'
+      ) {
+        await sendLoadAssignmentPush({
+          driverId:
+            dispatch.driverId,
+          dispatchId:
+            dispatch.id,
+          loadNumber:
+            dispatch.loadNumber,
+          pickupName:
+            dispatch.pickupName,
+          deliveryName:
+            dispatch.deliveryName
+        })
+      }
+
       return res.status(201).json({
         ok: true,
         dispatch
@@ -5010,6 +5381,7 @@ app.patch(
 
       const data: Record<string, any> = {}
       let updatedStopsForCatalog: DispatchStopInput[] | null = null
+      let notifyAssignedDriverId: number | null = null
 
       if (
         req.body?.assetId !== undefined
@@ -5151,11 +5523,20 @@ app.patch(
             })
           }
 
-          if (existing.driverId !== driver.id) {
+          const isNewPendingAssignment =
+            existing.driverId !== driver.id ||
+            existing.assignmentStatus ===
+              'DECLINED' ||
+            existing.assignmentStatus ===
+              'UNASSIGNED'
+
+          if (isNewPendingAssignment) {
             data.driverId = driver.id
             data.assignmentStatus = 'PENDING'
             data.acceptedAt = null
             data.declinedAt = null
+            notifyAssignedDriverId =
+              driver.id
           }
         }
       }
@@ -5344,6 +5725,27 @@ app.patch(
           companyId,
           updatedStopsForCatalog
         )
+      }
+
+      if (
+        notifyAssignedDriverId != null &&
+        updated.driverId ===
+          notifyAssignedDriverId &&
+        updated.assignmentStatus ===
+          'PENDING'
+      ) {
+        await sendLoadAssignmentPush({
+          driverId:
+            notifyAssignedDriverId,
+          dispatchId:
+            updated.id,
+          loadNumber:
+            updated.loadNumber,
+          pickupName:
+            updated.pickupName,
+          deliveryName:
+            updated.deliveryName
+        })
       }
 
       return res.json({

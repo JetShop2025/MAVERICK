@@ -23,6 +23,8 @@ import * as SecureStore from "expo-secure-store";
 import * as ImagePicker from "expo-image-picker";
 import * as DocumentPicker from "expo-document-picker";
 import * as FileSystem from "expo-file-system/legacy";
+import * as Notifications from "expo-notifications";
+import Constants from "expo-constants";
 import {
   nativeGpsAvailable,
   startNativeGps,
@@ -32,6 +34,14 @@ import {
   type NativeGpsDiagnostics,
 } from "./modules/mavtrack-native-gps/src";
 
+Notifications.setNotificationHandler({
+  handleNotification: async () => ({
+    shouldShowBanner: true,
+    shouldShowList: true,
+    shouldPlaySound: true,
+    shouldSetBadge: true,
+  }),
+});
 
 (Text as any).defaultProps = {
   ...((Text as any).defaultProps || {}),
@@ -54,6 +64,7 @@ const BACKGROUND_LOCATION_TASK =
 
 const TOKEN_KEY = "mavtrack_driver_token";
 const USER_KEY = "mavtrack_driver_user";
+const PUSH_TOKEN_KEY = "mavtrack_driver_push_token";
 const TRACKING_DEVICE_KEY =
   "mavtrack_tracking_device_id";
 
@@ -735,6 +746,48 @@ export default function App() {
   }, [token]);
 
   useEffect(() => {
+    if (!token) return;
+
+    void registerPushNotifications();
+
+    const receivedSubscription =
+      Notifications.addNotificationReceivedListener(
+        () => {
+          void loadAssignments();
+        }
+      );
+
+    const responseSubscription =
+      Notifications.addNotificationResponseReceivedListener(
+        (response) => {
+          void openLoadFromNotification(
+            response
+          );
+        }
+      );
+
+    void Notifications
+      .getLastNotificationResponseAsync()
+      .then(async (response) => {
+        if (!response) return;
+
+        await openLoadFromNotification(
+          response
+        );
+
+        await Notifications
+          .clearLastNotificationResponseAsync()
+          .catch(() => undefined);
+      })
+      .catch(() => undefined);
+
+    return () => {
+      receivedSubscription.remove();
+      responseSubscription.remove();
+    };
+  }, [token]);
+
+  useEffect(() => {
     if (Platform.OS !== "ios") void checkBackgroundTracking();
   }, []);
 
@@ -1091,6 +1144,147 @@ export default function App() {
     }
   }
 
+  async function registerPushNotifications() {
+    if (!token) return;
+
+    try {
+      let permissions =
+        await Notifications.getPermissionsAsync();
+
+      const permissionAlreadyAllowed =
+        permissions.granted ||
+        permissions.ios?.status ===
+          Notifications.IosAuthorizationStatus.PROVISIONAL;
+
+      if (!permissionAlreadyAllowed) {
+        permissions =
+          await Notifications.requestPermissionsAsync({
+            ios: {
+              allowAlert: true,
+              allowBadge: true,
+              allowSound: true,
+            },
+          });
+      }
+
+      const permissionAllowed =
+        permissions.granted ||
+        permissions.ios?.status ===
+          Notifications.IosAuthorizationStatus.PROVISIONAL;
+
+      if (!permissionAllowed) {
+        return;
+      }
+
+      const projectId =
+        Constants.easConfig?.projectId ||
+        Constants.expoConfig?.extra?.eas?.projectId;
+
+      if (!projectId) {
+        throw new Error(
+          "EAS project ID is missing."
+        );
+      }
+
+      const expoPushToken =
+        (
+          await Notifications.getExpoPushTokenAsync({
+            projectId,
+          })
+        ).data;
+
+      await SecureStore.setItemAsync(
+        PUSH_TOKEN_KEY,
+        expoPushToken
+      );
+
+      await apiFetch(
+        "/api/driver/push-token",
+        {
+          method: "POST",
+          body: JSON.stringify({
+            token: expoPushToken,
+            platform: Platform.OS,
+          }),
+        }
+      );
+    } catch (err) {
+      console.warn(
+        "Push notification registration failed:",
+        err
+      );
+    }
+  }
+
+  async function openLoadFromNotification(
+    response: Notifications.NotificationResponse
+  ) {
+    if (!token) return;
+
+    const data =
+      response.notification.request.content.data ||
+      {};
+
+    if (
+      String(data.type || "") !==
+      "LOAD_ASSIGNMENT"
+    ) {
+      return;
+    }
+
+    const dispatchId =
+      Number(data.dispatchId);
+
+    if (!Number.isInteger(dispatchId)) {
+      return;
+    }
+
+    try {
+      const payload =
+        await apiFetch(
+          "/api/driver/assignments"
+        );
+
+      const rows: Dispatch[] =
+        payload.dispatches ||
+        payload.assignments ||
+        [];
+
+      setAssignments(rows);
+
+      const target =
+        rows.find(
+          (row) =>
+            row.id === dispatchId
+        ) || null;
+
+      if (!target) {
+        return;
+      }
+
+      setLoadFilter(
+        target.assignmentStatus === "PENDING"
+          ? "pending"
+          : target.assignmentStatus === "ACCEPTED"
+            ? "active"
+            : "completed"
+      );
+
+      setTab("loads");
+      setSelectedLoad(target);
+
+      await Notifications
+        .clearLastNotificationResponseAsync()
+        .catch(() => undefined);
+    } catch (err) {
+      setAppError(
+        err instanceof Error
+          ? err.message
+          : "Unable to open assigned load."
+      );
+    }
+  }
+
   async function logout() {
     if (Platform.OS === "ios" && nativeGpsAvailable) {
       try {
@@ -1098,6 +1292,38 @@ export default function App() {
         if (state.running) await stopTracking();
       } catch { /* stop status is shown in App */ }
     }
+
+    const savedPushToken =
+      await SecureStore.getItemAsync(
+        PUSH_TOKEN_KEY
+      );
+
+    if (savedPushToken && token) {
+      try {
+        await fetch(
+          `${API_URL}/api/driver/push-token`,
+          {
+            method: "DELETE",
+            headers: {
+              "Content-Type":
+                "application/json",
+              Authorization:
+                `Bearer ${token}`,
+            },
+            body: JSON.stringify({
+              token: savedPushToken,
+            }),
+          }
+        );
+      } catch {
+        // Signing out should not be blocked by push cleanup.
+      }
+    }
+
+    await SecureStore.deleteItemAsync(
+      PUSH_TOKEN_KEY
+    );
+
     await SecureStore.deleteItemAsync(
       TOKEN_KEY
     );
@@ -1154,6 +1380,21 @@ export default function App() {
         [];
 
       setAssignments(rows);
+
+      const pendingBadgeCount =
+        rows.filter(
+          (row: Dispatch) =>
+            row.assignmentStatus ===
+              "PENDING" &&
+            row.status !== "DELIVERED" &&
+            row.status !== "CANCELLED"
+        ).length;
+
+      void Notifications
+        .setBadgeCountAsync(
+          pendingBadgeCount
+        )
+        .catch(() => undefined);
 
       if (selectedLoad) {
         const updated = rows.find(

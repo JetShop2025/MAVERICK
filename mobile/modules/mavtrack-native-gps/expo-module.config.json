@@ -1,0 +1,8 @@
+{
+  "platforms": ["ios"],
+  "apple": {
+    "modules": ["MavtrackNativeGpsModule"],
+    "appDelegateSubscribers": ["MavtrackNativeGpsAppDelegateSubscriber"],
+    "podspecPath": "ios/MavtrackNativeGps.podspec"
+  }
+}

@@ -116,11 +116,10 @@ model Asset {
   companyId Int
   company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
 
-  telemetry         Telemetry[]
-  dispatches        Dispatch[]
-  notifications     NotificationEvent[]
-  signatureRequests DispatchSignatureRequest[]
-  cameras           Camera[]
+  telemetry     Telemetry[]
+  dispatches    Dispatch[]
+  notifications NotificationEvent[]
+  cameras       Camera[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -458,8 +457,6 @@ model DispatchSignatureRequest {
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
-  asset     Asset?   @relation(fields: [assetId], references: [id])
-  assetId   Int?
 
   @@index([dispatchId, createdAt])
   @@index([signerEmail])

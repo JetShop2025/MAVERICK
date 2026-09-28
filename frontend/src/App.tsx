@@ -2384,6 +2384,404 @@ function PublicSignaturePage({
   )
 }
 
+function LoadDocumentPacketPage({
+  dispatchId
+}: {
+  dispatchId: number
+}) {
+  const [data, setData] = useState<any>(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
+
+  const loadPacket = useCallback(async () => {
+    const token = localStorage.getItem('maverick_token')
+    if (!token) {
+      setError('Sign in to MAVTRACK before opening this load packet.')
+      setLoading(false)
+      return
+    }
+
+    try {
+      const response = await fetch(
+        `${API_BASE}/api/dispatches/${dispatchId}/document-packet`,
+        {
+          headers: {
+            Authorization: `Bearer ${token}`
+          }
+        }
+      )
+      const payload = await response.json()
+      if (!response.ok || !payload.ok) {
+        throw new Error(payload.message || 'Unable to load document packet.')
+      }
+      setData(payload)
+      setError('')
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Unable to load document packet.')
+    } finally {
+      setLoading(false)
+    }
+  }, [dispatchId])
+
+  useEffect(() => {
+    void loadPacket()
+  }, [loadPacket])
+
+  const fmt = (value?: string | null) => {
+    if (!value) return '—'
+    const date = new Date(value)
+    return Number.isNaN(date.getTime()) ? '—' : date.toLocaleString()
+  }
+
+  const value = (input?: string | number | null) =>
+    input == null || String(input).trim() === '' ? '—' : String(input)
+
+  if (loading) {
+    return (
+      <div className="packet-shell packet-message-shell">
+        <div className="packet-message-card">Loading Load Document Packet…</div>
+      </div>
+    )
+  }
+
+  if (error || !data?.dispatch) {
+    return (
+      <div className="packet-shell packet-message-shell">
+        <div className="packet-message-card">
+          <img src={maverickLogo} alt="MAVTRACK" />
+          <h2>Document packet unavailable</h2>
+          <p>{error || 'Load not found.'}</p>
+        </div>
+      </div>
+    )
+  }
+
+  const dispatch = data.dispatch
+  const request = dispatch.signatureRequests?.[0] || null
+  const documents = Array.isArray(dispatch.documents) ? dispatch.documents : []
+  const ownerDocument = documents.find(
+    (document: any) =>
+      document.isSignature &&
+      String(document.description || '').toLowerCase().includes('owner / authorized signer')
+  )
+  const driverDocument = documents.find(
+    (document: any) =>
+      document.isSignature &&
+      String(document.description || '').toLowerCase().includes('driver acceptance signature')
+  )
+  const supportingDocuments = documents.filter(
+    (document: any) => !document.isSignature
+  )
+  const driver = dispatch.driver || null
+  const profile = driver?.driverProfile || null
+  const driverName =
+    [profile?.firstName, profile?.lastName].filter(Boolean).join(' ').trim() ||
+    driver?.name ||
+    dispatch.manualDriverName ||
+    '—'
+  const orderedStops = Array.isArray(dispatch.stops)
+    ? [...dispatch.stops].sort((a: any, b: any) => a.sequence - b.sequence)
+    : []
+
+  const documentDataUri = (document: any) =>
+    document?.dataBase64
+      ? `data:${document.mimeType};base64,${document.dataBase64}`
+      : ''
+
+  const ownerStatus = String(request?.status || 'PENDING')
+  const ownerSigned = ownerStatus === 'SIGNED'
+  const driverSigned = Boolean(driverDocument)
+
+  return (
+    <div className="packet-shell">
+      <div className="packet-toolbar no-print">
+        <button type="button" onClick={() => window.close()}>Close</button>
+        <div>
+          <strong>Load {dispatch.loadNumber}</strong>
+          <span>Document Packet</span>
+        </div>
+        <button
+          type="button"
+          className="packet-primary-button"
+          onClick={() => window.print()}
+        >
+          Download / Save PDF
+        </button>
+      </div>
+
+      <main className="packet-document">
+        <section className="packet-page owner-page">
+          <header className="packet-letterhead">
+            <div className="packet-brand-lockup">
+              <img src={maverickLogo} alt="MAVTRACK" />
+              <div>
+                <strong>MAVTRACK</strong>
+                <span>Load Authorization & Confirmation</span>
+              </div>
+            </div>
+            <div className="packet-header-meta">
+              <span>LOAD NUMBER</span>
+              <strong>{dispatch.loadNumber}</strong>
+              <small>{fmt(dispatch.createdAt)}</small>
+            </div>
+          </header>
+
+          <div className="packet-title-row">
+            <div>
+              <span>PAGE 1</span>
+              <h1>Owner / Authorized Signer Approval</h1>
+              <p>Formal authorization for the load listed below.</p>
+            </div>
+            <b className={`packet-status ${ownerStatus.toLowerCase()}`}>
+              {ownerSigned ? 'SIGNED' : ownerStatus === 'CHANGES_REQUESTED' ? 'CHANGES REQUESTED' : 'PENDING SIGNATURE'}
+            </b>
+          </div>
+
+          <section className="packet-info-grid">
+            <div><span>Dispatcher</span><strong>{value(dispatch.dispatcherName)}</strong></div>
+            <div><span>Reference #</span><strong>{value(dispatch.referenceNumber)}</strong></div>
+            <div><span>PO #</span><strong>{value(dispatch.poNumber)}</strong></div>
+            <div><span>B/L #</span><strong>{value(dispatch.bolNumber)}</strong></div>
+            <div><span>Carrier</span><strong>{value(dispatch.carrierName)}</strong></div>
+            <div><span>Lessor</span><strong>{value(dispatch.lessorName)}</strong></div>
+            <div><span>Truck</span><strong>{value(dispatch.truckNumber || dispatch.asset?.deviceId)}</strong></div>
+            <div><span>Trailer</span><strong>{value(dispatch.trailerNumber)}</strong></div>
+          </section>
+
+          <section className="packet-route-grid">
+            <article>
+              <span>PICKUP</span>
+              <strong>{value(dispatch.pickupName)}</strong>
+              <p>{value(dispatch.pickupAddress)}</p>
+              <small>Appointment: {fmt(dispatch.pickupScheduledAt)}</small>
+            </article>
+            <div className="packet-route-arrow">→</div>
+            <article>
+              <span>DELIVERY</span>
+              <strong>{value(dispatch.deliveryName)}</strong>
+              <p>{value(dispatch.deliveryAddress)}</p>
+              <small>Appointment: {fmt(dispatch.deliveryScheduledAt)}</small>
+            </article>
+          </section>
+
+          <section className="packet-signature-section">
+            <div className="packet-signature-heading">
+              <div>
+                <span>OWNER / AUTHORIZED SIGNER</span>
+                <strong>{value(request?.signerName)}</strong>
+              </div>
+              <div>
+                <span>TITLE</span>
+                <strong>{value(request?.signerTitle)}</strong>
+              </div>
+              <div>
+                <span>EMAIL</span>
+                <strong>{value(request?.signerEmail || dispatch.authorizedSignerEmail)}</strong>
+              </div>
+              <div>
+                <span>SIGNED AT</span>
+                <strong>{fmt(request?.signedAt)}</strong>
+              </div>
+            </div>
+
+            <div className="packet-signature-box">
+              {ownerDocument?.dataBase64 ? (
+                <img
+                  src={documentDataUri(ownerDocument)}
+                  alt="Owner signature"
+                  className="packet-signature-image owner"
+                />
+              ) : (
+                <div className="packet-signature-placeholder">
+                  {ownerStatus === 'CHANGES_REQUESTED'
+                    ? 'Changes requested before authorization.'
+                    : 'Waiting for owner / authorized signer signature.'}
+                </div>
+              )}
+            </div>
+
+            <p className="packet-certification">
+              By signing this authorization, the signer confirms they are authorized to approve this load on behalf of the represented company and agrees that the electronic signature shown above records that approval.
+            </p>
+          </section>
+
+          <footer className="packet-page-footer">
+            <span>MAVTRACK · Secure Load Documentation</span>
+            <span>Page 1 · Owner Authorization</span>
+          </footer>
+        </section>
+
+        <section className="packet-page driver-page">
+          <header className="packet-letterhead">
+            <div className="packet-brand-lockup">
+              <img src={maverickLogo} alt="MAVTRACK" />
+              <div>
+                <strong>MAVTRACK</strong>
+                <span>Driver Load Acceptance</span>
+              </div>
+            </div>
+            <div className="packet-header-meta">
+              <span>LOAD NUMBER</span>
+              <strong>{dispatch.loadNumber}</strong>
+              <small>{fmt(dispatch.acceptedAt)}</small>
+            </div>
+          </header>
+
+          <div className="packet-title-row">
+            <div>
+              <span>PAGE 2</span>
+              <h1>Driver Acceptance & Acknowledgement</h1>
+              <p>Driver acknowledgement following owner authorization.</p>
+            </div>
+            <b className={`packet-status ${driverSigned ? 'signed' : ownerSigned ? 'pending' : 'blocked'}`}>
+              {driverSigned ? 'SIGNED' : ownerSigned ? 'READY FOR DRIVER' : 'BLOCKED'}
+            </b>
+          </div>
+
+          <section className="packet-info-grid driver-info-grid">
+            <div><span>Driver</span><strong>{driverName}</strong></div>
+            <div><span>Driver Email</span><strong>{value(driver?.email)}</strong></div>
+            <div><span>Truck</span><strong>{value(dispatch.truckNumber || profile?.physicalTruckNumber || dispatch.asset?.deviceId)}</strong></div>
+            <div><span>Trailer</span><strong>{value(dispatch.trailerNumber || profile?.currentTrailerNumber)}</strong></div>
+            <div><span>Assignment</span><strong>{value(dispatch.assignmentStatus)}</strong></div>
+            <div><span>Accepted At</span><strong>{fmt(dispatch.acceptedAt)}</strong></div>
+          </section>
+
+          <section className="packet-driver-acknowledgement">
+            <span>DRIVER ACKNOWLEDGEMENT</span>
+            <p>
+              I acknowledge receipt of this load assignment and confirm that I reviewed the load information supplied by dispatch. My electronic signature records my acceptance of this assignment after the owner / authorized signer approval.
+            </p>
+          </section>
+
+          <section className="packet-signature-section driver-signature-section">
+            <div className="packet-signature-heading two-column">
+              <div><span>DRIVER</span><strong>{driverName}</strong></div>
+              <div><span>SIGNED AT</span><strong>{fmt(driverDocument?.signedAt || dispatch.acceptedAt)}</strong></div>
+            </div>
+            <div className="packet-signature-box driver-signature-box">
+              {driverDocument?.dataBase64 ? (
+                <img
+                  src={documentDataUri(driverDocument)}
+                  alt="Driver signed acceptance"
+                  className="packet-driver-document-image"
+                />
+              ) : (
+                <div className="packet-signature-placeholder">
+                  {ownerSigned
+                    ? 'Owner authorization complete. Waiting for driver acceptance and signature.'
+                    : 'Driver acceptance is blocked until owner authorization is signed.'}
+                </div>
+              )}
+            </div>
+          </section>
+
+          <footer className="packet-page-footer">
+            <span>MAVTRACK · Secure Load Documentation</span>
+            <span>Page 2 · Driver Acceptance</span>
+          </footer>
+        </section>
+
+        {supportingDocuments.map((document: any, index: number) => (
+          <section className="packet-page attachment-page" key={document.id}>
+            <header className="packet-letterhead compact">
+              <div className="packet-brand-lockup">
+                <img src={maverickLogo} alt="MAVTRACK" />
+                <div><strong>MAVTRACK</strong><span>Supporting Load Document</span></div>
+              </div>
+              <div className="packet-header-meta">
+                <span>LOAD NUMBER</span><strong>{dispatch.loadNumber}</strong>
+              </div>
+            </header>
+
+            <div className="packet-title-row attachment-title-row">
+              <div>
+                <span>PAGE {index + 3}</span>
+                <h1>{document.category === 'PHOTO' ? 'BOL / POD / Load Photo' : 'Supporting Document'}</h1>
+                <p>{document.originalName}</p>
+              </div>
+            </div>
+
+            {document.dataBase64 && String(document.mimeType).startsWith('image/') ? (
+              <div className="packet-attachment-image-wrap">
+                <img src={documentDataUri(document)} alt={document.originalName} />
+              </div>
+            ) : (
+              <div className="packet-attachment-cover">
+                <strong>{document.originalName}</strong>
+                <span>{document.mimeType}</span>
+                <p>This file is attached to the MAVTRACK load record. Open the original document from Documents & Signatures for its complete contents.</p>
+              </div>
+            )}
+
+            <div className="packet-attachment-meta">
+              <div><span>Uploaded By</span><strong>{value(document.uploadedByName || document.uploadedByRole)}</strong></div>
+              <div><span>Uploaded At</span><strong>{fmt(document.createdAt)}</strong></div>
+            </div>
+
+            <footer className="packet-page-footer">
+              <span>MAVTRACK · Supporting Documents</span>
+              <span>Page {index + 3}</span>
+            </footer>
+          </section>
+        ))}
+
+        <section className="packet-page audit-page">
+          <header className="packet-letterhead compact">
+            <div className="packet-brand-lockup">
+              <img src={maverickLogo} alt="MAVTRACK" />
+              <div><strong>MAVTRACK</strong><span>Document Audit Summary</span></div>
+            </div>
+            <div className="packet-header-meta">
+              <span>LOAD NUMBER</span><strong>{dispatch.loadNumber}</strong>
+            </div>
+          </header>
+
+          <div className="packet-title-row">
+            <div>
+              <span>FINAL PAGE</span>
+              <h1>Load Document Audit</h1>
+              <p>Signature and document summary for this load packet.</p>
+            </div>
+          </div>
+
+          <section className="packet-audit-list">
+            <article className={ownerSigned ? 'complete' : 'pending'}>
+              <span>01</span>
+              <div><strong>Owner Authorization</strong><small>{ownerSigned ? `Signed by ${value(request?.signerName)} · ${fmt(request?.signedAt)}` : ownerStatus.replaceAll('_', ' ')}</small></div>
+              <b>{ownerSigned ? '✓' : '—'}</b>
+            </article>
+            <article className={driverSigned ? 'complete' : 'pending'}>
+              <span>02</span>
+              <div><strong>Driver Acceptance</strong><small>{driverSigned ? `Signed by ${value(driverDocument?.signedBy || driverName)} · ${fmt(driverDocument?.signedAt || dispatch.acceptedAt)}` : 'Not signed yet'}</small></div>
+              <b>{driverSigned ? '✓' : '—'}</b>
+            </article>
+            <article className={supportingDocuments.length > 0 ? 'complete' : 'pending'}>
+              <span>03</span>
+              <div><strong>Supporting Documents</strong><small>{supportingDocuments.length} file{supportingDocuments.length === 1 ? '' : 's'} currently attached</small></div>
+              <b>{supportingDocuments.length}</b>
+            </article>
+          </section>
+
+          <section className="packet-audit-details">
+            <div><span>Company</span><strong>{value(dispatch.company?.name)}</strong></div>
+            <div><span>Generated</span><strong>{fmt(data.generatedAt)}</strong></div>
+            <div><span>Load Status</span><strong>{value(dispatch.status)}</strong></div>
+            <div><span>Assignment Status</span><strong>{value(dispatch.assignmentStatus)}</strong></div>
+            <div><span>Route Stops</span><strong>{orderedStops.length || 2}</strong></div>
+            <div><span>Total Stored Documents</span><strong>{documents.length}</strong></div>
+          </section>
+
+          <footer className="packet-page-footer">
+            <span>MAVTRACK · Document Audit Summary</span>
+            <span>Final Page</span>
+          </footer>
+        </section>
+      </main>
+    </div>
+  )
+}
+
 function App() {
   useEffect(() => {
     document.title = 'MAVTRACK'
@@ -4446,6 +4844,15 @@ function App() {
           null
         )
       }
+    }
+
+  const openLoadDocumentPacket =
+    (dispatchId: number) => {
+      window.open(
+        `/packet/${dispatchId}`,
+        '_blank',
+        'noopener,noreferrer'
+      )
     }
 
   const openDispatchDocument =
@@ -9160,6 +9567,19 @@ function App() {
     )
   }
 
+  const packetMatch =
+    window.location.pathname.match(
+      /^\/packet\/(\d+)$/i
+    )
+
+  if (packetMatch) {
+    return (
+      <LoadDocumentPacketPage
+        dispatchId={Number(packetMatch[1])}
+      />
+    )
+  }
+
   // =====================================================
   // LOGIN SCREEN
   // =====================================================
@@ -12839,6 +13259,23 @@ function App() {
                                       )
                                     }
 
+                                    <div className="operations-document-actions">
+                                      <button
+                                        type="button"
+                                        className="secondary-action"
+                                        onClick={() => openLoadDocumentPacket(dispatch.id)}
+                                      >
+                                        Preview Packet
+                                      </button>
+                                      <button
+                                        type="button"
+                                        className="primary-action"
+                                        onClick={() => openLoadDocumentPacket(dispatch.id)}
+                                      >
+                                        Download PDF
+                                      </button>
+                                    </div>
+
                                     <label className="secondary-action dispatch-document-upload">
                                       {
                                         documentUploadingId === dispatch.id
@@ -12869,7 +13306,11 @@ function App() {
                                   </div>
 
                                   <div className="operations-signature-packet">
-                                    <div className={`operations-signature-page ${ownerSignatureDocument ? 'complete' : 'pending'}`}>
+                                    <button
+                                      type="button"
+                                      className={`operations-signature-page ${ownerSignatureDocument ? 'complete' : 'pending'}`}
+                                      onClick={() => openLoadDocumentPacket(dispatch.id)}
+                                    >
                                       <div>
                                         <span>PAGE 1</span>
                                         <strong>Owner Authorization</strong>
@@ -12882,9 +13323,13 @@ function App() {
                                         </small>
                                       </div>
                                       <b>{ownerSignatureDocument ? 'SIGNED ✓' : ownerSignatureStatus === 'CHANGES_REQUESTED' ? 'CHANGES' : 'PENDING'}</b>
-                                    </div>
+                                    </button>
 
-                                    <div className={`operations-signature-page ${driverSignatureDocument ? 'complete' : ownerSignatureStatus === 'SIGNED' ? 'ready' : 'blocked'}`}>
+                                    <button
+                                      type="button"
+                                      className={`operations-signature-page ${driverSignatureDocument ? 'complete' : ownerSignatureStatus === 'SIGNED' ? 'ready' : 'blocked'}`}
+                                      onClick={() => openLoadDocumentPacket(dispatch.id)}
+                                    >
                                       <div>
                                         <span>PAGE 2</span>
                                         <strong>Driver Acceptance</strong>
@@ -12897,7 +13342,7 @@ function App() {
                                         </small>
                                       </div>
                                       <b>{driverSignatureDocument ? 'SIGNED ✓' : ownerSignatureStatus === 'SIGNED' ? 'READY' : 'BLOCKED'}</b>
-                                    </div>
+                                    </button>
                                   </div>
 
                                   {
@@ -12912,11 +13357,13 @@ function App() {
                                                   className="dispatch-document-row"
                                                   key={document.id}
                                                   onClick={() =>
-                                                    void openDispatchDocument(
-                                                      dispatch.id,
-                                                      document.id,
-                                                      document.originalName
-                                                    )
+                                                    document.isSignature
+                                                      ? openLoadDocumentPacket(dispatch.id)
+                                                      : void openDispatchDocument(
+                                                          dispatch.id,
+                                                          document.id,
+                                                          document.originalName
+                                                        )
                                                   }
                                                 >
                                                   <span className="dispatch-document-kind">

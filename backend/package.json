@@ -5,7 +5,8 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "dev": "tsx src/server.ts"
+    "prisma:generate": "prisma generate",
+    "dev": "prisma generate && tsx src/server.ts"
   },
   "keywords": [],
   "author": "",

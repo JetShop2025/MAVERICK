@@ -4716,6 +4716,134 @@ app.get(
   }
 )
 
+// =====================================================
+// LOAD DOCUMENT PACKET
+// Formal, print-ready data source for Owner + Driver signatures
+// and supporting load documents. No new database fields required.
+// =====================================================
+
+app.get(
+  '/api/dispatches/:id/document-packet',
+  requireAuth,
+  async (
+    req: AuthenticatedRequest,
+    res: Response
+  ) => {
+    try {
+      const companyId = req.user?.companyId
+      const dispatchId = Number(req.params.id)
+
+      if (!companyId || !Number.isInteger(dispatchId)) {
+        return res.status(400).json({
+          ok: false,
+          message: 'Invalid dispatch'
+        })
+      }
+
+      const dispatch = await prisma.dispatch.findFirst({
+        where: {
+          id: dispatchId,
+          companyId,
+          ...(isDriver(req.user?.role)
+            ? { driverId: req.user!.userId }
+            : {})
+        },
+        include: {
+          company: {
+            select: {
+              id: true,
+              name: true,
+              slug: true
+            }
+          },
+          asset: {
+            select: {
+              id: true,
+              deviceId: true,
+              name: true,
+              assetType: true,
+              trackingSource: true,
+              groupName: true
+            }
+          },
+          driver: {
+            select: {
+              id: true,
+              email: true,
+              name: true,
+              driverProfile: true
+            }
+          },
+          stops: {
+            orderBy: {
+              sequence: 'asc'
+            }
+          },
+          signatureRequests: {
+            orderBy: {
+              createdAt: 'desc'
+            },
+            take: 1
+          },
+          documents: {
+            orderBy: {
+              createdAt: 'asc'
+            }
+          }
+        }
+      })
+
+      if (!dispatch) {
+        return res.status(404).json({
+          ok: false,
+          message: 'Dispatch not found'
+        })
+      }
+
+      const documents = dispatch.documents.map((document) => ({
+        id: document.id,
+        dispatchId: document.dispatchId,
+        originalName: document.originalName,
+        mimeType: document.mimeType,
+        sizeBytes: document.sizeBytes,
+        category: document.category,
+        uploadedByRole: document.uploadedByRole,
+        uploadedByName: document.uploadedByName,
+        customerVisible: document.customerVisible,
+        isSignature: document.isSignature,
+        signedBy: document.signedBy,
+        signedAt: document.signedAt,
+        description: document.description,
+        createdAt: document.createdAt,
+        // Signatures and photos are embedded directly so the packet can be
+        // printed/saved as one self-contained document in the browser.
+        dataBase64:
+          document.isSignature ||
+          document.mimeType.startsWith('image/')
+            ? document.dataBase64
+            : null,
+        fileUrl:
+          `/api/dispatches/${dispatch.id}/documents/${document.id}/file`
+      }))
+
+      return res.json({
+        ok: true,
+        generatedAt: new Date().toISOString(),
+        dispatch: {
+          ...dispatch,
+          documents
+        }
+      })
+    } catch (error) {
+      console.error('Document packet error:', error)
+      return res.status(500).json({
+        ok: false,
+        message: 'Unable to load document packet'
+      })
+    }
+  }
+)
+
 app.delete(
   '/api/dispatches/:id',
   requireAuth,

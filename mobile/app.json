@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "MavApp",
+    "name": "MAVDRIVE",
     "slug": "mavapp",
     "version": "1.0.0",
     "orientation": "portrait",
@@ -13,9 +13,10 @@
         "UIBackgroundModes": [
           "location"
         ],
-        "NSLocationWhenInUseUsageDescription": "MavApp uses your location to send your truck position to MAVTRACK while tracking is active.",
-        "NSLocationAlwaysAndWhenInUseUsageDescription": "MavApp uses background location so MAVTRACK can continue receiving your truck position when the screen is locked or another app is open.",
-        "ITSAppUsesNonExemptEncryption": false
+        "NSLocationWhenInUseUsageDescription": "MAVDRIVE uses your location to send your truck position to MAVTRACK while tracking is active.",
+        "NSLocationAlwaysAndWhenInUseUsageDescription": "MAVDRIVE uses background location so MAVTRACK can continue receiving your truck position when the screen is locked or another app is open.",
+        "ITSAppUsesNonExemptEncryption": false,
+        "CFBundleDisplayName": "MAVDRIVE"
       }
     },
     "android": {

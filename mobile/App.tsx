@@ -56,8 +56,6 @@ Notifications.setNotificationHandler({
 };
 
 const API_URL = "https://maverick-1z64.onrender.com";
-const MOBILE_TELEMETRY_KEY =
-  process.env.EXPO_PUBLIC_MOBILE_TELEMETRY_KEY ?? "";
 
 const BACKGROUND_LOCATION_TASK =
   "MAVTRACK_BACKGROUND_LOCATION";
@@ -65,6 +63,10 @@ const BACKGROUND_LOCATION_TASK =
 const TOKEN_KEY = "mavtrack_driver_token";
 const USER_KEY = "mavtrack_driver_user";
 const PUSH_TOKEN_KEY = "mavtrack_driver_push_token";
+const TRACKING_AUTH_TOKEN_KEY =
+  "mavtrack_driver_tracking_auth_token";
+const TRACKING_DISCLOSURE_KEY =
+  "mavtrack_tracking_disclosure_v1";
 const TRACKING_DEVICE_KEY =
   "mavtrack_tracking_device_id";
 
@@ -86,8 +88,7 @@ const LAST_BACKGROUND_EVENT_KEY =
 const BACKGROUND_CALLBACK_COUNT_KEY =
   "mavtrack_background_callback_count";
 
-const DEFAULT_TRACKING_DEVICE_ID =
-  "TRK-TEST-001";
+const SHOW_ADVANCED_GPS_DIAGNOSTICS = __DEV__;
 
 type TabName = "home" | "loads" | "profile";
 type LoadFilter = "pending" | "active" | "completed";
@@ -182,19 +183,6 @@ type SignaturePoint = {
   y: number;
 };
 
-type DispatchSignatureRequest = {
-  id: number;
-  signerEmail: string;
-  signerName?: string | null;
-  signerTitle?: string | null;
-  status: string;
-  sentAt?: string | null;
-  viewedAt?: string | null;
-  signedAt?: string | null;
-  changesRequestedAt?: string | null;
-  changesNote?: string | null;
-};
-
 type Dispatch = {
   id: number;
   loadNumber: string;
@@ -236,7 +224,6 @@ type Dispatch = {
   asset?: Asset | null;
   stops?: DispatchStop[];
   documents?: DispatchDocument[];
-  signatureRequests?: DispatchSignatureRequest[];
 };
 
 type GPSData = {
@@ -256,7 +243,19 @@ async function postLocationToMavtrack(
   ok: boolean;
   sent: boolean;
 }> {
-  if (!MOBILE_TELEMETRY_KEY || !deviceId) {
+  if (!deviceId) {
+    return {
+      ok: false,
+      sent: false,
+    };
+  }
+
+  const trackingAuthToken =
+    await SecureStore.getItemAsync(
+      TRACKING_AUTH_TOKEN_KEY
+    );
+
+  if (!trackingAuthToken) {
     return {
       ok: false,
       sent: false,
@@ -304,7 +303,7 @@ async function postLocationToMavtrack(
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "x-mavtrack-key": MOBILE_TELEMETRY_KEY,
+        "x-mavtrack-key": trackingAuthToken,
       },
       body: JSON.stringify({
         deviceId,
@@ -339,7 +338,16 @@ async function postTrackingStateToMavtrack(
   deviceId: string,
   active: boolean
 ): Promise<boolean> {
-  if (!MOBILE_TELEMETRY_KEY || !deviceId) {
+  if (!deviceId) {
+    return false;
+  }
+
+  const trackingAuthToken =
+    await SecureStore.getItemAsync(
+      TRACKING_AUTH_TOKEN_KEY
+    );
+
+  if (!trackingAuthToken) {
     return false;
   }
 
@@ -350,7 +358,7 @@ async function postTrackingStateToMavtrack(
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          "x-mavtrack-key": MOBILE_TELEMETRY_KEY,
+          "x-mavtrack-key": trackingAuthToken,
         },
         body: JSON.stringify({
           deviceId,
@@ -741,6 +749,9 @@ export default function App() {
   const [menuOpen, setMenuOpen] =
     useState(false);
 
+  const [trackingDisclosureAccepted, setTrackingDisclosureAccepted] =
+    useState(false);
+
   useEffect(() => {
     void restoreSession();
   }, []);
@@ -814,6 +825,12 @@ export default function App() {
         setTracking(true);
         setTrackingMode("background");
         setTrackingStatus("NATIVE iOS GPS ACTIVE");
+
+        if (diag.deviceId) {
+          void requestTrackingCredential(
+            diag.deviceId
+          ).catch(() => undefined);
+        }
       }
     }).catch((err) => setAppError(String(err)));
   }, [token]);
@@ -1025,6 +1042,15 @@ export default function App() {
           USER_KEY
         );
 
+      const disclosure =
+        await SecureStore.getItemAsync(
+          TRACKING_DISCLOSURE_KEY
+        );
+
+      setTrackingDisclosureAccepted(
+        disclosure === "accepted"
+      );
+
       if (savedToken) {
         setToken(savedToken);
 
@@ -1156,6 +1182,53 @@ export default function App() {
     } finally {
       setAuthLoading(false);
     }
+  }
+
+  async function requestTrackingCredential(
+    deviceId: string
+  ) {
+    if (!deviceId) {
+      throw new Error(
+        "Tracking device is not assigned. Contact dispatch."
+      );
+    }
+
+    const payload =
+      await apiFetch(
+        "/api/driver/tracking-token",
+        {
+          method: "POST",
+          body: JSON.stringify({
+            deviceId,
+          }),
+        }
+      );
+
+    const trackingToken =
+      typeof payload?.trackingToken === "string"
+        ? payload.trackingToken
+        : "";
+
+    if (!trackingToken) {
+      throw new Error(
+        "Unable to authorize background tracking."
+      );
+    }
+
+    await SecureStore.setItemAsync(
+      TRACKING_AUTH_TOKEN_KEY,
+      trackingToken
+    );
+
+    return trackingToken;
+  }
+
+  async function acceptTrackingDisclosure() {
+    await SecureStore.setItemAsync(
+      TRACKING_DISCLOSURE_KEY,
+      "accepted"
+    );
+    setTrackingDisclosureAccepted(true);
   }
 
   async function registerPushNotifications() {
@@ -1339,6 +1412,10 @@ export default function App() {
     );
 
     await SecureStore.deleteItemAsync(
+      TRACKING_AUTH_TOKEN_KEY
+    );
+
+    await SecureStore.deleteItemAsync(
       TOKEN_KEY
     );
     await SecureStore.deleteItemAsync(
@@ -1447,7 +1524,7 @@ export default function App() {
             action === "decline"
               ? JSON.stringify({
                   reason:
-                    "Declined in MavApp",
+                    "Declined in MAVDRIVE",
                 })
               : JSON.stringify({
                   signatureDataBase64,
@@ -1817,7 +1894,7 @@ export default function App() {
   const trackingDeviceId =
     activeLoad?.asset?.deviceId ||
     driverProfile?.currentTruckNumber ||
-    DEFAULT_TRACKING_DEVICE_ID;
+    "";
 
   useEffect(() => {
     if (Platform.OS === "ios") return;
@@ -1978,14 +2055,6 @@ export default function App() {
       return;
     }
 
-    if (!MOBILE_TELEMETRY_KEY) {
-      Alert.alert(
-        "Configuration missing",
-        "The mobile telemetry key is not configured."
-      );
-      return;
-    }
-
     // iOS V4: one GPS producer and one network sender, both native Swift.
     // Do not start expo-location's TaskManager or a JS watch on iOS.
     if (Platform.OS === "ios") {
@@ -1995,7 +2064,7 @@ export default function App() {
         if (fg.status !== "granted") throw new Error("Location access was denied");
         const bg = await Location.requestBackgroundPermissionsAsync();
         if (bg.status !== "granted") {
-          throw new Error("MavDriver needs Allow Location Access: Always for background GPS");
+          throw new Error("MAVDRIVE needs Allow Location Access: Always for background GPS");
         }
         if (!nativeGpsAvailable) throw new Error("Native GPS module missing; install the new iOS TestFlight build");
         // Stop older Expo native subscription persisted by an earlier build.
@@ -2004,7 +2073,17 @@ export default function App() {
         }
         foregroundWatchRef.current?.remove();
         foregroundWatchRef.current = null;
-        const diag = await startNativeGps(trackingDeviceId, API_URL, MOBILE_TELEMETRY_KEY);
+
+        const trackingAuthToken =
+          await requestTrackingCredential(
+            trackingDeviceId
+          );
+
+        const diag = await startNativeGps(
+          trackingDeviceId,
+          API_URL,
+          trackingAuthToken
+        );
         setNativeDiagnostics(diag);
         await SecureStore.setItemAsync(TRACKING_DEVICE_KEY, trackingDeviceId);
         const stateAck = await postTrackingStateToMavtrack(trackingDeviceId, true);
@@ -2048,6 +2127,10 @@ export default function App() {
         );
         return;
       }
+
+      await requestTrackingCredential(
+        trackingDeviceId
+      );
 
       await SecureStore.setItemAsync(
         TRACKING_DEVICE_KEY,
@@ -2100,7 +2183,7 @@ export default function App() {
 
           Alert.alert(
             "Background Location Required",
-            "Set MavDriver location access to Always so GPS can continue when the iPhone is locked or another app is open."
+            "Set MAVDRIVE location access to Always so GPS can continue when the iPhone is locked or another app is open."
           );
           return;
         }
@@ -2223,6 +2306,7 @@ export default function App() {
         if (!acknowledged) setAppError("STOP completed on this phone, but server STOP acknowledgement failed; retry while online.");
         await SecureStore.deleteItemAsync(TRACKING_DEVICE_KEY);
         await SecureStore.deleteItemAsync(LAST_GPS_PING_KEY);
+        await SecureStore.deleteItemAsync(TRACKING_AUTH_TOKEN_KEY);
         setTracking(false);
         setTrackingMode("off");
         setTrackingStatus("GPS OFF");
@@ -2262,6 +2346,9 @@ export default function App() {
       await SecureStore.deleteItemAsync(
         LAST_GPS_PING_KEY
       );
+      await SecureStore.deleteItemAsync(
+        TRACKING_AUTH_TOKEN_KEY
+      );
 
       setTracking(false);
       setTrackingMode("off");
@@ -2289,7 +2376,7 @@ export default function App() {
           </Text>
         </View>
         <Text style={styles.bootBrand}>
-          MAVAPP
+          MAVDRIVE
         </Text>
         <ActivityIndicator
           size="small"
@@ -2346,7 +2433,7 @@ export default function App() {
                 MAVERICK
               </Text>
               <Text style={styles.loginAppNameFinal}>
-                MAVAPP
+                MAVDRIVE
               </Text>
             </View>
 
@@ -2429,6 +2516,16 @@ export default function App() {
           </ScrollView>
         </KeyboardAvoidingView>
       </SafeAreaView>
+    );
+  }
+
+  if (token && !trackingDisclosureAccepted) {
+    return (
+      <TrackingDisclosureScreen
+        onContinue={() =>
+          void acceptTrackingDisclosure()
+        }
+      />
     );
   }
 
@@ -2664,6 +2761,69 @@ export default function App() {
   );
 }
 
+function TrackingDisclosureScreen({
+  onContinue,
+}: {
+  onContinue: () => void;
+}) {
+  return (
+    <SafeAreaView style={styles.app}>
+      <StatusBar
+        barStyle="light-content"
+        backgroundColor="#07111F"
+      />
+      <ScrollView
+        contentContainerStyle={styles.trackingDisclosureScreen}
+        showsVerticalScrollIndicator={false}
+      >
+        <View style={styles.brandMark}>
+          <Text style={styles.brandM}>M</Text>
+        </View>
+        <Text style={styles.trackingDisclosureBrand}>
+          MAVDRIVE
+        </Text>
+        <Text style={styles.trackingDisclosureScreenTitle}>
+          Location Tracking
+        </Text>
+        <Text style={styles.trackingDisclosureScreenText}>
+          MAVDRIVE is a fleet tracking app. When you press START TRACKING, your company can receive this truck's location while Tracking is active.
+        </Text>
+
+        <View style={styles.trackingDisclosureBulletCard}>
+          <Text style={styles.trackingDisclosureBullet}>
+            • Tracking can continue while your iPhone is locked.
+          </Text>
+          <Text style={styles.trackingDisclosureBullet}>
+            • Tracking can continue while MAVDRIVE is in the background or while another app is open.
+          </Text>
+          <Text style={styles.trackingDisclosureBullet}>
+            • Reliable tracking requires Location Access set to Always and Precise Location turned on.
+          </Text>
+          <Text style={styles.trackingDisclosureBullet}>
+            • Tracking stops when you press STOP TRACKING, sign out, disable location permission, or iOS stops Location Services.
+          </Text>
+        </View>
+
+        <Text style={styles.trackingDisclosureSafety}>
+          Set up MAVDRIVE while parked. Do not interact with the app while driving.
+        </Text>
+
+        <Pressable
+          onPress={onContinue}
+          style={({ pressed }) => [
+            styles.trackingDisclosureContinue,
+            pressed && styles.buttonPressed,
+          ]}
+        >
+          <Text style={styles.trackingDisclosureContinueText}>
+            I UNDERSTAND — CONTINUE
+          </Text>
+        </Pressable>
+      </ScrollView>
+    </SafeAreaView>
+  );
+}
+
 function HomeScreen({
   user,
   activeLoad,
@@ -2856,6 +3016,25 @@ function HomeScreen({
         </View>
       )}
 
+      <View style={styles.trackingDisclosureCard}>
+        <Text style={styles.trackingDisclosureEyebrow}>
+          LOCATION TRACKING
+        </Text>
+        <Text style={styles.trackingDisclosureTitle}>
+          {tracking
+            ? "Tracking is active"
+            : "Background fleet tracking"}
+        </Text>
+        <Text style={styles.trackingDisclosureText}>
+          {tracking
+            ? "MAVDRIVE is sharing this truck's location with your fleet. Tracking can continue while your iPhone is locked or while you use another app."
+            : "When you press START TRACKING, MAVDRIVE can send this truck's location to your fleet while your iPhone is locked, while MAVDRIVE is in the background, or while another app is open."}
+        </Text>
+        <Text style={styles.trackingDisclosureRequirement}>
+          Requires: Location Access Always + Precise Location On
+        </Text>
+      </View>
+
       <Text style={styles.sectionTitlePlain}>
         Current Truck
       </Text>
@@ -2963,6 +3142,125 @@ function HomeScreen({
         </Text>
       </View>
 
+      {tracking && SHOW_ADVANCED_GPS_DIAGNOSTICS ? (
+        <View style={styles.gpsDiagnosticsCard}>
+          <View style={styles.gpsDiagnosticsHeader}>
+            <Text style={styles.gpsDiagnosticsTitle}>
+              BACKGROUND GPS DIAGNOSTICS
+            </Text>
+            <View
+              style={[
+                styles.gpsDiagnosticsPill,
+                backgroundTaskStarted
+                  ? styles.gpsDiagnosticsPillOn
+                  : styles.gpsDiagnosticsPillOff,
+              ]}
+            >
+              <Text
+                style={styles.gpsDiagnosticsPillText}
+              >
+                {backgroundTaskStarted === true
+                  ? (Platform.OS === "ios" ? "SWIFT GPS ACTIVE" : "NATIVE TASK ACTIVE")
+                  : backgroundTaskStarted === false
+                    ? (Platform.OS === "ios" ? "SWIFT GPS INACTIVE" : "NATIVE TASK INACTIVE")
+                    : "TASK UNKNOWN"}
+              </Text>
+            </View>
+          </View>
+
+          <View style={styles.gpsDiagnosticsGrid}>
+            {Platform.OS === "ios" && nativeDiagnostics ? (
+              <>
+                <DiagnosticItem label="DEVICE" value={nativeDiagnostics.deviceId || "—"} />
+                <DiagnosticItem label="LAST HTTP ATTEMPT" value={formatNativeTime(nativeDiagnostics.lastAttempt)} />
+                <DiagnosticItem label="LAST SERVER ACK" value={formatNativeTime(nativeDiagnostics.lastAck)} />
+                <DiagnosticItem label="HTTP STATUS" value={String(nativeDiagnostics.lastHttpStatus || "—")} />
+                <DiagnosticItem label="PENDING GPS POINTS" value={String(nativeDiagnostics.queued)} />
+                <DiagnosticItem
+                  label="BACKGROUND SESSION"
+                  value={nativeDiagnostics.backgroundActivitySession ? "ACTIVE" : "INACTIVE"}
+                />
+                <DiagnosticItem
+                  label="SIGNIFICANT CHANGE"
+                  value={nativeDiagnostics.significantChanges ? "ARMED" : "OFF"}
+                />
+                <DiagnosticItem
+                  label="LAST NATIVE APP STATE"
+                  value={nativeDiagnostics.lastAppState || "—"}
+                />
+                <DiagnosticItem
+                  label="LIFECYCLE RESTORE"
+                  value={nativeDiagnostics.lastLifecycle || "—"}
+                />
+                <DiagnosticItem label="GPS AGE" value={formatNativeAge(nativeDiagnostics.lastFix)} />
+                <DiagnosticItem label="SERVER ACK AGE" value={formatNativeAge(nativeDiagnostics.lastAck)} />
+              </>
+            ) : null}
+            <DiagnosticItem
+              label="LAST NATIVE FIX"
+              value={backgroundLastFix}
+            />
+            <DiagnosticItem
+              label="LAST SERVER ACK"
+              value={backgroundLastSend}
+            />
+            <DiagnosticItem
+              label="CALLBACKS"
+              value={String(backgroundCallbackCount)}
+            />
+            <DiagnosticItem
+              label="LAST EVENT"
+              value={backgroundLastEvent}
+            />
+            <DiagnosticItem
+              label="LOCATION ACCESS"
+              value={backgroundPermission}
+            />
+            <DiagnosticItem
+              label="PRECISION"
+              value={preciseLocationStatus}
+            />
+            <DiagnosticItem
+              label="APP STATE"
+              value={currentAppState.toUpperCase()}
+            />
+            <DiagnosticItem
+              label="TRACKING MODE"
+              value={trackingMode.toUpperCase()}
+            />
+          </View>
+
+          <Text style={styles.gpsDiagnosticsHint}>
+            Lock the iPhone while the vehicle is moving. After unlocking,
+            LAST NATIVE FIX and CALLBACKS should have advanced. If they did
+            but LAST SERVER ACK did not, Core Location is working and the network
+            upload is the failing step. BACKGROUND SESSION should remain ACTIVE on iOS.
+          </Text>
+        </View>
+      ) : null}
+
+      {backgroundLastError ? (
+        <View
+          style={{
+            marginTop: 10,
+            padding: 12,
+            borderRadius: 12,
+            backgroundColor: "#2A1520",
+            borderWidth: 1,
+            borderColor: "#6B2637",
+          }}
+        >
+          <Text
+            style={{
+              color: "#FCA5A5",
+              fontSize: 12,
+              fontWeight: "700",
+            }}
+          >
+            GPS background error: {backgroundLastError}
+          </Text>
+        </View>
+      ) : null}
     </ScrollView>
   );
 }
@@ -3516,7 +3814,7 @@ function SignatureAcceptanceScreen({
         `<text x="40" y="270" font-family="Arial" font-size="16" font-weight="700" fill="#475569">Driver Signature</text>` +
         `<g transform="translate(40,290) scale(2.45,1.55)">${signatureSvg}</g>` +
         `<line x1="40" y1="575" x2="860" y2="575" stroke="#cbd5e1"/>` +
-        `<text x="40" y="603" font-family="Arial" font-size="13" fill="#64748b">Signed electronically in MavDriver</text>` +
+        `<text x="40" y="603" font-family="Arial" font-size="13" fill="#64748b">Signed electronically in MAVDRIVE</text>` +
         `</svg>`;
 
       onConfirm(
@@ -3764,19 +4062,6 @@ function LoadDetailScreen({
 }) {
   const pending =
     load.assignmentStatus === "PENDING";
-
-  const ownerAuthorization =
-    load.signatureRequests?.[0] || null;
-
-  const ownerAuthorized =
-    ownerAuthorization?.status === "SIGNED";
-
-  const ownerAuthorizationLabel =
-    ownerAuthorized
-      ? "SIGNED · DRIVER MAY ACCEPT"
-      : ownerAuthorization?.status === "CHANGES_REQUESTED"
-        ? "CHANGES REQUESTED · ACCEPTANCE BLOCKED"
-        : "PENDING SIGNATURE · ACCEPTANCE BLOCKED";
 
   return (
     <SafeAreaView style={styles.app}>
@@ -4162,53 +4447,6 @@ function LoadDetailScreen({
         </View>
 
         {pending ? (
-          <View
-            style={{
-              marginTop: 14,
-              marginBottom: 4,
-              padding: 14,
-              borderRadius: 12,
-              borderWidth: 1,
-              borderColor: ownerAuthorized ? "#166534" : "#92400E",
-              backgroundColor: ownerAuthorized ? "#0D2818" : "#2A1B08",
-            }}
-          >
-            <Text
-              style={{
-                color: ownerAuthorized ? "#86EFAC" : "#FCD34D",
-                fontSize: 11,
-                fontWeight: "800",
-                letterSpacing: 0.6,
-              }}
-            >
-              OWNER AUTHORIZATION
-            </Text>
-            <Text
-              style={{
-                marginTop: 6,
-                color: "#F8FAFC",
-                fontSize: 14,
-                fontWeight: "800",
-              }}
-            >
-              {ownerAuthorizationLabel}
-            </Text>
-            {!ownerAuthorized ? (
-              <Text
-                style={{
-                  marginTop: 7,
-                  color: "#CBD5E1",
-                  fontSize: 12,
-                  lineHeight: 18,
-                }}
-              >
-                This load cannot be accepted until the company owner / authorized signer approves it.
-              </Text>
-            ) : null}
-          </View>
-        ) : null}
-
-        {pending ? (
           <View style={styles.responseRow}>
             <Pressable
               onPress={onDecline}
@@ -4224,12 +4462,8 @@ function LoadDetailScreen({
             </Pressable>
 
             <Pressable
-              onPress={ownerAuthorized ? onAccept : undefined}
-              disabled={!ownerAuthorized}
-              style={[
-                styles.acceptButton,
-                !ownerAuthorized && styles.buttonDisabled,
-              ]}
+              onPress={onAccept}
+              style={styles.acceptButton}
             >
               <Text
                 style={
@@ -4327,7 +4561,7 @@ function ProfileScreen({
   const fixedTruckDeviceId =
     activeLoad?.asset?.deviceId ||
     profile?.currentTruckNumber ||
-    DEFAULT_TRACKING_DEVICE_ID;
+    "";
 
   async function saveAll() {
     if (
@@ -7218,6 +7452,109 @@ const styles = StyleSheet.create({
     color: COLORS.muted,
     fontSize: 10,
     textAlign: "center",
+  },
+
+  trackingDisclosureScreen: {
+    flexGrow: 1,
+    paddingHorizontal: 24,
+    paddingTop: 48,
+    paddingBottom: 36,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  trackingDisclosureBrand: {
+    marginTop: 16,
+    color: COLORS.text,
+    fontSize: 24,
+    fontWeight: "900",
+    letterSpacing: 4,
+  },
+  trackingDisclosureScreenTitle: {
+    marginTop: 28,
+    color: COLORS.text,
+    fontSize: 25,
+    fontWeight: "900",
+  },
+  trackingDisclosureScreenText: {
+    marginTop: 10,
+    maxWidth: 430,
+    color: "#B7C5D7",
+    textAlign: "center",
+    fontSize: 14,
+    lineHeight: 21,
+  },
+  trackingDisclosureBulletCard: {
+    width: "100%",
+    maxWidth: 430,
+    marginTop: 22,
+    padding: 16,
+    gap: 12,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    borderRadius: 15,
+    backgroundColor: COLORS.surface,
+  },
+  trackingDisclosureBullet: {
+    color: "#D9E3EF",
+    fontSize: 13,
+    lineHeight: 19,
+  },
+  trackingDisclosureSafety: {
+    marginTop: 18,
+    maxWidth: 430,
+    color: "#F4C078",
+    textAlign: "center",
+    fontSize: 12,
+    lineHeight: 18,
+    fontWeight: "800",
+  },
+  trackingDisclosureContinue: {
+    width: "100%",
+    maxWidth: 430,
+    minHeight: 52,
+    marginTop: 24,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: 26,
+    backgroundColor: COLORS.blueStrong,
+  },
+  trackingDisclosureContinueText: {
+    color: "#FFFFFF",
+    fontSize: 12,
+    fontWeight: "900",
+    letterSpacing: 0.8,
+  },
+  trackingDisclosureCard: {
+    marginBottom: 16,
+    padding: 14,
+    borderWidth: 1,
+    borderColor: "rgba(96, 165, 250, 0.28)",
+    borderRadius: 14,
+    backgroundColor: "rgba(37, 99, 235, 0.08)",
+  },
+  trackingDisclosureEyebrow: {
+    color: COLORS.blueLight,
+    fontSize: 9,
+    fontWeight: "900",
+    letterSpacing: 1,
+  },
+  trackingDisclosureTitle: {
+    marginTop: 5,
+    color: COLORS.text,
+    fontSize: 14,
+    fontWeight: "900",
+  },
+  trackingDisclosureText: {
+    marginTop: 6,
+    color: "#B8C6D8",
+    fontSize: 11,
+    lineHeight: 17,
+  },
+  trackingDisclosureRequirement: {
+    marginTop: 8,
+    color: "#93C5FD",
+    fontSize: 10,
+    fontWeight: "800",
   },
 
   gpsDiagnosticsCard: {

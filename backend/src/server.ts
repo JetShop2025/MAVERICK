@@ -409,8 +409,8 @@ async function sendLoadAssignmentPush({
   driverId,
   dispatchId,
   loadNumber,
-  pickupName,
-  deliveryName
+  pickupName: _pickupName,
+  deliveryName: _deliveryName
 }: {
   driverId: number
   dispatchId: number
@@ -436,7 +436,7 @@ async function sendLoadAssignmentPush({
     userId: driverId,
     title: 'New Load Assigned',
     body:
-      `Load ${loadNumber} is pending acceptance. ${pickupName} → ${deliveryName}`,
+      `Load ${loadNumber} is pending your acceptance. Tap to view details.`,
     badge: Math.max(1, pendingCount),
     data: {
       type: 'LOAD_ASSIGNMENT',
@@ -710,7 +710,7 @@ type AuthenticatedRequest = Request & {
 // MIDDLEWARE DE AUTENTICACION
 // =====================================================
 
-function requireAuth(
+async function requireAuth(
   req: AuthenticatedRequest,
   res: Response,
   next: NextFunction
@@ -743,15 +743,35 @@ function requireAuth(
         companyId: number
       }
 
+    const currentUser =
+      await prisma.user.findUnique({
+        where: {
+          id: decoded.userId
+        },
+        select: {
+          id: true,
+          email: true,
+          role: true,
+          companyId: true,
+          active: true
+        }
+      })
+
+    if (!currentUser || !currentUser.active) {
+      return res.status(401).json({
+        ok: false,
+        message: 'User account is inactive'
+      })
+    }
+
     req.user = {
-      userId: decoded.userId,
-      email: decoded.email,
-      role: decoded.role,
-      companyId: decoded.companyId
+      userId: currentUser.id,
+      email: currentUser.email,
+      role: currentUser.role,
+      companyId: currentUser.companyId
     }
 
     next()
-
   } catch {
     return res.status(401).json({
       ok: false,
@@ -1397,6 +1417,120 @@ function isDriver(
   return role === 'driver'
 }
 
+function isDispatchStaff(
+  role: string | undefined
+) {
+  return (
+    role === 'dispatch' ||
+    isCompanyAdmin(role)
+  )
+}
+
+function requireDispatchAccess(
+  req: AuthenticatedRequest,
+  res: Response,
+  next: NextFunction
+) {
+  if (!isDispatchStaff(req.user?.role)) {
+    return res.status(403).json({
+      ok: false,
+      message: 'Dispatch access required'
+    })
+  }
+
+  next()
+}
+
+type MobileTrackingClaims = {
+  type: 'mobile_tracking'
+  userId: number
+  companyId: number
+  deviceId: string
+}
+
+async function verifyMobileTrackingCredential(
+  credential: string,
+  requestedDeviceId: string
+) {
+  const allowLegacy =
+    process.env.ALLOW_LEGACY_MOBILE_TELEMETRY_KEY !==
+      'false'
+
+  if (
+    allowLegacy &&
+    MOBILE_TELEMETRY_KEY &&
+    credential === MOBILE_TELEMETRY_KEY
+  ) {
+    return {
+      ok: true as const,
+      legacy: true as const,
+      userId: null,
+      companyId: null
+    }
+  }
+
+  try {
+    const decoded =
+      jwt.verify(
+        credential,
+        JWT_SECRET
+      ) as MobileTrackingClaims
+
+    if (
+      decoded.type !== 'mobile_tracking' ||
+      !Number.isInteger(decoded.userId) ||
+      !Number.isInteger(decoded.companyId) ||
+      typeof decoded.deviceId !== 'string' ||
+      decoded.deviceId.toUpperCase() !==
+        requestedDeviceId.toUpperCase()
+    ) {
+      return { ok: false as const }
+    }
+
+    const driver =
+      await prisma.user.findFirst({
+        where: {
+          id: decoded.userId,
+          companyId: decoded.companyId,
+          role: 'driver',
+          active: true
+        },
+        select: {
+          id: true,
+          companyId: true,
+          driverProfile: {
+            select: {
+              currentTruckNumber: true
+            }
+          }
+        }
+      })
+
+    const assignedDeviceId =
+      driver?.driverProfile
+        ?.currentTruckNumber
+        ?.trim()
+        .toUpperCase() || ''
+
+    if (
+      !driver ||
+      assignedDeviceId !==
+        requestedDeviceId.toUpperCase()
+    ) {
+      return { ok: false as const }
+    }
+
+    return {
+      ok: true as const,
+      legacy: false as const,
+      userId: driver.id,
+      companyId: driver.companyId
+    }
+  } catch {
+    return { ok: false as const }
+  }
+}
+
 const driverInclude = {
   driverProfile: true
 } as const
@@ -1541,7 +1675,7 @@ app.get(
         })
       }
 
-      if (!isCompanyAdmin(req.user?.role)) {
+      if (!isDispatchStaff(req.user?.role)) {
         return res.status(403).json({
           ok: false,
           message:
@@ -2320,6 +2454,130 @@ app.patch(
 
 
 app.post(
+  '/api/driver/tracking-token',
+  requireAuth,
+  async (
+    req: AuthenticatedRequest,
+    res: Response
+  ) => {
+    try {
+      if (!isDriver(req.user?.role)) {
+        return res.status(403).json({
+          ok: false,
+          message: 'Driver account required'
+        })
+      }
+
+      const requestedDeviceId =
+        optionalString(
+          req.body?.deviceId
+        )?.toUpperCase()
+
+      if (!requestedDeviceId) {
+        return res.status(400).json({
+          ok: false,
+          message: 'Tracking device is required'
+        })
+      }
+
+      const driver =
+        await prisma.user.findFirst({
+          where: {
+            id: req.user!.userId,
+            companyId: req.user!.companyId,
+            role: 'driver',
+            active: true
+          },
+          select: {
+            id: true,
+            companyId: true,
+            driverProfile: {
+              select: {
+                currentTruckNumber: true
+              }
+            }
+          }
+        })
+
+      const assignedDeviceId =
+        driver?.driverProfile
+          ?.currentTruckNumber
+          ?.trim()
+          .toUpperCase() || ''
+
+      if (
+        !driver ||
+        !assignedDeviceId ||
+        assignedDeviceId !== requestedDeviceId
+      ) {
+        return res.status(403).json({
+          ok: false,
+          message:
+            'This tracking device is not assigned to your driver account'
+        })
+      }
+
+      const asset =
+        await prisma.asset.findFirst({
+          where: {
+            companyId: driver.companyId,
+            deviceId: {
+              equals: requestedDeviceId,
+              mode: 'insensitive'
+            },
+            active: true,
+            assetType: 'TRK',
+            trackingSource: 'PHONE'
+          },
+          select: {
+            id: true,
+            deviceId: true
+          }
+        })
+
+      if (!asset) {
+        return res.status(404).json({
+          ok: false,
+          message:
+            'Assigned phone tracking asset was not found'
+        })
+      }
+
+      const trackingToken =
+        jwt.sign(
+          {
+            type: 'mobile_tracking',
+            userId: driver.id,
+            companyId: driver.companyId,
+            deviceId: asset.deviceId
+          } satisfies MobileTrackingClaims,
+          JWT_SECRET,
+          {
+            expiresIn: '365d'
+          }
+        )
+
+      return res.json({
+        ok: true,
+        trackingToken,
+        deviceId: asset.deviceId
+      })
+    } catch (error) {
+      console.error(
+        'Create mobile tracking token error:',
+        error
+      )
+
+      return res.status(500).json({
+        ok: false,
+        message:
+          'Unable to authorize mobile tracking'
+      })
+    }
+  }
+)
+
+app.post(
   '/api/driver/push-token',
   requireAuth,
   async (
@@ -2534,12 +2792,6 @@ app.get(
               orderBy: {
                 createdAt: 'desc'
               }
-            },
-            signatureRequests: {
-              orderBy: {
-                createdAt: 'desc'
-              },
-              take: 1
             }
           },
           orderBy: [
@@ -2610,12 +2862,6 @@ async function respondToDriverAssignment({
             include: {
               driverProfile: true
             }
-          },
-          signatureRequests: {
-            orderBy: {
-              createdAt: 'desc'
-            },
-            take: 1
           }
         }
       })
@@ -2647,25 +2893,6 @@ async function respondToDriverAssignment({
         message:
           `Assignment is already ${existing.assignmentStatus.toLowerCase()}`
       })
-    }
-
-    if (action === 'ACCEPTED') {
-      const ownerAuthorization =
-        existing.signatureRequests[0]
-
-      if (
-        !ownerAuthorization ||
-        ownerAuthorization.status !== 'SIGNED'
-      ) {
-        return res.status(409).json({
-          ok: false,
-          code: 'OWNER_AUTHORIZATION_REQUIRED',
-          message:
-            ownerAuthorization?.status === 'CHANGES_REQUESTED'
-              ? 'This load cannot be accepted because the owner requested changes. Wait for a new signed authorization.'
-              : 'This load cannot be accepted yet because owner authorization is still pending.'
-        })
-      }
     }
 
     const profile =
@@ -2791,7 +3018,7 @@ async function respondToDriverAssignment({
                 uploadedByName:
                   signedBy,
                 customerVisible:
-                  true,
+                  false,
                 isSignature:
                   true,
                 signedBy,
@@ -2933,6 +3160,7 @@ app.post(
 app.get(
   '/api/notifications',
   requireAuth,
+  requireDispatchAccess,
   async (
     req: AuthenticatedRequest,
     res: Response
@@ -2981,6 +3209,7 @@ app.get(
 app.get(
   '/api/assets',
   requireAuth,
+  requireDispatchAccess,
   async (
     req: AuthenticatedRequest,
     res: Response
@@ -3070,6 +3299,7 @@ app.get(
 app.get(
   '/api/assets/:id/cameras',
   requireAuth,
+  requireDispatchAccess,
   async (
     req: AuthenticatedRequest,
     res: Response
@@ -3977,25 +4207,9 @@ function internalAddressCode(address: string) {
 
 async function rememberCustomerLocations(
   companyId: number,
-  stops: DispatchStopInput[],
-  authorizedSignerEmail?: string | null
+  stops: DispatchStopInput[]
 ) {
-  const primaryPickup =
-    [...stops]
-      .filter((stop) => stop.type === 'PICKUP')
-      .sort(
-        (a, b) =>
-          (a.pairNumber || a.sequence) -
-          (b.pairNumber || b.sequence)
-      )[0] || null
-
   for (const stop of stops) {
-    const shouldRememberSigner =
-      Boolean(
-        authorizedSignerEmail &&
-        primaryPickup &&
-        stop.sequence === primaryPickup.sequence
-      )
     if (!stop.name || !stop.address) continue
 
     const requestedCode = normalizeCustomerCode(stop.customerCode)
@@ -4042,12 +4256,6 @@ async function rememberCustomerLocations(
             customerName: stop.name,
             address: stop.address,
             phone: stop.phone,
-            ...(shouldRememberSigner
-              ? {
-                  authorizedSignerEmail:
-                  authorizedSignerEmail ?? null
-                }
-              : {}),
             latitude: stop.latitude,
             longitude: stop.longitude,
             lastUsedAt: new Date()
@@ -4068,12 +4276,6 @@ async function rememberCustomerLocations(
         customerName: stop.name,
         address: stop.address,
         phone: stop.phone,
-        ...(shouldRememberSigner
-          ? {
-              authorizedSignerEmail:
-                  authorizedSignerEmail ?? null
-            }
-          : {}),
         latitude: stop.latitude,
         longitude: stop.longitude,
         lastUsedAt: new Date()
@@ -4084,12 +4286,6 @@ async function rememberCustomerLocations(
         customerName: stop.name,
         address: stop.address,
         phone: stop.phone,
-        ...(shouldRememberSigner
-          ? {
-              authorizedSignerEmail:
-                  authorizedSignerEmail ?? null
-            }
-          : {}),
         latitude: stop.latitude,
         longitude: stop.longitude,
         lastUsedAt: new Date()
@@ -4101,6 +4297,7 @@ async function rememberCustomerLocations(
 app.get(
   '/api/customer-locations',
   requireAuth,
+  requireDispatchAccess,
   async (req: AuthenticatedRequest, res: Response) => {
     const companyId = req.user?.companyId
     if (!companyId) {
@@ -4141,6 +4338,7 @@ app.get(
 app.get(
   '/api/address-autocomplete',
   requireAuth,
+  requireDispatchAccess,
   async (req: AuthenticatedRequest, res: Response) => {
     const companyId = req.user?.companyId
     if (!companyId) {
@@ -4209,8 +4407,6 @@ app.get(
             : location.code,
           customerName: location.customerName,
           phone: location.phone,
-          authorizedSignerEmail:
-            location.authorizedSignerEmail,
           city: location.city,
           state: null,
           postcode: null,
@@ -4481,6 +4677,7 @@ const MAX_DISPATCH_DOCUMENT_BYTES =
 app.get(
   '/api/dispatches',
   requireAuth,
+  requireDispatchAccess,
   async (
     req: AuthenticatedRequest,
     res: Response
@@ -4560,25 +4757,6 @@ app.get(
               orderBy: {
                 createdAt: 'desc'
               }
-            },
-            signatureRequests: {
-              orderBy: {
-                createdAt: 'desc'
-              },
-              take: 1,
-              select: {
-                id: true,
-                signerEmail: true,
-                signerName: true,
-                signerTitle: true,
-                status: true,
-                sentAt: true,
-                viewedAt: true,
-                signedAt: true,
-                changesRequestedAt: true,
-                changesNote: true,
-                createdAt: true
-              }
             }
           },
           orderBy: [
@@ -4613,6 +4791,7 @@ app.get(
 app.get(
   '/api/dispatches/:id',
   requireAuth,
+  requireDispatchAccess,
   async (
     req: AuthenticatedRequest,
     res: Response
@@ -4716,137 +4895,10 @@ app.get(
   }
 )
 
-// =====================================================
-// LOAD DOCUMENT PACKET
-// Formal, print-ready data source for Owner + Driver signatures
-// and supporting load documents. No new database fields required.
-// =====================================================
-
-app.get(
-  '/api/dispatches/:id/document-packet',
-  requireAuth,
-  async (
-    req: AuthenticatedRequest,
-    res: Response
-  ) => {
-    try {
-      const companyId = req.user?.companyId
-      const dispatchId = Number(req.params.id)
-
-      if (!companyId || !Number.isInteger(dispatchId)) {
-        return res.status(400).json({
-          ok: false,
-          message: 'Invalid dispatch'
-        })
-      }
-
-      const dispatch = await prisma.dispatch.findFirst({
-        where: {
-          id: dispatchId,
-          companyId,
-          ...(isDriver(req.user?.role)
-            ? { driverId: req.user!.userId }
-            : {})
-        },
-        include: {
-          company: {
-            select: {
-              id: true,
-              name: true,
-              slug: true
-            }
-          },
-          asset: {
-            select: {
-              id: true,
-              deviceId: true,
-              name: true,
-              assetType: true,
-              trackingSource: true,
-              groupName: true
-            }
-          },
-          driver: {
-            select: {
-              id: true,
-              email: true,
-              name: true,
-              driverProfile: true
-            }
-          },
-          stops: {
-            orderBy: {
-              sequence: 'asc'
-            }
-          },
-          signatureRequests: {
-            orderBy: {
-              createdAt: 'desc'
-            },
-            take: 1
-          },
-          documents: {
-            orderBy: {
-              createdAt: 'asc'
-            }
-          }
-        }
-      })
-
-      if (!dispatch) {
-        return res.status(404).json({
-          ok: false,
-          message: 'Dispatch not found'
-        })
-      }
-
-      const documents = dispatch.documents.map((document) => ({
-        id: document.id,
-        dispatchId: document.dispatchId,
-        originalName: document.originalName,
-        mimeType: document.mimeType,
-        sizeBytes: document.sizeBytes,
-        category: document.category,
-        uploadedByRole: document.uploadedByRole,
-        uploadedByName: document.uploadedByName,
-        customerVisible: document.customerVisible,
-        isSignature: document.isSignature,
-        signedBy: document.signedBy,
-        signedAt: document.signedAt,
-        description: document.description,
-        createdAt: document.createdAt,
-        // Signatures and photos are embedded directly so the packet can be
-        // printed/saved as one self-contained document in the browser.
-        dataBase64:
-          document.isSignature ||
-          document.mimeType.startsWith('image/')
-            ? document.dataBase64
-            : null,
-        fileUrl:
-          `/api/dispatches/${dispatch.id}/documents/${document.id}/file`
-      }))
-
-      return res.json({
-        ok: true,
-        generatedAt: new Date().toISOString(),
-        dispatch: {
-          ...dispatch,
-          documents
-        }
-      })
-    } catch (error) {
-      console.error('Document packet error:', error)
-      return res.status(500).json({
-        ok: false,
-        message: 'Unable to load document packet'
-      })
-    }
-  }
-)
-
 app.delete(
   '/api/dispatches/:id',
   requireAuth,
+  requireDispatchAccess,
   async (
     req: AuthenticatedRequest,
     res: Response
@@ -4932,6 +4984,7 @@ app.delete(
 app.post(
   '/api/dispatches',
   requireAuth,
+  requireDispatchAccess,
   async (
     req: AuthenticatedRequest,
     res: Response
@@ -4996,24 +5049,6 @@ app.post(
         optionalString(
           req.body?.deliveryAddress
         )
-
-      const authorizedSignerEmail =
-        optionalString(
-          req.body?.authorizedSignerEmail
-        )?.toLowerCase()
-
-      if (
-        !authorizedSignerEmail ||
-        !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(
-          authorizedSignerEmail
-        )
-      ) {
-        return res.status(400).json({
-          ok: false,
-          message:
-            'Owner / authorized signer email is required and must be valid'
-        })
-      }
 
       if (
         !pickupName ||
@@ -5306,7 +5341,6 @@ app.post(
                 : 'UNASSIGNED',
             acceptedAt: null,
             declinedAt: null,
-            authorizedSignerEmail,
             loadNumber,
             status: requestedStatus,
 
@@ -5516,102 +5550,8 @@ app.post(
 
       await rememberCustomerLocations(
         companyId,
-        dispatchStops,
-        authorizedSignerEmail
+        dispatchStops
       )
-
-      // Create a secure owner-signature request and email it automatically.
-      // Email delivery remains non-fatal: a created dispatch is never rolled back
-      // because of an email-provider problem.
-      try {
-        const signatureToken =
-          randomBytes(32).toString('hex')
-
-        const signatureRequest =
-          await prisma.dispatchSignatureRequest.create({
-            data: {
-              dispatchId: dispatch.id,
-              token: signatureToken,
-              signerEmail: authorizedSignerEmail,
-              status: 'PENDING',
-              sentAt: new Date()
-            }
-          })
-
-        const signUrl =
-          `${PUBLIC_FRONTEND_URL}/sign/${signatureRequest.token}`
-
-        const signerEmailResult =
-          await sendMaverickEmail({
-            to: [authorizedSignerEmail],
-            subject:
-              `MAVTRACK | Load ${dispatch.loadNumber} - Review & Sign`,
-            html: `
-              <!DOCTYPE html>
-              <html>
-                <body style="margin:0;padding:0;background:#f3f6fa;font-family:Arial,Helvetica,sans-serif;color:#0f172a;">
-                  <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="background:#f3f6fa;padding:32px 12px;">
-                    <tr>
-                      <td align="center">
-                        <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="max-width:640px;background:#ffffff;border:1px solid #e2e8f0;border-radius:14px;overflow:hidden;">
-                          <tr>
-                            <td style="padding:24px 30px;background:#071426;color:#ffffff;">
-                              <div style="font-size:16px;font-weight:800;letter-spacing:1px;">MAVTRACK LLC</div>
-                              <div style="margin-top:6px;color:#94a3b8;font-size:12px;">Load Confirmation · Signature Required</div>
-                            </td>
-                          </tr>
-                          <tr>
-                            <td style="padding:30px;">
-                              <h2 style="margin:0 0 8px;font-size:22px;">Load ${escapeHtml(dispatch.loadNumber)}</h2>
-                              <p style="margin:0 0 22px;color:#475569;line-height:1.55;">You are listed as the owner / authorized signer for this load. Please review the information below and sign electronically.</p>
-
-                              <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="border-collapse:collapse;">
-                                <tr><td style="padding:10px 0;border-bottom:1px solid #e2e8f0;color:#64748b;">Pickup</td><td style="padding:10px 0;border-bottom:1px solid #e2e8f0;text-align:right;font-weight:700;">${escapeHtml(dispatch.pickupName)}</td></tr>
-                                <tr><td style="padding:10px 0;border-bottom:1px solid #e2e8f0;color:#64748b;">Pickup Address</td><td style="padding:10px 0;border-bottom:1px solid #e2e8f0;text-align:right;font-weight:700;">${escapeHtml(dispatch.pickupAddress)}</td></tr>
-                                <tr><td style="padding:10px 0;border-bottom:1px solid #e2e8f0;color:#64748b;">Delivery</td><td style="padding:10px 0;border-bottom:1px solid #e2e8f0;text-align:right;font-weight:700;">${escapeHtml(dispatch.deliveryName)}</td></tr>
-                                <tr><td style="padding:10px 0;border-bottom:1px solid #e2e8f0;color:#64748b;">Delivery Address</td><td style="padding:10px 0;border-bottom:1px solid #e2e8f0;text-align:right;font-weight:700;">${escapeHtml(dispatch.deliveryAddress)}</td></tr>
-                                <tr><td style="padding:10px 0;border-bottom:1px solid #e2e8f0;color:#64748b;">Carrier</td><td style="padding:10px 0;border-bottom:1px solid #e2e8f0;text-align:right;font-weight:700;">${escapeHtml(dispatch.carrierName || '—')}</td></tr>
-                                <tr><td style="padding:10px 0;color:#64748b;">Lessor</td><td style="padding:10px 0;text-align:right;font-weight:700;">${escapeHtml(dispatch.lessorName || '—')}</td></tr>
-                              </table>
-
-                              <p style="margin:26px 0 8px;text-align:center;">
-                                <a href="${signUrl}" style="display:inline-block;background:#2563eb;color:#ffffff;text-decoration:none;padding:14px 22px;border-radius:9px;font-weight:800;">Review &amp; Sign</a>
-                              </p>
-                              <p style="margin:12px 0 0;color:#64748b;font-size:12px;line-height:1.5;text-align:center;">This secure link is unique to this load and signer.</p>
-                            </td>
-                          </tr>
-                        </table>
-                      </td>
-                    </tr>
-                  </table>
-                </body>
-              </html>
-            `
-          })
-
-        await createNotificationEvent({
-          companyId,
-          assetId: dispatch.assetId,
-          dispatchId: dispatch.id,
-          type: signerEmailResult.ok
-            ? 'AUTHORIZED_SIGNATURE_SENT'
-            : 'AUTHORIZED_SIGNATURE_EMAIL_FAILED',
-          severity: signerEmailResult.ok ? 'success' : 'warning',
-          title: signerEmailResult.ok
-            ? 'Signature request sent'
-            : 'Signature request email not sent',
-          message: signerEmailResult.ok
-            ? `Load ${dispatch.loadNumber} signature request was emailed to ${authorizedSignerEmail}.`
-            : `Load ${dispatch.loadNumber} was created, but the signature request email to ${authorizedSignerEmail} could not be sent.`,
-          recipients: signerEmailResult.recipients,
-          emailSent: signerEmailResult.ok
-        })
-      } catch (signerEmailError) {
-        console.error(
-          'Authorized signer signature request error:',
-          signerEmailError
-        )
-      }
 
       if (
         dispatch.driverId != null &&
@@ -5663,6 +5603,7 @@ app.post(
 app.patch(
   '/api/dispatches/:id',
   requireAuth,
+  requireDispatchAccess,
   async (
     req: AuthenticatedRequest,
     res: Response
@@ -5868,32 +5809,6 @@ app.patch(
         }
       }
 
-      if (
-        req.body?.authorizedSignerEmail !==
-        undefined
-      ) {
-        const authorizedSignerEmail =
-          optionalString(
-            req.body.authorizedSignerEmail
-          )?.toLowerCase()
-
-        if (
-          !authorizedSignerEmail ||
-          !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(
-            authorizedSignerEmail
-          )
-        ) {
-          return res.status(400).json({
-            ok: false,
-            message:
-              'Owner / authorized signer email is required and must be valid'
-          })
-        }
-
-        data.authorizedSignerEmail =
-          authorizedSignerEmail
-      }
-
       const stringFields = [
         'loadNumber',
         'manualDriverName',
@@ -6073,15 +5988,10 @@ app.patch(
           }
         })
 
-      if (
-        updatedStopsForCatalog ||
-        req.body?.authorizedSignerEmail !==
-          undefined
-      ) {
+      if (updatedStopsForCatalog) {
         await rememberCustomerLocations(
           companyId,
-          updated.stops,
-          updated.authorizedSignerEmail
+          updatedStopsForCatalog
         )
       }
 
@@ -6138,6 +6048,7 @@ app.patch(
 app.post(
   '/api/dispatches/:id/status',
   requireAuth,
+  requireDispatchAccess,
   async (
     req: AuthenticatedRequest,
     res: Response
@@ -6358,302 +6269,6 @@ app.post(
 
 
 // =====================================================
-// PUBLIC AUTHORIZED-SIGNER SIGNATURE
-// =====================================================
-
-app.get(
-  '/api/public/sign/:token',
-  async (req: Request, res: Response) => {
-    try {
-      const token =
-        String(req.params.token || '').trim()
-
-      if (!/^[a-f0-9]{64}$/i.test(token)) {
-        return res.status(400).json({
-          ok: false,
-          message: 'Invalid signature link'
-        })
-      }
-
-      const request =
-        await prisma.dispatchSignatureRequest.findUnique({
-          where: { token },
-          include: {
-            dispatch: {
-              select: {
-                id: true,
-                loadNumber: true,
-                pickupName: true,
-                pickupAddress: true,
-                pickupScheduledAt: true,
-                deliveryName: true,
-                deliveryAddress: true,
-                deliveryScheduledAt: true,
-                commodity: true,
-                carrierName: true,
-                lessorName: true,
-                truckNumber: true,
-                trailerNumber: true,
-                referenceNumber: true,
-                poNumber: true,
-                bolNumber: true,
-                status: true
-              }
-            }
-          }
-        })
-
-      if (!request) {
-        return res.status(404).json({
-          ok: false,
-          message: 'Signature request not found'
-        })
-      }
-
-      if (!request.viewedAt) {
-        await prisma.dispatchSignatureRequest.update({
-          where: { id: request.id },
-          data: { viewedAt: new Date() }
-        })
-      }
-
-      return res.json({
-        ok: true,
-        request: {
-          id: request.id,
-          signerEmail: request.signerEmail,
-          signerName: request.signerName,
-          signerTitle: request.signerTitle,
-          status: request.status,
-          sentAt: request.sentAt,
-          viewedAt: request.viewedAt || new Date(),
-          signedAt: request.signedAt,
-          changesRequestedAt: request.changesRequestedAt,
-          changesNote: request.changesNote
-        },
-        dispatch: request.dispatch
-      })
-    } catch (error) {
-      console.error('Public signature request error:', error)
-      return res.status(500).json({
-        ok: false,
-        message: 'Unable to load signature request'
-      })
-    }
-  }
-)
-
-app.post(
-  '/api/public/sign/:token',
-  async (req: Request, res: Response) => {
-    try {
-      const token =
-        String(req.params.token || '').trim()
-
-      const action =
-        String(req.body?.action || '').trim().toUpperCase()
-
-      if (
-        !/^[a-f0-9]{64}$/i.test(token) ||
-        !['SIGN', 'REQUEST_CHANGES'].includes(action)
-      ) {
-        return res.status(400).json({
-          ok: false,
-          message: 'Invalid signature request'
-        })
-      }
-
-      const request =
-        await prisma.dispatchSignatureRequest.findUnique({
-          where: { token },
-          include: {
-            dispatch: true
-          }
-        })
-
-      if (!request) {
-        return res.status(404).json({
-          ok: false,
-          message: 'Signature request not found'
-        })
-      }
-
-      if (request.status === 'SIGNED') {
-        return res.status(409).json({
-          ok: false,
-          message: 'This confirmation has already been signed'
-        })
-      }
-
-      if (request.status === 'CHANGES_REQUESTED') {
-        return res.status(409).json({
-          ok: false,
-          message: 'Changes were already requested for this confirmation'
-        })
-      }
-
-      const now = new Date()
-
-      if (action === 'REQUEST_CHANGES') {
-        const changesNote =
-          optionalString(req.body?.changesNote)
-
-        if (!changesNote || changesNote.length < 3) {
-          return res.status(400).json({
-            ok: false,
-            message: 'Please describe the requested changes'
-          })
-        }
-
-        const updated =
-          await prisma.$transaction(async (tx) => {
-            const signatureRequest =
-              await tx.dispatchSignatureRequest.update({
-                where: { id: request.id },
-                data: {
-                  status: 'CHANGES_REQUESTED',
-                  changesRequestedAt: now,
-                  changesNote
-                }
-              })
-
-            await tx.dispatchStatusEvent.create({
-              data: {
-                dispatchId: request.dispatchId,
-                status: request.dispatch.status,
-                eventType: 'OWNER_CHANGES_REQUESTED',
-                title: 'Owner requested changes',
-                notes: changesNote
-              }
-            })
-
-            return signatureRequest
-          })
-
-        await createNotificationEvent({
-          companyId: request.dispatch.companyId,
-          assetId: request.dispatch.assetId,
-          dispatchId: request.dispatchId,
-          type: 'OWNER_CHANGES_REQUESTED',
-          severity: 'warning',
-          title: `Load ${request.dispatch.loadNumber}: changes requested`,
-          message: `${request.signerEmail} requested changes to the load confirmation: ${changesNote}`
-        })
-
-        return res.json({
-          ok: true,
-          request: updated
-        })
-      }
-
-      const signerName =
-        optionalString(req.body?.signerName)
-      const signerTitle =
-        optionalString(req.body?.signerTitle)
-      const signatureDataBase64 =
-        optionalString(req.body?.signatureDataBase64)
-      const signatureBuffer =
-        decodeBase64File(signatureDataBase64)
-
-      if (!signerName || signerName.length < 2) {
-        return res.status(400).json({
-          ok: false,
-          message: 'Signer name is required'
-        })
-      }
-
-      if (
-        !signatureDataBase64 ||
-        !signatureBuffer ||
-        signatureBuffer.length < 100
-      ) {
-        return res.status(400).json({
-          ok: false,
-          message: 'Signature is required'
-        })
-      }
-
-      if (signatureBuffer.length > 512 * 1024) {
-        return res.status(413).json({
-          ok: false,
-          message: 'Signature is too large'
-        })
-      }
-
-      const updated =
-        await prisma.$transaction(async (tx) => {
-          const signatureRequest =
-            await tx.dispatchSignatureRequest.update({
-              where: { id: request.id },
-              data: {
-                status: 'SIGNED',
-                signerName,
-                signerTitle,
-                signedAt: now
-              }
-            })
-
-          await tx.dispatchDocument.create({
-            data: {
-              dispatchId: request.dispatchId,
-              originalName:
-                `Load-${request.dispatch.loadNumber}-Owner-Signature.png`,
-              mimeType: 'image/png',
-              sizeBytes: signatureBuffer.length,
-              category: 'SIGNATURE',
-              dataBase64: signatureDataBase64,
-              uploadedByRole: 'authorized_signer',
-              uploadedByName: signerName,
-              customerVisible: true,
-              isSignature: true,
-              signedBy: signerName,
-              signedAt: now,
-              description:
-                `Owner / authorized signer acceptance for load ${request.dispatch.loadNumber} (${request.signerEmail})`
-            }
-          })
-
-          await tx.dispatchStatusEvent.create({
-            data: {
-              dispatchId: request.dispatchId,
-              status: request.dispatch.status,
-              eventType: 'OWNER_SIGNED',
-              title: 'Owner signed confirmation',
-              notes:
-                `${signerName}${signerTitle ? ` · ${signerTitle}` : ''} signed as authorized representative.`
-            }
-          })
-
-          return signatureRequest
-        })
-
-      await createNotificationEvent({
-        companyId: request.dispatch.companyId,
-        assetId: request.dispatch.assetId,
-        dispatchId: request.dispatchId,
-        type: 'OWNER_SIGNATURE_COMPLETED',
-        severity: 'success',
-        title: `Load ${request.dispatch.loadNumber}: confirmation signed`,
-        message:
-          `${signerName} (${request.signerEmail}) signed the load confirmation.`
-      })
-
-      return res.json({
-        ok: true,
-        request: updated
-      })
-    } catch (error) {
-      console.error('Public signature submission error:', error)
-      return res.status(500).json({
-        ok: false,
-        message: 'Unable to submit signature'
-      })
-    }
-  }
-)
-
-
-// =====================================================
 // DISPATCH STOPS + DOCUMENTS
 // =====================================================
 
@@ -6679,7 +6294,7 @@ async function updateDispatchStopStatusForRequest({
 
     if (
       !driverOnly &&
-      !isCompanyAdmin(req.user?.role)
+      !isDispatchStaff(req.user?.role)
     ) {
       return res.status(403).json({
         ok: false,
@@ -7208,6 +6823,17 @@ app.post(
         ).toLowerCase()
 
       if (
+        role !== 'driver' &&
+        !isDispatchStaff(req.user?.role)
+      ) {
+        return res.status(403).json({
+          ok: false,
+          message:
+            'Dispatch or assigned driver access required'
+        })
+      }
+
+      if (
         role === 'driver' &&
         (
           dispatch.driverId !==
@@ -7386,6 +7012,16 @@ app.get(
       const dispatchId =
         Number(req.params.id)
 
+      if (
+        !isDriver(req.user?.role) &&
+        !isDispatchStaff(req.user?.role)
+      ) {
+        return res.status(403).json({
+          ok: false,
+          message: 'Document access denied'
+        })
+      }
+
       const documentId =
         Number(req.params.documentId)
 
@@ -7470,6 +7106,7 @@ app.get(
 app.post(
   '/api/dispatches/:id/share',
   requireAuth,
+  requireDispatchAccess,
   async (
     req: AuthenticatedRequest,
     res: Response
@@ -8011,6 +7648,7 @@ html: `
 app.get(
   '/api/dispatches/:id/shares',
   requireAuth,
+  requireDispatchAccess,
   async (
     req: AuthenticatedRequest,
     res: Response
@@ -8087,6 +7725,7 @@ app.get(
 app.delete(
   '/api/dispatches/:id/shares/:shareId',
   requireAuth,
+  requireDispatchAccess,
   async (
     req: AuthenticatedRequest,
     res: Response
@@ -8407,9 +8046,9 @@ app.get(
               : null,
 
           driverInstructions:
-            share.dispatch.driverInstructions,
+            null,
           notes:
-            share.dispatch.notes,
+            null,
 
           assignmentStatus:
             share.dispatch.assignmentStatus,
@@ -8435,26 +8074,10 @@ app.get(
           driver:
             share.allowDriverInfo && driver
               ? {
-                  id:
-                    driver.id,
                   name:
                     driver.name,
-                  email:
-                    driver.email,
                   phone:
-                    profile?.phone ?? null,
-                  licenseNumber:
-                    profile?.licenseNumber ?? null,
-                  licenseState:
-                    profile?.licenseState ?? null,
-                  currentTruckNumber:
-                    profile?.currentTruckNumber ?? null,
-                  physicalTruckNumber:
-                    profile?.physicalTruckNumber ?? null,
-                  currentTrailerNumber:
-                    profile?.currentTrailerNumber ?? null,
-                  currentTrailerLicense:
-                    profile?.currentTrailerLicense ?? null
+                    profile?.phone ?? null
                 }
               : null,
 
@@ -8468,7 +8091,6 @@ app.get(
             share.dispatch.documents
               .filter(
                 (document) =>
-                  share.allowDriverInfo ||
                   !document.isSignature
               )
               .map(
@@ -8618,7 +8240,9 @@ app.get(
             dispatchId:
               share.dispatchId,
             customerVisible:
-              true
+              true,
+            isSignature:
+              false
           }
         })
 
@@ -9135,24 +8759,10 @@ app.post(
           ? req.headers['x-mavtrack-key'].trim()
           : ''
 
-      if (
-        !MOBILE_TELEMETRY_KEY ||
-        requestKey !== MOBILE_TELEMETRY_KEY
-      ) {
-        return res.status(401).json({
-          ok: false,
-          message:
-            'Invalid mobile telemetry credentials'
-        })
-      }
-
       const deviceId =
         typeof req.body?.deviceId === 'string'
           ? req.body.deviceId.trim()
           : ''
-
-      const active =
-        req.body?.active === true
 
       if (!deviceId) {
         return res.status(400).json({
@@ -9160,6 +8770,23 @@ app.post(
           message: 'deviceId is required'
         })
       }
+
+      const trackingAuth =
+        await verifyMobileTrackingCredential(
+          requestKey,
+          deviceId
+        )
+
+      if (!trackingAuth.ok) {
+        return res.status(401).json({
+          ok: false,
+          message:
+            'Invalid mobile tracking credentials'
+        })
+      }
+
+      const active =
+        req.body?.active === true
 
       const asset =
         await prisma.asset.findUnique({
@@ -9172,7 +8799,11 @@ app.post(
         !asset ||
         !asset.active ||
         asset.assetType !== 'TRK' ||
-        asset.trackingSource !== 'PHONE'
+        asset.trackingSource !== 'PHONE' ||
+        (
+          !trackingAuth.legacy &&
+          trackingAuth.companyId !== asset.companyId
+        )
       ) {
         return res.status(404).json({
           ok: false,
@@ -9252,17 +8883,6 @@ app.post(
           ? req.headers['x-mavtrack-key'].trim()
           : ''
 
-      if (
-        !MOBILE_TELEMETRY_KEY ||
-        requestKey !== MOBILE_TELEMETRY_KEY
-      ) {
-        return res.status(401).json({
-          ok: false,
-          message:
-            'Invalid mobile telemetry credentials'
-        })
-      }
-
       const {
         deviceId,
         latitude,
@@ -9297,6 +8917,20 @@ app.post(
       const normalizedDeviceId =
         deviceId.trim()
 
+      const trackingAuth =
+        await verifyMobileTrackingCredential(
+          requestKey,
+          normalizedDeviceId
+        )
+
+      if (!trackingAuth.ok) {
+        return res.status(401).json({
+          ok: false,
+          message:
+            'Invalid mobile tracking credentials'
+        })
+      }
+
       const asset =
         await prisma.asset.findUnique({
           where: {
@@ -9309,7 +8943,11 @@ app.post(
         !asset ||
         !asset.active ||
         asset.assetType !== 'TRK' ||
-        asset.trackingSource !== 'PHONE'
+        asset.trackingSource !== 'PHONE' ||
+        (
+          !trackingAuth.legacy &&
+          trackingAuth.companyId !== asset.companyId
+        )
       ) {
         return res.status(404).json({
           ok: false,
@@ -9560,6 +9198,7 @@ app.post(
 app.get(
   '/api/telemetry/latest',
   requireAuth,
+  requireDispatchAccess,
   async (
     req: AuthenticatedRequest,
     res: Response
@@ -9745,6 +9384,7 @@ app.get(
 app.get(
   '/api/telemetry/history',
   requireAuth,
+  requireDispatchAccess,
   async (
     req: AuthenticatedRequest,
     res: Response
@@ -10441,6 +10081,7 @@ async function matchRoadTrack(
 app.post(
   '/api/road-match',
   requireAuth,
+  requireDispatchAccess,
   async (
     req: AuthenticatedRequest,
     res: Response

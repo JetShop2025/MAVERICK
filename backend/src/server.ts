@@ -74,6 +74,9 @@ const PUBLIC_FRONTEND_URL =
 const MOBILE_TELEMETRY_KEY =
   process.env.MOBILE_TELEMETRY_KEY?.trim() || ''
 
+const DIGITAL_MATTER_API_KEY =
+  process.env.DIGITAL_MATTER_API_KEY?.trim() || ''
+
 const DEFAULT_NOTIFICATION_EMAIL =
   process.env.NOTIFICATION_EMAIL
     ?.trim()
@@ -8284,6 +8287,444 @@ app.get(
     }
   }
 )
+
+// =====================================================
+// DIGITAL MATTER — HTTP CONNECTOR
+// =====================================================
+
+type DigitalMatterObject = Record<string, any>
+
+function digitalMatterNormalizeKey(value: string) {
+  return value
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, '')
+}
+
+function digitalMatterObjects(value: unknown): DigitalMatterObject[] {
+  const output: DigitalMatterObject[] = []
+  const seen = new Set<object>()
+
+  const visit = (item: unknown) => {
+    if (!item || typeof item !== 'object') return
+
+    const objectItem = item as DigitalMatterObject
+    if (seen.has(objectItem)) return
+    seen.add(objectItem)
+
+    if (!Array.isArray(objectItem)) {
+      output.push(objectItem)
+    }
+
+    for (const child of Object.values(objectItem)) {
+      if (child && typeof child === 'object') {
+        if (Array.isArray(child)) {
+          for (const nested of child) visit(nested)
+        } else {
+          visit(child)
+        }
+      }
+    }
+  }
+
+  visit(value)
+  return output
+}
+
+function digitalMatterValue(
+  objects: DigitalMatterObject[],
+  names: string[]
+) {
+  const wanted = new Set(
+    names.map(digitalMatterNormalizeKey)
+  )
+
+  for (const objectItem of objects) {
+    for (const [key, value] of Object.entries(objectItem)) {
+      if (wanted.has(digitalMatterNormalizeKey(key))) {
+        return value
+      }
+    }
+  }
+
+  return undefined
+}
+
+function digitalMatterNumber(
+  objects: DigitalMatterObject[],
+  names: string[]
+): number | null {
+  const value = digitalMatterValue(objects, names)
+
+  if (
+    value === null ||
+    value === undefined ||
+    value === ''
+  ) {
+    return null
+  }
+
+  const parsed = Number(value)
+  return Number.isFinite(parsed) ? parsed : null
+}
+
+function digitalMatterDate(
+  objects: DigitalMatterObject[],
+  names: string[]
+): Date | null {
+  const value = digitalMatterValue(objects, names)
+
+  if (
+    value === null ||
+    value === undefined ||
+    value === ''
+  ) {
+    return null
+  }
+
+  const parsed = new Date(String(value))
+  return Number.isNaN(parsed.getTime()) ? null : parsed
+}
+
+function digitalMatterSerial(
+  envelope: DigitalMatterObject
+) {
+  const objects = digitalMatterObjects(envelope)
+  const raw = digitalMatterValue(
+    objects,
+    [
+      'SerNo',
+      'SerialNumber',
+      'Serial',
+      'DeviceSerial',
+      'DeviceSerialNumber'
+    ]
+  )
+
+  const serial = String(raw ?? '')
+    .trim()
+    .replace(/[^A-Za-z0-9_-]/g, '')
+
+  return serial || null
+}
+
+app.post(
+  '/api/digitalmatter/telemetry',
+  async (req, res) => {
+    try {
+      if (!DIGITAL_MATTER_API_KEY) {
+        console.error(
+          'DIGITAL_MATTER_API_KEY is not configured'
+        )
+
+        return res.status(503).json({
+          ok: false,
+          message:
+            'Digital Matter integration is not configured'
+        })
+      }
+
+      const requestKey =
+        typeof req.headers['x-mavtrack-dm-key'] === 'string'
+          ? req.headers['x-mavtrack-dm-key'].trim()
+          : ''
+
+      if (requestKey !== DIGITAL_MATTER_API_KEY) {
+        return res.status(401).json({
+          ok: false,
+          message: 'Invalid Digital Matter credentials'
+        })
+      }
+
+      const envelopes: DigitalMatterObject[] =
+        Array.isArray(req.body)
+          ? req.body.filter(
+              (item: unknown) =>
+                item && typeof item === 'object'
+            )
+          : req.body && typeof req.body === 'object'
+            ? [req.body]
+            : []
+
+      if (envelopes.length === 0) {
+        return res.status(400).json({
+          ok: false,
+          message: 'Invalid Digital Matter payload'
+        })
+      }
+
+      const companyAnchor =
+        await prisma.asset.findUnique({
+          where: {
+            deviceId: 'TRAILER-002'
+          },
+          select: {
+            companyId: true
+          }
+        })
+
+      const company = companyAnchor
+        ? null
+        : await prisma.company.findUnique({
+            where: {
+              slug: 'maverick-demo'
+            },
+            select: {
+              id: true
+            }
+          })
+
+      const companyId =
+        companyAnchor?.companyId ?? company?.id ?? null
+
+      if (!companyId) {
+        return res.status(503).json({
+          ok: false,
+          message:
+            'MAVTRACK company could not be resolved'
+        })
+      }
+
+      let accepted = 0
+      let skipped = 0
+      const devices: string[] = []
+
+      for (const envelope of envelopes) {
+        const serial = digitalMatterSerial(envelope)
+
+        if (!serial) {
+          skipped += 1
+          continue
+        }
+
+        const deviceId = `DM-${serial}`
+        devices.push(deviceId)
+
+        const asset =
+          await prisma.asset.upsert({
+            where: {
+              deviceId
+            },
+            update: {
+              companyId,
+              active: true,
+              assetType: 'TRL',
+              trackingSource: 'DIGITAL_MATTER',
+              groupName: 'GA LOGISTICS',
+              description:
+                'Digital Matter Oyster3-4G GPS tracking unit'
+            },
+            create: {
+              companyId,
+              deviceId,
+              name:
+                serial === '1833347'
+                  ? 'OYSTER 01'
+                  : `OYSTER ${serial}`,
+              description:
+                'Digital Matter Oyster3-4G GPS tracking unit',
+              active: true,
+              assetType: 'TRL',
+              trackingSource: 'DIGITAL_MATTER',
+              groupName: 'GA LOGISTICS'
+            }
+          })
+
+        const rawRecords =
+          Array.isArray(envelope.Records)
+            ? envelope.Records
+            : Array.isArray(envelope.records)
+              ? envelope.records
+              : [envelope]
+
+        for (const record of rawRecords) {
+          if (!record || typeof record !== 'object') {
+            skipped += 1
+            continue
+          }
+
+          const objects =
+            digitalMatterObjects(record)
+
+          const latitude =
+            digitalMatterNumber(
+              objects,
+              ['Lat', 'Latitude']
+            )
+
+          const longitude =
+            digitalMatterNumber(
+              objects,
+              ['Long', 'Lon', 'Lng', 'Longitude']
+            )
+
+          const safeLatitude =
+            latitude !== null &&
+            latitude >= -90 &&
+            latitude <= 90
+              ? latitude
+              : null
+
+          const safeLongitude =
+            longitude !== null &&
+            longitude >= -180 &&
+            longitude <= 180
+              ? longitude
+              : null
+
+          const altitude =
+            digitalMatterNumber(
+              objects,
+              ['Alt', 'Altitude']
+            )
+
+          const speedKphRaw =
+            digitalMatterNumber(
+              objects,
+              ['Spd', 'Speed', 'SpeedKph']
+            )
+
+          const speedKph =
+            speedKphRaw === null
+              ? null
+              : Math.max(0, speedKphRaw)
+
+          const headingRaw =
+            digitalMatterNumber(
+              objects,
+              ['Head', 'Heading', 'Bearing']
+            )
+
+          const headingDegrees =
+            headingRaw === null
+              ? null
+              : ((headingRaw % 360) + 360) % 360
+
+          const accuracyRaw =
+            digitalMatterNumber(
+              objects,
+              ['PosAcc', 'Accuracy', 'AccuracyMeters']
+            )
+
+          const accuracyMeters =
+            accuracyRaw !== null && accuracyRaw >= 0
+              ? accuracyRaw
+              : null
+
+          const batteryVoltageRaw =
+            digitalMatterNumber(
+              objects,
+              [
+                'BatteryVoltage',
+                'BatteryVolts',
+                'BattVoltage',
+                'BattVolts',
+                'BatteryV',
+                'BattV'
+              ]
+            )
+
+          const batteryVoltage =
+            batteryVoltageRaw !== null &&
+            batteryVoltageRaw >= 0 &&
+            batteryVoltageRaw <= 20
+              ? batteryVoltageRaw
+              : null
+
+          const recordedAt =
+            digitalMatterDate(
+              objects,
+              [
+                'GpsUTC',
+                'DateUTC',
+                'RecordedAt',
+                'Timestamp',
+                'TimeUTC'
+              ]
+            ) ?? new Date()
+
+          const movementStatus =
+            speedKph !== null
+              ? speedKph >= 5
+                ? 'MOVING'
+                : 'PARKED'
+              : null
+
+          const duplicate =
+            await prisma.telemetry.findFirst({
+              where: {
+                assetId: asset.id,
+                source: 'DIGITAL_MATTER',
+                recordedAt
+              },
+              select: {
+                id: true
+              }
+            })
+
+          if (duplicate) {
+            skipped += 1
+            continue
+          }
+
+          await prisma.telemetry.create({
+            data: {
+              deviceId,
+              temperature: null,
+              latitude: safeLatitude,
+              longitude: safeLongitude,
+              altitude,
+              speedKph,
+              movementStatus,
+              source: 'DIGITAL_MATTER',
+              accuracyMeters,
+              headingDegrees,
+              batteryVoltage,
+              batteryPercent: null,
+              reeferPower: null,
+              powerSource:
+                batteryVoltage !== null
+                  ? 'BATTERY'
+                  : null,
+              recordedAt,
+              isBackfill: false,
+              assetId: asset.id
+            }
+          })
+
+          accepted += 1
+        }
+
+        console.log(
+          'Digital Matter telemetry received:',
+          {
+            serial,
+            deviceId,
+            assetId: asset.id
+          }
+        )
+      }
+
+      return res.status(200).json({
+        ok: true,
+        accepted,
+        skipped,
+        devices: Array.from(new Set(devices))
+      })
+    } catch (error) {
+      console.error(
+        'Digital Matter telemetry error:',
+        error
+      )
+
+      return res.status(500).json({
+        ok: false,
+        message:
+          'Unable to process Digital Matter telemetry'
+      })
+    }
+  }
+)
+
 
 // =====================================================
 // RECIBIR TELEMETRIA

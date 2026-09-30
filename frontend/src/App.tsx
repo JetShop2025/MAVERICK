@@ -387,18 +387,40 @@ void markerIcon2x
 void markerIcon
 void markerShadow
 
+type TrackingSourceCode =
+  | 'PHONE'
+  | 'MAV2'
+  | 'DIGITAL_MATTER'
+
 function createTrailerIcon(
   movementStatus: MovementStatus,
   selected = false,
-  hasDispatch = false
+  hasDispatch = false,
+  trackingSource: TrackingSourceCode = 'MAV2'
 ) {
+  const isDigitalMatter =
+    trackingSource === 'DIGITAL_MATTER'
+
+  const sourceBadge =
+    isDigitalMatter ? 'DM' : 'M2'
+
+  const sourceClass =
+    isDigitalMatter
+      ? 'digital-matter'
+      : 'mav2'
+
+  const sourceStyle =
+    isDigitalMatter
+      ? ' style="background:#0891b2;border-color:#083344;color:#ecfeff"'
+      : ''
+
   return L.divIcon({
     className: 'mav-trailer-marker-wrapper',
     html: `
       <div class="mav-trailer-marker ${movementStatus}${selected ? ' selected' : ''}${hasDispatch ? ' has-dispatch' : ''}">
         <span class="mav-trailer-marker-pulse"></span>
         <span class="mav-trailer-marker-icon">▰</span>
-        <span class="mav-marker-source-badge mav2">M2</span>
+        <span class="mav-marker-source-badge ${sourceClass}"${sourceStyle}>${sourceBadge}</span>
         ${hasDispatch ? '<span class="mav-trailer-load-badge">L</span>' : ''}
       </div>
     `,
@@ -412,12 +434,14 @@ function createTruckIcon(
   movementStatus: MovementStatus,
   selected = false,
   hasDispatch = false,
-  trackingSource: 'PHONE' | 'MAV2' = 'PHONE'
+  trackingSource: TrackingSourceCode = 'PHONE'
 ) {
   const sourceBadge =
     trackingSource === 'PHONE'
       ? '📱'
-      : 'M2'
+      : trackingSource === 'DIGITAL_MATTER'
+        ? 'DM'
+        : 'M2'
 
   return L.divIcon({
     className: 'mav-truck-marker-wrapper',
@@ -447,15 +471,29 @@ function assetTypeCode(
 
 function trackingSourceCode(
   asset: any
-): 'PHONE' | 'MAV2' {
-  return String(
-    asset?.trackingSource ||
-      (assetTypeCode(asset) === 'TRK'
-        ? 'PHONE'
-        : 'MAV2')
-  ).toUpperCase() === 'PHONE'
-    ? 'PHONE'
-    : 'MAV2'
+): TrackingSourceCode {
+  const source =
+    String(
+      asset?.trackingSource ||
+        (assetTypeCode(asset) === 'TRK'
+          ? 'PHONE'
+          : 'MAV2')
+    )
+      .trim()
+      .toUpperCase()
+
+  if (source === 'PHONE') {
+    return 'PHONE'
+  }
+
+  if (
+    source === 'DIGITAL_MATTER' ||
+    source === 'DM'
+  ) {
+    return 'DIGITAL_MATTER'
+  }
+
+  return 'MAV2'
 }
 
 function TrackingSourceIcon({
@@ -467,11 +505,27 @@ function TrackingSourceIcon({
 }) {
   const source = trackingSourceCode(asset)
 
+  const sourceLabel =
+    source === 'PHONE'
+      ? 'Phone GPS'
+      : source === 'DIGITAL_MATTER'
+        ? 'Digital Matter'
+        : 'MAV2 device'
+
   return (
     <span
-      className={`tracking-source-icon ${source.toLowerCase()}${compact ? ' compact' : ''}`}
-      title={source === 'PHONE' ? 'Phone GPS' : 'MAV2 device'}
-      aria-label={source === 'PHONE' ? 'Phone GPS' : 'MAV2 device'}
+      className={`tracking-source-icon ${source.toLowerCase().replace('_', '-')}${compact ? ' compact' : ''}`}
+      title={sourceLabel}
+      aria-label={sourceLabel}
+      style={
+        source === 'DIGITAL_MATTER'
+          ? {
+              color: '#67e8f9',
+              borderColor: 'rgba(34,211,238,.35)',
+              background: 'rgba(6,182,212,.14)'
+            }
+          : undefined
+      }
     >
       {source === 'PHONE' ? (
         <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -489,7 +543,13 @@ function TrackingSourceIcon({
         </svg>
       )}
       {!compact ? (
-        <span>{source === 'PHONE' ? 'PHONE' : 'MAV2'}</span>
+        <span>
+          {source === 'PHONE'
+            ? 'PHONE'
+            : source === 'DIGITAL_MATTER'
+              ? 'DM'
+              : 'MAV2'}
+        </span>
       ) : null}
     </span>
   )
@@ -937,10 +997,13 @@ function MapController({
       lastFocusedAssetRef.current = selectedAssetKey
       hadSelectedAssetRef.current = true
 
-      map.setView(
+      map.flyTo(
         [latitude, longitude],
-        map.getZoom(),
-        { animate: false }
+        17,
+        {
+          animate: true,
+          duration: 0.7
+        }
       )
       return
     }
@@ -1769,7 +1832,8 @@ function PublicLoadTrackingPage({
                                 ? 'moving'
                                 : 'parked',
                               true,
-                              true
+                              true,
+                              trackingSourceCode(dispatch.asset)
                             )
                       }
                     />
@@ -2041,7 +2105,8 @@ function PublicLoadTrackingPage({
                                 ? 'moving'
                                 : 'parked',
                               true,
-                              true
+                              true,
+                              trackingSourceCode(dispatch.asset)
                             )
                       }
                     >
@@ -3324,6 +3389,11 @@ function App() {
     selectedDeviceId,
     setSelectedDeviceId
   ] = useState('')
+
+  const [
+    mapFocusRequest,
+    setMapFocusRequest
+  ] = useState(0)
 
   const [
     now,
@@ -9427,6 +9497,12 @@ function App() {
         temperatureChartPadding * 2)
 
   const openAssetOnMap = () => {
+    if (selectedDeviceId) {
+      setMapFocusRequest(
+        (value) => value + 1
+      )
+    }
+
     setSearchTerm('')
     setStatusFilter('all')
     setAssetTypeFilter('all')
@@ -9486,6 +9562,9 @@ function App() {
 
     setSelectedDeviceId(
       asset.deviceId
+    )
+    setMapFocusRequest(
+      (value) => value + 1
     )
     setAssetSearchTerm('')
     setSearchTerm('')
@@ -10148,7 +10227,9 @@ function App() {
                     fleetMapViewKey
                   }
                   selectedAssetKey={
-                    selectedDeviceId || null
+                    selectedDeviceId
+                      ? `${selectedDeviceId}:${mapFocusRequest}`
+                      : null
                   }
                 />
 
@@ -10293,7 +10374,8 @@ function App() {
                                   selected,
                                   Boolean(
                                     activeDispatch
-                                  )
+                                  ),
+                                  trackingSourceCode(asset)
                                 )
                           }
                           opacity={
@@ -10305,6 +10387,9 @@ function App() {
                             click: () => {
                               setSelectedDeviceId(
                                 asset.deviceId
+                              )
+                              setMapFocusRequest(
+                                (value) => value + 1
                               )
                               setAssetSearchTerm('')
                               setSearchTerm('')
@@ -10934,7 +11019,11 @@ function App() {
                               Tracking Source
                             </dt>
                             <dd>
-                              {isSelectedPhoneTracker ? 'Phone GPS' : 'MAV2'}
+                              {trackingSourceCode(selectedAsset) === 'PHONE'
+                                ? 'Phone GPS'
+                                : trackingSourceCode(selectedAsset) === 'DIGITAL_MATTER'
+                                  ? 'Digital Matter'
+                                  : 'MAV2'}
                             </dd>
                           </div>
 
@@ -11108,7 +11197,9 @@ function App() {
                                   </span>
 
                                   <span>
-                                    MAV2 Battery
+                                    {trackingSourceCode(selectedAsset) === 'DIGITAL_MATTER'
+                                      ? 'Digital Matter Battery'
+                                      : 'MAV2 Battery'}
                                   </span>
                                 </div>
                               </div>
@@ -11681,7 +11772,9 @@ function App() {
                                   <span className="asset-source-label">
                                     {trackingSourceCode(asset) === 'PHONE'
                                       ? 'Phone GPS'
-                                      : 'MAV2'}
+                                      : trackingSourceCode(asset) === 'DIGITAL_MATTER'
+                                        ? 'Digital Matter'
+                                        : 'MAV2'}
                                   </span>
                                   {
                                     asset.groupName && (
@@ -11791,6 +11884,9 @@ function App() {
                                 onClick={() => {
                                   setSelectedDeviceId(
                                     asset.deviceId
+                                  )
+                                  setMapFocusRequest(
+                                    (value) => value + 1
                                   )
                                   setSearchTerm('')
                                   setStatusFilter('all')
@@ -12742,13 +12838,18 @@ function App() {
                                   >
                                     {dispatchStatusLabel(dispatch.status)}
                                   </span>
-                                  <small
-                                    className={
-                                      `operations-device-state ${rowStatus}`
-                                    }
-                                  >
-                                    {rowStatusLabel}
-                                  </small>
+                                  {
+                                    dispatch.status !== 'DELIVERED' &&
+                                    dispatch.status !== 'CANCELLED' && (
+                                      <small
+                                        className={
+                                          `operations-device-state ${rowStatus}`
+                                        }
+                                      >
+                                        {rowStatusLabel}
+                                      </small>
+                                    )
+                                  }
                                 </div>
 
                                 <div className="operations-load-cell movement-cell">
@@ -13029,13 +13130,18 @@ function App() {
                                       {dispatchStatusLabel(dispatch.status)}
                                     </span>
 
-                                    <span
-                                      className={
-                                        `operations-device-state ${detailStatus}`
-                                      }
-                                    >
-                                      {detailStatusLabel}
-                                    </span>
+                                    {
+                                      dispatch.status !== 'DELIVERED' &&
+                                      dispatch.status !== 'CANCELLED' && (
+                                        <span
+                                          className={
+                                            `operations-device-state ${detailStatus}`
+                                          }
+                                        >
+                                          {detailStatusLabel}
+                                        </span>
+                                      )
+                                    }
                                   </div>
 
                                   <small>
@@ -13258,23 +13364,6 @@ function App() {
                                         </div>
                                       )
                                     }
-
-                                    <div className="operations-document-actions">
-                                      <button
-                                        type="button"
-                                        className="secondary-action"
-                                        onClick={() => openLoadDocumentPacket(dispatch.id)}
-                                      >
-                                        Preview Packet
-                                      </button>
-                                      <button
-                                        type="button"
-                                        className="primary-action"
-                                        onClick={() => openLoadDocumentPacket(dispatch.id)}
-                                      >
-                                        Download PDF
-                                      </button>
-                                    </div>
 
                                     <label className="secondary-action dispatch-document-upload">
                                       {
@@ -13555,6 +13644,9 @@ function App() {
                                           onClick={() => {
                                             setSelectedDeviceId(
                                               dispatch.asset.deviceId
+                                            )
+                                            setMapFocusRequest(
+                                              (value) => value + 1
                                             )
                                             setActiveView('map')
                                           }}

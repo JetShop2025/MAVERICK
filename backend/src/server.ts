@@ -5,11 +5,12 @@ import express, {
 } from 'express'
 
 import { registerMavdrivePublicPages } from './mavdrive-public-pages.js'
+import { loadTelemetryViews } from './telemetry-view.js'
 import cors from 'cors'
 import dotenv from 'dotenv'
 import bcrypt from 'bcryptjs'
 import jwt from 'jsonwebtoken'
-import { createHash, randomBytes } from 'node:crypto'
+import { createHash, randomBytes, timingSafeEqual } from 'node:crypto'
 
 import { PrismaClient } from './generated/prisma/client.js'
 import { PrismaPg } from '@prisma/adapter-pg'
@@ -75,6 +76,9 @@ const PUBLIC_FRONTEND_URL =
 
 const MOBILE_TELEMETRY_KEY =
   process.env.MOBILE_TELEMETRY_KEY?.trim() || ''
+
+// Set after installing the same key in MAV2 firmware or the Soracom Beam header.
+const MAV2_TELEMETRY_KEY = process.env.MAV2_TELEMETRY_KEY?.trim() || ''
 
 const DIGITAL_MATTER_API_KEY =
   process.env.DIGITAL_MATTER_API_KEY?.trim() || ''
@@ -8737,6 +8741,15 @@ app.post(
   async (req, res) => {
 
     try {
+      if (MAV2_TELEMETRY_KEY) {
+        const requestKey = typeof req.headers['x-mavtrack-key'] === 'string'
+          ? req.headers['x-mavtrack-key'].trim() : ''
+        const validKey = timingSafeEqual(
+          createHash('sha256').update(requestKey).digest(),
+          createHash('sha256').update(MAV2_TELEMETRY_KEY).digest()
+        )
+        if (!validKey) return res.status(401).json({ ok: false, message: 'Invalid MAV2 credentials' })
+      }
       const {
         deviceId,
         temperature,
@@ -8910,6 +8923,7 @@ app.post(
           : null
 
       const shouldAutoProvisionMav2 =
+        process.env.MAV2_AUTO_PROVISION === 'true' &&
         mav2FleetNumber !== null &&
         (
           mav2FleetNumber === 1 ||
@@ -8919,7 +8933,8 @@ app.post(
           )
         )
 
-      if (shouldAutoProvisionMav2) {
+      // Bootstrap missing units only. Telemetry must never undo an admin edit.
+      if (!asset && shouldAutoProvisionMav2) {
         const trailer002 =
           await prisma.asset.findUnique({
             where: {
@@ -8940,18 +8955,7 @@ app.post(
                 deviceId:
                   normalizedDeviceId
               },
-              update: {
-                companyId:
-                  trailer002.companyId,
-                name:
-                  fleetName,
-                description:
-                  'Maverick T-SIM7670G-S3 tracking unit',
-                assetType: 'TRL',
-                trackingSource: 'MAV2',
-                groupName: 'GA LOGISTICS',
-                active: true
-              },
+              update: {},
               create: {
                 companyId:
                   trailer002.companyId,
@@ -9013,6 +9017,16 @@ app.post(
         }
       }
 
+      if (!asset) {
+        return res.status(404).json({ ok: false, message: 'Register this MAV2 asset before sending telemetry' })
+      }
+      if (!asset.active) {
+        return res.status(410).json({ ok: false, message: 'Asset is inactive' })
+      }
+      if (asset.trackingSource !== 'MAV2') {
+        return res.status(409).json({ ok: false, message: 'Asset does not use MAV2 tracking' })
+      }
+
       const previousLiveTelemetry =
         (
           asset &&
@@ -9023,7 +9037,8 @@ app.post(
                 assetId:
                   asset.id,
                 isBackfill:
-                  false
+                  false,
+                temperature: { not: null }
               },
               orderBy: {
                 receivedAt:
@@ -9639,182 +9654,40 @@ app.post(
 // =====================================================
 
 app.get(
+  '/api/telemetry/fleet',
+  requireAuth,
+  requireDispatchAccess,
+  async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const companyId = req.user?.companyId
+      if (!companyId) return res.status(401).json({ ok: false, message: 'Invalid session' })
+      const assets = await prisma.asset.findMany({ where: { companyId, active: true } })
+      const telemetry = await loadTelemetryViews(prisma, assets)
+      return res.json({ ok: true, telemetry })
+    } catch (error) {
+      console.error('Error loading fleet telemetry:', error)
+      return res.status(500).json({ ok: false, message: 'Database error' })
+    }
+  }
+)
+
+app.get(
   '/api/telemetry/latest',
   requireAuth,
   requireDispatchAccess,
-  async (
-    req: AuthenticatedRequest,
-    res: Response
-  ) => {
+  async (req: AuthenticatedRequest, res: Response) => {
     try {
-      const companyId =
-        req.user?.companyId
-
-      if (!companyId) {
-        return res.status(401).json({
-          ok: false,
-          message: 'Invalid session'
-        })
-      }
-
-      const deviceId =
-        typeof req.query.deviceId === 'string'
-          ? req.query.deviceId.trim()
-          : ''
-
-      if (!deviceId) {
-        return res.status(400).json({
-          ok: false,
-          message: 'deviceId is required'
-        })
-      }
-
-      // The requested asset MUST belong to the
-      // authenticated company. This also prevents
-      // telemetry from one trailer being returned
-      // for another trailer.
-      const asset =
-        await prisma.asset.findFirst({
-          where: {
-            companyId,
-            deviceId,
-            active: true
-          },
-          select: {
-            id: true,
-            deviceId: true,
-            trackingSource: true,
-            trackingActive: true,
-            trackingStartedAt: true,
-            trackingStoppedAt: true,
-            lastHeartbeatAt: true,
-            lastPhoneGpsAt: true
-          }
-        })
-
-      if (!asset) {
-        return res.status(404).json({
-          ok: false,
-          message: 'Asset not found'
-        })
-      }
-
-      // ---------------------------------
-      // LATEST LIVE TELEMETRY FOR THIS ASSET
-      // ---------------------------------
-
-      const latestTelemetry =
-        await prisma.telemetry.findFirst({
-          where: {
-            assetId: asset.id,
-            isBackfill: false
-          },
-          orderBy: {
-            receivedAt: 'desc'
-          }
-        })
-
-      if (!latestTelemetry) {
-        return res.status(404).json({
-          ok: false,
-          message:
-            'No telemetry available for this asset'
-        })
-      }
-
-      // ---------------------------------
-      // LAST VALID GPS LOCATION FOR THIS ASSET
-      // ---------------------------------
-
-      const latestLocation =
-        await prisma.telemetry.findFirst({
-          where: {
-            assetId: asset.id,
-            isBackfill: false,
-            latitude: {
-              not: null
-            },
-            longitude: {
-              not: null
-            },
-            recordedAt: {
-              not: null
-            }
-          },
-          orderBy: [
-            {
-              recordedAt: 'desc'
-            },
-            {
-              receivedAt: 'desc'
-            }
-          ]
-        })
-
-      const hasCurrentGps =
-        latestTelemetry.latitude !== null &&
-        latestTelemetry.longitude !== null &&
-        latestTelemetry.recordedAt !== null
-
-      return res.json({
-        ok: true,
-        telemetry: {
-          ...latestTelemetry,
-
-          // Always identify the requested device.
-          deviceId: asset.deviceId,
-
-          // PHONE tracking session state. Keep connection status separate
-          // from GPS freshness so a locked/stationary iPhone does not
-          // bounce Offline just because iOS has not emitted a new fix.
-          trackingSource: asset.trackingSource,
-          trackingActive: asset.trackingActive,
-          trackingStartedAt: asset.trackingStartedAt,
-          trackingStoppedAt: asset.trackingStoppedAt,
-          lastHeartbeatAt: asset.lastHeartbeatAt,
-          lastPhoneGpsAt: asset.lastPhoneGpsAt,
-
-          // MAV2 power telemetry.
-          reeferPower:
-            latestTelemetry.reeferPower ??
-            null,
-
-          powerSource:
-            latestTelemetry.powerSource ??
-            null,
-
-          latitude:
-            latestTelemetry.latitude ??
-            latestLocation?.latitude ??
-            null,
-
-          longitude:
-            latestTelemetry.longitude ??
-            latestLocation?.longitude ??
-            null,
-
-          altitude:
-            latestTelemetry.altitude ??
-            latestLocation?.altitude ??
-            null,
-
-          hasCurrentGps,
-
-          locationReceivedAt:
-            latestLocation?.recordedAt ??
-            null
-        }
-      })
+      const companyId = req.user?.companyId
+      if (!companyId) return res.status(401).json({ ok: false, message: 'Invalid session' })
+      const deviceId = typeof req.query.deviceId === 'string' ? req.query.deviceId.trim() : ''
+      if (!deviceId) return res.status(400).json({ ok: false, message: 'deviceId is required' })
+      const asset = await prisma.asset.findFirst({ where: { companyId, deviceId, active: true } })
+      if (!asset) return res.status(404).json({ ok: false, message: 'Asset not found' })
+      const views = await loadTelemetryViews(prisma, [asset])
+      return res.json({ ok: true, telemetry: views[asset.deviceId] })
     } catch (error) {
-      console.error(
-        'Error loading latest telemetry:',
-        error
-      )
-
-      return res.status(500).json({
-        ok: false,
-        message: 'Database error'
-      })
+      console.error('Error loading latest telemetry:', error)
+      return res.status(500).json({ ok: false, message: 'Database error' })
     }
   }
 )
@@ -9964,11 +9837,13 @@ app.get(
             receivedAt: true,
             isBackfill: true
           },
-          take: 50000
+          orderBy: [{ recordedAt: 'asc' }, { receivedAt: 'asc' }, { id: 'asc' }],
+          take: 50001
         })
 
+      const truncated = rows.length > 50000
       const points =
-        rows
+        rows.slice(0, 50000)
           .map((row) => ({
             id: row.id,
             temperature:
@@ -10020,7 +9895,8 @@ app.get(
           to:
             to.toISOString()
         },
-        points
+        points,
+        truncated
       })
     } catch (error) {
       console.error(
@@ -10614,6 +10490,10 @@ app.post(
 async function startServer() {
 
   try {
+
+    if (!MAV2_TELEMETRY_KEY) {
+      console.warn('MAV2 authentication is not enabled. Configure MAV2_TELEMETRY_KEY after updating devices or Soracom Beam.')
+    }
 
     await ensureAdminUser()
 

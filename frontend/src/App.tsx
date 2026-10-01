@@ -3551,8 +3551,16 @@ function App() {
   // TELEMETRY
   // =====================================================
 
+  const telemetryControllerRef = useRef<AbortController | null>(null)
+  const fleetControllerRef = useRef<AbortController | null>(null)
+  const historyRequestRef = useRef(0)
+
   // Clear every device-specific view immediately when the user changes asset.
   useEffect(() => {
+    telemetryControllerRef.current?.abort()
+    historyRequestRef.current += 1
+    setHistoryLoading(false)
+    setHistoryError('')
     setTelemetry(null)
     setRoutePoints([])
     setLiveRoadSegments([])
@@ -3563,108 +3571,52 @@ function App() {
     setHistoryOpen(false)
   }, [selectedDeviceId])
 
-  const loadTelemetry =
-    useCallback(
-      async () => {
-        const token =
-          localStorage.getItem(
-            'maverick_token'
-          )
-
-        if (!token) {
-          setIsLoggedIn(false)
-          return
-        }
-
-        // Nothing is selected on initial load.
-        if (!selectedDeviceId) {
-          setTelemetry(null)
-          return
-        }
-
-        try {
-          const res =
-            await fetch(
-              `${API_BASE}/api/telemetry/latest?deviceId=${encodeURIComponent(selectedDeviceId)}`,
-              {
-                headers: {
-                  Authorization:
-                    `Bearer ${token}`
-                }
-              }
-            )
-
-          const data =
-            await res.json()
-
-          if (
-            res.status === 401
-          ) {
-            localStorage.removeItem(
-              'maverick_token'
-            )
-
-            localStorage.removeItem(
-              'maverick_user'
-            )
-
-            setCurrentUser(null)
-            setTelemetry(null)
-            setIsLoggedIn(false)
-            return
-          }
-
-          if (res.ok && data.ok) {
-            setTelemetry(
-              data.telemetry
-            )
-
-            // IMPORTANT:
-            // Do not setSelectedDeviceId here.
-            // The selected asset belongs to the user's choice,
-            // not whichever trailer transmitted most recently.
-            setApiStatus(
-              'online'
-            )
-          } else {
-            setTelemetry(null)
-            setApiStatus(
-              res.status === 404
-                ? 'online'
-                : 'offline'
-            )
-          }
-        } catch {
-          setTelemetry(null)
-          setApiStatus(
-            'offline'
-          )
-        }
-      },
-      [selectedDeviceId]
-    )
+  const loadTelemetry = useCallback(async () => {
+    telemetryControllerRef.current?.abort()
+    const controller = new AbortController()
+    telemetryControllerRef.current = controller
+    const token = localStorage.getItem('maverick_token')
+    if (!token) { setIsLoggedIn(false); return }
+    if (!selectedDeviceId) { setTelemetry(null); return }
+    try {
+      const res = await fetch(
+        `${API_BASE}/api/telemetry/latest?deviceId=${encodeURIComponent(selectedDeviceId)}`,
+        { headers: { Authorization: `Bearer ${token}` }, signal: controller.signal }
+      )
+      const data = await res.json()
+      if (controller.signal.aborted || telemetryControllerRef.current !== controller) return
+      if (res.status === 401) { handleLogout(); return }
+      if (res.ok && data.ok && data.telemetry?.deviceId === selectedDeviceId) {
+        setTelemetry(data.telemetry)
+        setApiStatus('online')
+      } else if (res.status === 404) {
+        setTelemetry(null)
+        setApiStatus('online')
+      } else {
+        // A failed refresh must not erase the last known location or readings.
+        setApiStatus('offline')
+      }
+    } catch {
+      if (!controller.signal.aborted && telemetryControllerRef.current === controller) {
+        setApiStatus('offline')
+      }
+    } finally {
+      if (telemetryControllerRef.current === controller) telemetryControllerRef.current = null
+    }
+  }, [selectedDeviceId])
 
   useEffect(() => {
-    if (!selectedDeviceId) {
-      return
-    }
-
+    if (!selectedDeviceId || !isLoggedIn) return
     loadTelemetry()
-
-    const interval =
-      setInterval(
-        loadTelemetry,
-        5000
-      )
-
-    return () =>
-      clearInterval(
-        interval
-      )
-  }, [
-    selectedDeviceId,
-    loadTelemetry
-  ])
+    const interval = window.setInterval(() => {
+      // Skip overlapping polls on a slow connection.
+      if (telemetryControllerRef.current?.signal.aborted !== false) loadTelemetry()
+    }, 5000)
+    return () => {
+      window.clearInterval(interval)
+      telemetryControllerRef.current?.abort()
+    }
+  }, [selectedDeviceId, isLoggedIn, loadTelemetry])
 
 
   // =====================================================
@@ -3790,90 +3742,43 @@ function App() {
   // Fleet view needs the latest reading for every asset,
   // not only the currently selected trailer.
 
-  const loadFleetTelemetry =
-    useCallback(
-      async () => {
-        const token =
-          localStorage.getItem(
-            'maverick_token'
-          )
-
-        if (!token || assets.length === 0) {
-          setFleetTelemetry({})
-          return
-        }
-
-        try {
-          const entries =
-            await Promise.all(
-              assets.map(async (asset) => {
-                const res = await fetch(
-                  `${API_BASE}/api/telemetry/latest?deviceId=${encodeURIComponent(asset.deviceId)}`,
-                  {
-                    headers: {
-                      Authorization:
-                        `Bearer ${token}`
-                    }
-                  }
-                )
-
-                if (res.status === 401) {
-                  throw new Error('AUTH_EXPIRED')
-                }
-
-                const data =
-                  await res.json()
-
-                return [
-                  asset.deviceId,
-                  res.ok && data.ok
-                    ? data.telemetry
-                    : null
-                ] as const
-              })
-            )
-
-          setFleetTelemetry(
-            Object.fromEntries(entries)
-          )
-        } catch (error) {
-          if (
-            error instanceof Error &&
-            error.message === 'AUTH_EXPIRED'
-          ) {
-            handleLogout()
-            return
-          }
-
-          console.error(
-            'Unable to load fleet telemetry:',
-            error
-          )
-        }
-      },
-      [assets]
-    )
+  const loadFleetTelemetry = useCallback(async () => {
+    fleetControllerRef.current?.abort()
+    const controller = new AbortController()
+    fleetControllerRef.current = controller
+    const token = localStorage.getItem('maverick_token')
+    if (!token) return
+    try {
+      const res = await fetch(`${API_BASE}/api/telemetry/fleet`, {
+        headers: { Authorization: `Bearer ${token}` },
+        signal: controller.signal
+      })
+      const data = await res.json()
+      if (controller.signal.aborted || fleetControllerRef.current !== controller) return
+      if (res.status === 401) { handleLogout(); return }
+      if (!res.ok || !data.ok) throw new Error('Unable to load fleet telemetry')
+      setFleetTelemetry(data.telemetry || {})
+      setApiStatus('online')
+    } catch {
+      if (!controller.signal.aborted && fleetControllerRef.current === controller) {
+        setApiStatus('offline')
+      }
+    } finally {
+      if (fleetControllerRef.current === controller) fleetControllerRef.current = null
+    }
+  }, [])
 
   useEffect(() => {
-    if (!isLoggedIn || assets.length === 0) {
-      return
-    }
-
+    if (!isLoggedIn) { setFleetTelemetry({}); return }
     loadFleetTelemetry()
-
-    const interval =
-      setInterval(
-        loadFleetTelemetry,
-        5000
-      )
-
-    return () =>
-      clearInterval(interval)
-  }, [
-    isLoggedIn,
-    assets.length,
-    loadFleetTelemetry
-  ])
+    const interval = window.setInterval(() => {
+      if (!fleetControllerRef.current) loadFleetTelemetry()
+    }, 5000)
+    return () => {
+      window.clearInterval(interval)
+      fleetControllerRef.current?.abort()
+    }
+  }, [isLoggedIn, assets, loadFleetTelemetry])
 
 
   // =====================================================
@@ -7034,7 +6939,7 @@ function App() {
       : '--'
 
   const temperatureLabel =
-    deviceStatus === 'online'
+    telemetry?.hasCurrentTemperature && deviceStatus === 'online'
       ? 'Temperature'
       : 'Last Temperature'
 
@@ -8341,6 +8246,7 @@ function App() {
         customDate
       )
 
+      const requestId = ++historyRequestRef.current
       setHistoryLoading(true)
       setHistoryError('')
       setSelectedHistoryTripId('all')
@@ -8367,6 +8273,8 @@ function App() {
         const data =
           await res.json()
 
+        if (requestId !== historyRequestRef.current) return
+
         if (res.status === 401) {
           handleLogout()
           return
@@ -8379,6 +8287,10 @@ function App() {
             'Unable to load trip history.'
           )
           return
+        }
+
+        if (data.truncated) {
+          setHistoryError('Showing the first 50,000 readings. Select a shorter date range for the complete history.')
         }
 
         setHistoryPoints(
@@ -8396,7 +8308,7 @@ function App() {
               timestamp:
                 String(point.timestamp),
               temperature:
-                Number(point.temperature),
+                point.temperature == null ? NaN : Number(point.temperature),
               altitude:
                 point.altitude == null
                   ? null
@@ -8415,12 +8327,13 @@ function App() {
           )
         )
       } catch {
+        if (requestId !== historyRequestRef.current) return
         setHistoryPoints([])
         setHistoryError(
           'Unable to connect to MAVTRACK.'
         )
       } finally {
-        setHistoryLoading(false)
+        if (requestId === historyRequestRef.current) setHistoryLoading(false)
       }
     },
     [
@@ -8531,9 +8444,7 @@ function App() {
               timestamp:
                 String(point.timestamp),
               temperature:
-                Number(
-                  point.temperature
-                ),
+                point.temperature == null ? NaN : Number(point.temperature),
               altitude:
                 point.altitude == null
                   ? null
@@ -8556,6 +8467,9 @@ function App() {
           )
 
         setReportPoints(points)
+        if (data.truncated) {
+          setReportError('This report contains only the first 50,000 readings. Select a shorter date range for a complete report.')
+        }
         setReportGeneratedAt(
           new Date().toISOString()
         )
@@ -10158,6 +10072,7 @@ function App() {
           className="toolbar-button"
           onClick={() => {
             loadTelemetry()
+            loadFleetTelemetry()
             loadAssets()
           }}
           type="button"
@@ -10167,7 +10082,7 @@ function App() {
 
         <div className="map-mode">
           <span>
-            API {apiStatus}
+            {apiStatus === 'online' ? 'API online' : 'Update failed · Showing last known data'}
           </span>
 
           <span>•</span>
@@ -11128,6 +11043,9 @@ function App() {
                               <strong>
                                 {temperatureF}°F
                               </strong>
+                              <small className="temperature-alert-note">
+                                Measured {formatDateTime(telemetry?.temperatureRecordedAt)}
+                              </small>
 
                               {
                                 temperatureOutOfRange && (
@@ -15319,6 +15237,7 @@ function App() {
                   <strong>
                     {temperatureF}°F
                   </strong>
+                  <small>Measured {formatDateTime(telemetry?.temperatureRecordedAt)}</small>
                 </article>
 
                 <article className="page-card monitor-card">
@@ -16015,10 +15934,8 @@ function App() {
                                       }
                                     >
                                       {
-                                        pointTempF.toFixed(
-                                          1
-                                        )
-                                      }°F
+                                        Number.isFinite(pointTempF) ? `${pointTempF.toFixed(1)}°F` : 'Unavailable'
+                                      }
                                     </td>
 
                                     <td>

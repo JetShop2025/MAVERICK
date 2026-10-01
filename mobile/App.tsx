@@ -56,6 +56,15 @@ Notifications.setNotificationHandler({
 };
 
 const API_URL = "https://maverick-1z64.onrender.com";
+const PRIVACY_URL = API_URL + "/mavdrive/privacy";
+const SUPPORT_URL = API_URL + "/mavdrive/support";
+async function openExternalPage(url: string) {
+  try {
+    await Linking.openURL(url);
+  } catch {
+    Alert.alert("Unable to open page", "Please try again with an internet connection.");
+  }
+}
 
 const BACKGROUND_LOCATION_TASK =
   "MAVTRACK_BACKGROUND_LOCATION";
@@ -1588,21 +1597,10 @@ export default function App() {
   async function addLoadPhoto(
     dispatch: Dispatch
   ) {
-    const permission =
-      await ImagePicker.requestMediaLibraryPermissionsAsync();
-
-    if (!permission.granted) {
-      Alert.alert(
-        "Photo access required",
-        "Allow photo access to upload load photos."
-      );
-      return;
-    }
-
+    // The system image picker grants access only to the selected photos.
     const result =
       await ImagePicker.launchImageLibraryAsync({
-        mediaTypes:
-          ImagePicker.MediaTypeOptions.Images,
+        mediaTypes: ["images"],
         quality: 0.82,
         base64: true,
       });
@@ -2513,6 +2511,12 @@ export default function App() {
               New driver? Contact your fleet
               administrator.
             </Text>
+            <Pressable accessibilityRole="link" onPress={() => void openExternalPage(PRIVACY_URL)} style={{ padding: 12 }}>
+              <Text style={[styles.loginFooterFinal, { color: "#8DBFFF" }]}>Privacy Policy</Text>
+            </Pressable>
+            <Pressable accessibilityRole="link" onPress={() => void openExternalPage(SUPPORT_URL)} style={{ padding: 12 }}>
+              <Text style={[styles.loginFooterFinal, { color: "#8DBFFF" }]}>Support</Text>
+            </Pressable>
           </ScrollView>
         </KeyboardAvoidingView>
       </SafeAreaView>
@@ -2807,6 +2811,9 @@ function TrackingDisclosureScreen({
         <Text style={styles.trackingDisclosureSafety}>
           Set up MAVDRIVE while parked. Do not interact with the app while driving.
         </Text>
+        <Pressable accessibilityRole="link" onPress={() => void openExternalPage(PRIVACY_URL)} style={{ padding: 12 }}>
+          <Text style={styles.profileEditText}>Read Privacy Policy</Text>
+        </Pressable>
 
         <Pressable
           onPress={onContinue}
@@ -4956,6 +4963,20 @@ function ProfileScreen({
             No active assignment.
           </Text>
         )}
+      </View>
+
+      <View style={styles.profileRowsCard}>
+        <Pressable accessibilityRole="link" onPress={() => void openExternalPage(PRIVACY_URL)} style={{ padding: 16 }}>
+          <Text style={styles.profileEditText}>Privacy Policy</Text>
+        </Pressable>
+        <View style={styles.profileRowDivider} />
+        <Pressable accessibilityRole="link" onPress={() => void openExternalPage(SUPPORT_URL)} style={{ padding: 16 }}>
+          <Text style={styles.profileEditText}>Support & Data Requests</Text>
+        </Pressable>
+        <Text style={[styles.noAssignmentText, { padding: 16 }]}>
+          MAVDRIVE {Constants.expoConfig?.version || "1.0.0"}
+          {Constants.nativeBuildVersion ? " · Build " + Constants.nativeBuildVersion : ""}
+        </Text>
       </View>
 
       <Pressable

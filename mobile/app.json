@@ -17,6 +17,16 @@
         "NSLocationAlwaysAndWhenInUseUsageDescription": "MAVDRIVE uses background location so MAVTRACK can continue receiving your truck position when the screen is locked or another app is open.",
         "ITSAppUsesNonExemptEncryption": false,
         "CFBundleDisplayName": "MAVDRIVE"
+      },
+      "privacyManifests": {
+        "NSPrivacyAccessedAPITypes": [
+          {
+            "NSPrivacyAccessedAPITypeReasons": [
+              "CA92.1"
+            ],
+            "NSPrivacyAccessedAPIType": "NSPrivacyAccessedAPICategoryUserDefaults"
+          }
+        ]
       }
     },
     "android": {
@@ -43,15 +53,23 @@
       [
         "expo-location",
         {
-          "locationWhenInUsePermission": "Allow MavApp to use your location while tracking is active.",
-          "locationAlwaysAndWhenInUsePermission": "Allow MavApp to use your location in the background so MAVTRACK can continue receiving truck GPS.",
+          "locationWhenInUsePermission": "MAVDRIVE uses your location to share your truck position with your fleet while tracking is active.",
+          "locationAlwaysAndWhenInUsePermission": "MAVDRIVE shares your truck position with your fleet during active tracking, including when the screen is locked or another app is open.",
           "isIosBackgroundLocationEnabled": true,
           "isAndroidBackgroundLocationEnabled": true,
           "isAndroidForegroundServiceEnabled": true
         }
       ],
       "expo-secure-store",
-      "expo-notifications"
+      "expo-notifications",
+      [
+        "expo-image-picker",
+        {
+          "cameraPermission": false,
+          "photosPermission": "MAVDRIVE lets you select photos to attach to your assigned load.",
+          "microphonePermission": false
+        }
+      ]
     ],
     "extra": {
       "eas": {

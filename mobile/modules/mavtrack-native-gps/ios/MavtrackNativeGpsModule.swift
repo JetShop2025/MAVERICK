@@ -193,6 +193,12 @@ private final class MavtrackLocationEngine: NSObject, CLLocationManagerDelegate 
       writeQueue([])
       set(0.0, "lastQueuedTime")
     }
+    // Cancel the previous upload before switching sessions. Its completion
+    // must not clear the upload state or background task of the new session.
+    currentTask?.cancel()
+    currentTask = nil
+    sending = false
+    endUploadBackgroundTask()
     generation += 1
     deviceId = device
     apiUrl = server.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
@@ -367,7 +373,6 @@ private final class MavtrackLocationEngine: NSObject, CLLocationManagerDelegate 
         guard let self = self else { return }
         // Never remove a point from a different session if STOP/START happened mid-request.
         guard self.running && self.deviceId == expectedDevice && self.generation == expectedGeneration else {
-          self.endUploadBackgroundTask()
           return
         }
         self.sending = false

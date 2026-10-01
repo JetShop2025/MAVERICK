@@ -4,6 +4,7 @@ import express, {
   type NextFunction
 } from 'express'
 
+import { registerMavdrivePublicPages } from './mavdrive-public-pages.js'
 import cors from 'cors'
 import dotenv from 'dotenv'
 import bcrypt from 'bcryptjs'
@@ -32,6 +33,7 @@ const prisma = new PrismaClient({
 // =====================================================
 
 const app = express()
+registerMavdrivePublicPages(app)
 
 const PORT =
   process.env.PORT || 3000

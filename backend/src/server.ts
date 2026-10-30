@@ -6715,6 +6715,7 @@ async function updateDispatchStopStatusForRequest({
                         <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="max-width:680px;background:#ffffff;border-radius:16px;overflow:hidden;box-shadow:0 8px 30px rgba(15,23,42,0.08);">
                           <tr>
                             <td style="background:#071426;padding:26px 32px;">
+                              <img src="${escapeHtml(PUBLIC_FRONTEND_URL + "/branding/mavtrack-logo.png")}" width="108" height="90" alt="MAVTRACK" style="display:block;width:108px;height:90px;margin:0 0 18px;border:0;border-radius:8px;background:#ffffff;" />
                               <div style="font-size:23px;font-weight:800;letter-spacing:2px;color:#ffffff;">MAVTRACK LLC</div>
                               <div style="margin-top:7px;font-size:13px;color:#94a3b8;">Load ${escapeHtml(updated.loadNumber)} status update</div>
                             </td>
@@ -7338,6 +7339,7 @@ html: `
                 background:#071426;
                 padding:30px 36px;
               ">
+                <img src="${escapeHtml(PUBLIC_FRONTEND_URL + "/branding/mavtrack-logo.png")}" width="108" height="90" alt="MAVTRACK" style="display:block;width:108px;height:90px;margin:0 0 18px;border:0;border-radius:8px;background:#ffffff;" />
                 <div style="
                   font-size:24px;
                   font-weight:800;

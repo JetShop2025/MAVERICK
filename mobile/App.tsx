@@ -2418,19 +2418,13 @@ export default function App() {
 
               <View style={styles.loginPhotoShade} />
 
-              <View style={styles.brandWingRowCompact}>
-                <View style={styles.brandWingCompactLeft} />
-                <View style={styles.brandShieldCompact}>
-                  <Text style={styles.brandShieldCompactText}>
-                    M
-                  </Text>
-                </View>
-                <View style={styles.brandWingCompactRight} />
-              </View>
+              <Image
+                source={require("./assets/mavtrack-logo.png")}
+                accessibilityLabel="MAVTRACK Tracking System"
+                resizeMode="contain"
+                style={{ position: "absolute", top: 12, width: 160, height: 133, borderRadius: 10, backgroundColor: "#FFFFFF" }}
+              />
 
-              <Text style={styles.loginBrandFinal}>
-                MAVERICK
-              </Text>
               <Text style={styles.loginAppNameFinal}>
                 MAVDRIVE
               </Text>

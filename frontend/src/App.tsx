@@ -22,7 +22,7 @@ import {
 } from 'react'
 
 import './App.css'
-import maverickLogo from './assets/maverick-logo.jpeg'
+import mavtrackLogo from './assets/mavtrack-logo.svg'
 import mavtrackTruckHero from './assets/mavtrack-truck-hero.png'
 import Login from './Login'
 
@@ -1595,7 +1595,7 @@ function PublicLoadTrackingPage({
       <div className="public-track-shell">
         <div className="public-track-message">
           <img
-            src={maverickLogo}
+            src={mavtrackLogo}
             alt="MAVTRACK"
           />
           <strong>
@@ -1614,7 +1614,7 @@ function PublicLoadTrackingPage({
       <div className="public-track-shell">
         <div className="public-track-message">
           <img
-            src={maverickLogo}
+            src={mavtrackLogo}
             alt="MAVTRACK"
           />
           <strong>
@@ -1686,7 +1686,7 @@ function PublicLoadTrackingPage({
     <div className="public-track-shell public-track-v2">
       <header className="public-track-header public-track-v2-header">
         <div className="public-track-brand">
-          <img src={maverickLogo} alt="MAVTRACK" />
+          <img src={mavtrackLogo} alt="MAVTRACK" />
           <div>
             <strong>MAVTRACK</strong>
             <span>Secure Load Tracking</span>
@@ -2355,7 +2355,7 @@ function PublicSignaturePage({
     return (
       <div className="signature-public-shell">
         <div className="signature-public-card signature-public-message">
-          <img src={maverickLogo} alt="MAVTRACK" />
+          <img src={mavtrackLogo} alt="MAVTRACK" />
           <h2>Signature link unavailable</h2>
           <p>{error}</p>
         </div>
@@ -2372,7 +2372,7 @@ function PublicSignaturePage({
       <main className="signature-public-card">
         <header className="signature-public-header">
           <div className="signature-public-brand">
-            <img src={maverickLogo} alt="MAVTRACK" />
+            <img src={mavtrackLogo} alt="MAVTRACK" />
             <div><strong>MAVTRACK</strong><span>Secure Load Confirmation</span></div>
           </div>
           <span className={`signature-status ${status.toLowerCase()}`}>
@@ -2524,7 +2524,7 @@ function LoadDocumentPacketPage({
     return (
       <div className="packet-shell packet-message-shell">
         <div className="packet-message-card">
-          <img src={maverickLogo} alt="MAVTRACK" />
+          <img src={mavtrackLogo} alt="MAVTRACK" />
           <h2>Document packet unavailable</h2>
           <p>{error || 'Load not found.'}</p>
         </div>
@@ -2589,7 +2589,7 @@ function LoadDocumentPacketPage({
         <section className="packet-page owner-page">
           <header className="packet-letterhead">
             <div className="packet-brand-lockup">
-              <img src={maverickLogo} alt="MAVTRACK" />
+              <img src={mavtrackLogo} alt="MAVTRACK" />
               <div>
                 <strong>MAVTRACK</strong>
                 <span>Load Authorization & Confirmation</span>
@@ -2690,7 +2690,7 @@ function LoadDocumentPacketPage({
         <section className="packet-page driver-page">
           <header className="packet-letterhead">
             <div className="packet-brand-lockup">
-              <img src={maverickLogo} alt="MAVTRACK" />
+              <img src={mavtrackLogo} alt="MAVTRACK" />
               <div>
                 <strong>MAVTRACK</strong>
                 <span>Driver Load Acceptance</span>
@@ -2762,7 +2762,7 @@ function LoadDocumentPacketPage({
           <section className="packet-page attachment-page" key={document.id}>
             <header className="packet-letterhead compact">
               <div className="packet-brand-lockup">
-                <img src={maverickLogo} alt="MAVTRACK" />
+                <img src={mavtrackLogo} alt="MAVTRACK" />
                 <div><strong>MAVTRACK</strong><span>Supporting Load Document</span></div>
               </div>
               <div className="packet-header-meta">
@@ -2805,7 +2805,7 @@ function LoadDocumentPacketPage({
         <section className="packet-page audit-page">
           <header className="packet-letterhead compact">
             <div className="packet-brand-lockup">
-              <img src={maverickLogo} alt="MAVTRACK" />
+              <img src={mavtrackLogo} alt="MAVTRACK" />
               <div><strong>MAVTRACK</strong><span>Document Audit Summary</span></div>
             </div>
             <div className="packet-header-meta">
@@ -2873,8 +2873,8 @@ function App() {
       document.head.appendChild(favicon)
     }
 
-    favicon.type = 'image/jpeg'
-    favicon.href = maverickLogo
+    favicon.type = 'image/svg+xml'
+    favicon.href = '/favicon.svg?v=mavtrack-2'
   }, [])
 
   // =====================================================
@@ -9640,7 +9640,7 @@ function App() {
           type="button"
         >
           <img
-            src={maverickLogo}
+            src={mavtrackLogo}
             alt="MAVTRACK"
           />
 

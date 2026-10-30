@@ -7,7 +7,7 @@ import type {
 } from 'react'
 
 import './Login.css'
-import maverickLogo from './assets/maverick-logo.svg'
+import mavtrackLogo from './assets/mavtrack-logo.svg'
 
 type LoginProps = {
   onLogin: () => void
@@ -115,7 +115,7 @@ function Login({
         onLogin()
       } catch {
         setError(
-          'Unable to connect to Maverick.'
+          'Unable to connect to MAVTRACK.'
         )
       } finally {
         setLoading(false)
@@ -131,13 +131,13 @@ function Login({
         <aside className="mav-login-hero">
           <header className="mav-login-brand">
             <img
-              src={maverickLogo}
-              alt="Maverick"
+              src={mavtrackLogo}
+              alt="MAVTRACK"
             />
 
             <div>
               <strong>
-                MAVERICK
+                MAVTRACK
               </strong>
 
               <span>
@@ -322,13 +322,13 @@ function Login({
           <div className="mav-login-card">
             <div className="mav-login-card-logo">
               <img
-                src={maverickLogo}
-                alt="Maverick"
+                src={mavtrackLogo}
+                alt="MAVTRACK"
               />
             </div>
 
             <span className="mav-login-card-kicker">
-              MAVERICK COMMAND
+              MAVTRACK COMMAND
             </span>
 
             <h2>
@@ -489,7 +489,7 @@ function Login({
                 <p>
                   Authentication and company
                   data remain isolated to your
-                  Maverick account.
+                  MAVTRACK account.
                 </p>
               </div>
             </div>
@@ -497,7 +497,7 @@ function Login({
             <div className="mav-login-system">
               <span>
                 <i />
-                Maverick API
+                MAVTRACK API
               </span>
 
               <strong>
@@ -507,7 +507,7 @@ function Login({
           </div>
 
           <footer className="mav-login-copyright">
-            © {new Date().getFullYear()} Maverick Tracking Systems
+            © {new Date().getFullYear()} MAVTRACK Tracking Systems
           </footer>
         </section>
       </section>

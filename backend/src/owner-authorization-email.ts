@@ -15,6 +15,7 @@ const escape = (value: string) => value.replace(/[&<>"']/g, character =>
 
 export function renderOwnerAuthorizationEmail(load: OwnerAuthorizationEmail) {
   const url = escape(load.authorizationUrl)
+  const logoUrl = escape(new URL("/branding/mavtrack-logo.png", load.authorizationUrl).href)
   const equipment = [
     ['Carrier', load.carrierName],
     ['Truck', load.truckNumber],
@@ -41,6 +42,7 @@ export function renderOwnerAuthorizationEmail(load: OwnerAuthorizationEmail) {
 <!--[if mso]><table role="presentation" width="680" cellspacing="0" cellpadding="0" border="0"><tr><td><![endif]-->
 <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" bgcolor="#ffffff" style="max-width:680px;table-layout:fixed;border:1px solid #e2e8f0;border-radius:16px;overflow:hidden;">
 <tr><td bgcolor="#071426" style="padding:28px 30px;border-bottom:4px solid #2563eb;">
+<img src="${logoUrl}" width="108" height="90" alt="MAVTRACK" style="display:block;width:108px;height:90px;margin:0 0 18px;border:0;border-radius:8px;background:#ffffff;" />
 <p style="margin:0;font-size:24px;line-height:30px;font-weight:bold;letter-spacing:2px;color:#ffffff;">MAVTRACK LLC</p>
 <p style="margin:8px 0 0;font-size:11px;line-height:18px;letter-spacing:1.5px;color:#a8b8cd;">SECURE LOAD AUTHORIZATION</p>
 </td></tr>

@@ -7,6 +7,7 @@ import express, {
 import { registerMavdrivePublicPages } from './mavdrive-public-pages.js'
 import { loadTelemetryViews } from './telemetry-view.js'
 import { registerDispatchDocumentPacket } from './dispatch-document-packet.js'
+import { registerOwnerAuthorization, ownerApprovalSummary, ownerEmail, newOwnerApproval, emailOwnerApproval, requireSignedOwner, OwnerApprovalRequired, lockDispatch, ownerApprovalChanged } from './owner-authorization.js'
 import cors from 'cors'
 import dotenv from 'dotenv'
 import bcrypt from 'bcryptjs'
@@ -2782,6 +2783,7 @@ app.get(
                 sequence: 'asc'
               }
             },
+            signatureRequests: ownerApprovalSummary,
             documents: {
               select: {
                 id: true,
@@ -2965,6 +2967,12 @@ async function respondToDriverAssignment({
     const updated =
       await prisma.$transaction(
         async (tx) => {
+          await lockDispatch(tx, existing.id)
+          const current = await tx.dispatch.findUnique({ where: { id: existing.id } })
+          if (!current || current.driverId !== req.user!.userId || current.assignmentStatus !== 'PENDING' || ['DELIVERED', 'CANCELLED'].includes(current.status)) {
+            throw new OwnerApprovalRequired()
+          }
+          if (action === 'ACCEPTED') await requireSignedOwner(tx, existing.id)
           await tx.dispatch.update({
             where: {
               id: existing.id
@@ -3064,6 +3072,7 @@ async function respondToDriverAssignment({
                   sequence: 'asc'
                 }
               },
+              signatureRequests: ownerApprovalSummary,
               documents: {
                 select: {
                   id: true,
@@ -3121,6 +3130,9 @@ async function respondToDriverAssignment({
       dispatch: updated
     })
   } catch (error) {
+    if (error instanceof OwnerApprovalRequired) {
+      return res.status(409).json({ ok: false, code: 'OWNER_AUTHORIZATION_REQUIRED', message: error.message })
+    }
     console.error(
       'Driver assignment response error:',
       error
@@ -4685,6 +4697,8 @@ const MAX_DISPATCH_DOCUMENT_BYTES =
   8 * 1024 * 1024
 
 registerDispatchDocumentPacket(app, prisma, requireAuth, requireDispatchAccess)
+registerOwnerAuthorization(app, prisma, requireAuth, requireDispatchAccess, sendMaverickEmail, PUBLIC_FRONTEND_URL,
+  async load => { if (load.driverId) await sendLoadAssignmentPush({ driverId: load.driverId, dispatchId: load.id, loadNumber: load.loadNumber, pickupName: load.pickupName, deliveryName: load.deliveryName }) })
 
 app.get(
   '/api/dispatches',
@@ -4741,6 +4755,7 @@ app.get(
                 sequence: 'asc'
               }
             },
+            signatureRequests: ownerApprovalSummary,
             documents: {
               select: {
                 id: true,
@@ -4852,6 +4867,7 @@ app.get(
                 sequence: 'asc'
               }
             },
+            signatureRequests: ownerApprovalSummary,
             documents: {
               select: {
                 id: true,
@@ -5010,6 +5026,11 @@ app.post(
           ok: false,
           message: 'Invalid session'
         })
+      }
+
+      const authorizedSignerEmail = ownerEmail(req.body?.authorizedSignerEmail)
+      if (!authorizedSignerEmail) {
+        return res.status(400).json({ ok: false, message: 'A valid owner authorization email is required.' })
       }
 
       const creatingUser =
@@ -5343,6 +5364,8 @@ app.post(
             companyId,
             assetId,
             driverId,
+            authorizedSignerEmail,
+            signatureRequests: { create: newOwnerApproval(authorizedSignerEmail) },
             manualDriverName:
               selectedAssetTrackingSource === 'PHONE'
                 ? null
@@ -5528,6 +5551,7 @@ app.post(
                 sequence: 'asc'
               }
             },
+            signatureRequests: ownerApprovalSummary,
             documents: {
               select: {
                 id: true,
@@ -5583,9 +5607,13 @@ app.post(
         })
       }
 
+      const ownerEmailResult = await emailOwnerApproval(prisma, dispatch.id, sendMaverickEmail, PUBLIC_FRONTEND_URL)
+        .catch(error => { console.error('Owner authorization email error:', error); return { ok: false } })
       return res.status(201).json({
         ok: true,
-        dispatch
+        dispatch,
+        ownerAuthorizationEmailSent: ownerEmailResult.ok,
+        warning: ownerEmailResult.ok ? null : 'Load saved, but the owner authorization email could not be sent. Use Send / Resend Owner Email to retry. Driver acceptance remains blocked.'
       })
     } catch (error: any) {
       console.error(
@@ -5659,7 +5687,11 @@ app.patch(
         })
       }
 
-      const data: Record<string, any> = {}
+      const authorizedSignerEmail = ownerEmail(req.body?.authorizedSignerEmail ?? existing.authorizedSignerEmail)
+      if (!authorizedSignerEmail) {
+        return res.status(400).json({ ok: false, message: 'A valid owner authorization email is required.' })
+      }
+      const data: Record<string, any> = { authorizedSignerEmail }
       let updatedStopsForCatalog: DispatchStopInput[] | null = null
       let notifyAssignedDriverId: number | null = null
 
@@ -5941,8 +5973,17 @@ app.patch(
         }
       }
 
+      const reauthorize = ownerApprovalChanged(existing, data)
+      if (reauthorize) {
+        data.signatureRequests = { create: newOwnerApproval(authorizedSignerEmail) }
+        data.assignmentStatus = (data.driverId === undefined ? existing.driverId : data.driverId) ? 'PENDING' : 'UNASSIGNED'
+        data.acceptedAt = null
+        data.declinedAt = null
+      }
       const updated =
-        await prisma.dispatch.update({
+        await prisma.$transaction(async tx => {
+          await lockDispatch(tx, existing.id)
+          return tx.dispatch.update({
           where: {
             id: existing.id
           },
@@ -5968,6 +6009,7 @@ app.patch(
                 sequence: 'asc'
               }
             },
+            signatureRequests: ownerApprovalSummary,
             documents: {
               select: {
                 id: true,
@@ -5999,6 +6041,7 @@ app.patch(
             }
           }
         })
+        })
 
       if (updatedStopsForCatalog) {
         await rememberCustomerLocations(
@@ -6028,9 +6071,15 @@ app.patch(
         })
       }
 
+      const ownerEmailResult = reauthorize
+        ? await emailOwnerApproval(prisma, updated.id, sendMaverickEmail, PUBLIC_FRONTEND_URL)
+            .catch(error => { console.error('Owner authorization email error:', error); return { ok: false } })
+        : null
       return res.json({
         ok: true,
-        dispatch: updated
+        dispatch: updated,
+        ownerAuthorizationEmailSent: ownerEmailResult?.ok,
+        warning: ownerEmailResult && !ownerEmailResult.ok ? 'Load saved, but the owner authorization email could not be sent. Use Send / Resend Owner Email to retry. Driver acceptance remains blocked.' : null
       })
     } catch (error: any) {
       console.error(

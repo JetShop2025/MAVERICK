@@ -197,6 +197,7 @@ type Dispatch = {
   loadNumber: string;
   status: DispatchStatus;
   assignmentStatus?: AssignmentStatus;
+  signatureRequests?: { status: string; signedAt?: string | null }[];
   pickupName: string;
   pickupAddress: string;
   pickupScheduledAt?: string | null;
@@ -2559,11 +2560,13 @@ export default function App() {
         onBack={() =>
           setSelectedLoad(null)
         }
-        onAccept={() =>
-          setSigningLoad(
-            selectedLoad
-          )
-        }
+        onAccept={() => {
+          if (selectedLoad.signatureRequests?.[0]?.status !== "SIGNED") {
+            Alert.alert("Owner authorization required", "The owner / authorized signer must approve this load before you can accept it.");
+            return;
+          }
+          setSigningLoad(selectedLoad);
+        }}
         documentBusy={documentBusy}
         onAddPhoto={() =>
           void addLoadPhoto(
@@ -4069,6 +4072,7 @@ function LoadDetailScreen({
 }) {
   const pending =
     load.assignmentStatus === "PENDING";
+  const ownerApproved = load.signatureRequests?.[0]?.status === "SIGNED";
 
   return (
     <SafeAreaView style={styles.app}>
@@ -4470,14 +4474,15 @@ function LoadDetailScreen({
 
             <Pressable
               onPress={onAccept}
-              style={styles.acceptButton}
+              disabled={!ownerApproved}
+              style={[styles.acceptButton, !ownerApproved && { opacity: 0.45 }]}
             >
               <Text
                 style={
                   styles.acceptButtonText
                 }
               >
-                ACCEPT LOAD
+                {ownerApproved ? "ACCEPT LOAD" : "AWAITING OWNER"}
               </Text>
             </Pressable>
           </View>

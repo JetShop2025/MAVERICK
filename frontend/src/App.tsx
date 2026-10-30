@@ -2397,6 +2397,9 @@ function PublicSignaturePage({
           <div><span>B/L #</span><strong>{dispatch?.bolNumber || '—'}</strong></div>
         </section>
 
+        {dispatch?.termsAndAgreement && <section className="signature-form-section"><h3>Terms and Agreement</h3><p style={{ whiteSpace: 'pre-wrap' }}>{dispatch.termsAndAgreement}</p></section>}
+        {dispatch?.stops?.length > 0 && <section className="signature-form-section"><h3>Load Stops</h3>{dispatch.stops.map((stop: any) => <p key={stop.id}><strong>{stop.type}: {stop.name}</strong><br />{stop.address}</p>)}</section>}
+
         {status === 'SIGNED' ? (
           <section className="signature-complete-panel">
             <div>✓</div>
@@ -2534,12 +2537,12 @@ function LoadDocumentPacketPage({
   const documents = Array.isArray(dispatch.documents) ? dispatch.documents : []
   const ownerDocument = documents.find(
     (document: any) =>
-      document.isSignature &&
+      document.isSignature && request?.status === 'SIGNED' && document.signedAt === request.signedAt &&
       String(document.description || '').toLowerCase().includes('owner / authorized signer')
   )
   const driverDocument = documents.find(
     (document: any) =>
-      document.isSignature &&
+      document.isSignature && dispatch.assignmentStatus === 'ACCEPTED' && document.signedAt === dispatch.acceptedAt &&
       String(document.description || '').toLowerCase().includes('driver acceptance signature')
   )
   const supportingDocuments = documents.filter(
@@ -4829,6 +4832,25 @@ function App() {
       }
     }
 
+  const [ownerEmailBusy, setOwnerEmailBusy] = useState<number | null>(null)
+  const sendOwnerEmail = async (dispatchId: number) => {
+    const token = localStorage.getItem('maverick_token')
+    if (!token) return
+    setOwnerEmailBusy(dispatchId)
+    setDispatchError('')
+    try {
+      const response = await fetch(API_BASE + '/api/dispatches/' + dispatchId + '/owner-authorization', {
+        method: 'POST', headers: { Authorization: 'Bearer ' + token }
+      })
+      const payload = await response.json()
+      if (!response.ok || !payload.ok) throw new Error(payload.message || 'Unable to send owner email.')
+      await loadDispatches()
+      window.alert('Owner authorization email sent. The driver can accept only after the owner signs.')
+    } catch (error) {
+      setDispatchError(error instanceof Error ? error.message : 'Unable to send owner email.')
+    } finally { setOwnerEmailBusy(null) }
+  }
+
   const openLoadDocumentPacket =
     (dispatchId: number) => {
       window.open(
@@ -5173,6 +5195,7 @@ function App() {
         setNewDispatchOpen(false)
         resetNewDispatchForm()
         await loadDispatches()
+        if (data.warning) setDispatchError(data.warning)
       } catch {
         setDispatchError(
           'Unable to connect to MAVTRACK.'
@@ -5683,6 +5706,7 @@ function App() {
         setEditingDispatchId(null)
 
         await loadDispatches()
+        if (data.warning) setDispatchError(data.warning)
       } catch {
         setDispatchError(
           'Unable to connect to MAVTRACK.'
@@ -13290,6 +13314,12 @@ function App() {
                                         </div>
                                       )
                                     }
+
+                                    {ownerSignatureStatus !== "SIGNED" && dispatch.status !== "DELIVERED" && dispatch.status !== "CANCELLED" && (
+                                      <button type="button" className="secondary-action" disabled={ownerEmailBusy === dispatch.id} onClick={() => void sendOwnerEmail(dispatch.id)}>
+                                        {ownerEmailBusy === dispatch.id ? "Sending..." : "Send / Resend Owner Email"}
+                                      </button>
+                                    )}
 
                                     <label className="secondary-action dispatch-document-upload">
                                       {

@@ -2475,9 +2475,17 @@ function LoadDocumentPacketPage({
           }
         }
       )
+      const contentType = response.headers.get('content-type') || ''
+      if (!contentType.toLowerCase().includes('application/json')) {
+        throw new Error('The document service returned an invalid response. Please try again or contact support.')
+      }
       const payload = await response.json()
       if (!response.ok || !payload.ok) {
-        throw new Error(payload.message || 'Unable to load document packet.')
+        throw new Error(
+          response.status === 401
+            ? 'Your session expired. Sign in to MAVTRACK again and reopen this packet.'
+            : payload.message || 'Unable to load document packet.'
+        )
       }
       setData(payload)
       setError('')

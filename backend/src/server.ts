@@ -6,6 +6,7 @@ import express, {
 
 import { registerMavdrivePublicPages } from './mavdrive-public-pages.js'
 import { loadTelemetryViews } from './telemetry-view.js'
+import { registerDispatchDocumentPacket } from './dispatch-document-packet.js'
 import cors from 'cors'
 import dotenv from 'dotenv'
 import bcrypt from 'bcryptjs'
@@ -4682,6 +4683,8 @@ function decodeBase64File(
 
 const MAX_DISPATCH_DOCUMENT_BYTES =
   8 * 1024 * 1024
+
+registerDispatchDocumentPacket(app, prisma, requireAuth, requireDispatchAccess)
 
 app.get(
   '/api/dispatches',

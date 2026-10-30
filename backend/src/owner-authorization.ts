@@ -1,5 +1,6 @@
 import type { Express, Request, RequestHandler } from 'express'
 import { randomBytes } from 'node:crypto'
+import { renderOwnerAuthorizationEmail } from './owner-authorization-email.js'
 import type { Prisma, PrismaClient } from './generated/prisma/client.js'
 
 export const ownerApprovalSummary = {
@@ -41,26 +42,24 @@ export async function requireSignedOwner(tx: Prisma.TransactionClient, dispatchI
 }
 
 type SendEmail = (input: { to: string[]; subject: string; html: string }) => Promise<{ ok: boolean }>
-const escapeHtml = (value: string) => value.replace(/[&<>"']/g, c =>
-  ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]!))
 
 export async function emailOwnerApproval(
   prisma: PrismaClient, dispatchId: number, send: SendEmail, frontendUrl: string
 ) {
   const request = await prisma.dispatchSignatureRequest.findFirst({
     where: { dispatchId }, orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
-    include: { dispatch: { select: { loadNumber: true, pickupName: true, deliveryName: true } } }
+    include: { dispatch: { select: {
+      loadNumber: true, pickupName: true, deliveryName: true,
+      pickupAddress: true, deliveryAddress: true, carrierName: true,
+      truckNumber: true, trailerNumber: true
+    } } }
   })
   if (!request || request.status !== 'PENDING') return { ok: false }
   const url = frontendUrl.replace(/\/+$/, '') + '/sign/' + request.token
   const result = await send({
     to: [request.signerEmail],
-    subject: 'MAVTRACK: authorization required for load ' + request.dispatch.loadNumber,
-    html: '<h2>Load ' + escapeHtml(request.dispatch.loadNumber) + '</h2><p>' +
-      escapeHtml(request.dispatch.pickupName) + ' &rarr; ' + escapeHtml(request.dispatch.deliveryName) +
-      '</p><p>Review and sign as the owner / authorized representative. The driver cannot accept until you approve.</p>' +
-      '<p><a href="' + escapeHtml(url) + '">Review and sign load authorization</a></p>' +
-      '<p>This private link expires after 7 days. Do not forward it.</p>'
+    subject: 'MAVTRACK LLC | Owner Authorization Required | Load ' + request.dispatch.loadNumber,
+    html: renderOwnerAuthorizationEmail({ ...request.dispatch, authorizationUrl: url })
   })
   if (result.ok) {
     await prisma.dispatchSignatureRequest.update({ where: { id: request.id }, data: { sentAt: new Date() } })

@@ -23,6 +23,7 @@ import {
 
 import './App.css'
 import "./owner-authorization.css"
+import { notificationReadKey, useNotificationReadState, unreadNotificationCount } from "./notification-read-state"
 import mavtrackLogo from './assets/mavtrack-logo.svg'
 import mavtrackTruckHero from './assets/mavtrack-truck-hero.png'
 import Login from './Login'
@@ -7589,12 +7590,15 @@ function App() {
     deviceAlertCount +
     temperatureAlertCount
 
+  const { readIds: readNotificationIds, markRead: markNotificationsRead } =
+    useNotificationReadState(notificationReadKey(currentUser))
+
+  useEffect(() => {
+    if (notificationsOpen) markNotificationsRead(backendNotifications)
+  }, [notificationsOpen, backendNotifications, markNotificationsRead])
+
   const notificationBadgeCount =
-    activeAlertCount +
-    Math.min(
-      backendNotifications.length,
-      9
-    )
+    unreadNotificationCount(backendNotifications, readNotificationIds)
 
   // =====================================================
   // ACTIONS
@@ -7610,6 +7614,8 @@ function App() {
     )
 
     setCurrentUser(null)
+    setBackendNotifications([])
+    setNotificationsOpen(false)
     setTelemetry(null)
     setAssets([])
     setFleetTelemetry({})
@@ -9892,7 +9898,7 @@ function App() {
                 0 && (
                 <span className="notification-badge">
                   {
-                    notificationBadgeCount
+                    notificationBadgeCount > 99 ? '99+' : notificationBadgeCount
                   }
                 </span>
               )
@@ -16072,7 +16078,6 @@ function App() {
                 <div className="backend-notification-list">
                   {
                     backendNotifications
-                      .slice(0, 8)
                       .map(
                         (notification) => (
                           <button

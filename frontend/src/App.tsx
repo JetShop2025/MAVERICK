@@ -22,6 +22,7 @@ import {
 } from 'react'
 
 import './App.css'
+import "./owner-authorization.css"
 import mavtrackLogo from './assets/mavtrack-logo.svg'
 import mavtrackTruckHero from './assets/mavtrack-truck-hero.png'
 import Login from './Login'

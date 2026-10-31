@@ -1,0 +1,28 @@
+﻿/* Keep long owner addresses inside their status card at every panel width. */
+.operations-documents-card .operations-card-heading-row {
+  flex-wrap: wrap;
+}
+
+.operations-documents-card .operations-card-heading-row > * {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.operations-documents-card .operations-signature-state {
+  flex: 0 1 240px;
+  min-width: 0;
+  max-width: 100%;
+  margin-right: 0;
+  box-sizing: border-box;
+}
+
+.operations-documents-card .operations-signature-state > * {
+  min-width: 0;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.operations-documents-card .operations-card-heading-row > .secondary-action {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}

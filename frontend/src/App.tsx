@@ -2462,6 +2462,23 @@ function LoadDocumentPacketPage({
   const [data, setData] = useState<any>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
+  const [printing, setPrinting] = useState(false)
+
+  async function printPacket() {
+    if (printing) return
+    setPrinting(true)
+    try {
+      await document.fonts.ready
+      const images = Array.from(document.querySelectorAll<HTMLImageElement>('.packet-document img'))
+      await Promise.all(images.map(image => image.decode()))
+      window.print()
+    } catch {
+      window.alert('Some document images could not be loaded. Reload the packet before printing to include all signatures.')
+    } finally {
+      setPrinting(false)
+    }
+  }
+
 
   const loadPacket = useCallback(async () => {
     const token = localStorage.getItem('maverick_token')
@@ -2581,9 +2598,10 @@ function LoadDocumentPacketPage({
         <button
           type="button"
           className="packet-primary-button"
-          onClick={() => window.print()}
+          disabled={printing}
+          onClick={() => void printPacket()}
         >
-          Download / Save PDF
+          {printing ? 'Preparing PDF...' : 'Download / Save PDF'}
         </button>
       </div>
 

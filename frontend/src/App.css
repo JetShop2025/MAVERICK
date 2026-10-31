@@ -13170,8 +13170,24 @@ button:disabled {
   @page { size: Letter portrait; margin: 0; }
   html, body, #root { width: auto !important; height: auto !important; min-width: 0 !important; overflow: visible !important; background: #fff !important; }
   body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+
+  /* Earlier report print rules hide body descendants. Restore the packet
+     explicitly so browser Print / Save as PDF renders the actual pages. */
+  .packet-shell,
+  .packet-shell * {
+    visibility: visible !important;
+  }
+
   .no-print { display: none !important; }
-  .packet-shell { min-height: 0; padding: 0; overflow: visible; background: #fff; }
+  .packet-shell {
+    position: absolute !important;
+    inset: 0 auto auto 0 !important;
+    width: 100% !important;
+    min-height: 0;
+    padding: 0;
+    overflow: visible;
+    background: #fff;
+  }
   .packet-document { display: block; }
   .packet-page {
     width: 8.5in;

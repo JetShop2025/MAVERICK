@@ -1,26 +1,39 @@
-# MAVDRIVE 1.0.0 — App Store preparation
-Updated October 1, 2026.
+# MAVDRIVE - App Store preparation
+Updated October 30, 2026 (California).
+
 Bundle identifier: com.mavtrack.driver
 App Store Connect app: 6810734041
 Support contact: jetshopone@outlook.com
 
-## Metadata to enter
-Name: MAVDRIVE
-Subtitle: Fleet dispatch & truck tracking
-Description: MAVDRIVE connects drivers with their fleet. View assigned loads, accept or decline assignments, update pickup and delivery stops, and attach shipment photos, documents and signatures. Share your assigned truck's location with your fleet during an active tracking session, including while the app is in the background. Manage your driver and equipment details in one place. A driver account provided by your fleet administrator is required. Set up the app while parked and do not interact with it while driving.
-Keywords: fleet,truck,driver,dispatch,loads,tracking,logistics,delivery
-Privacy Policy URL (after backend deployment): https://maverick-1z64.onrender.com/mavdrive/privacy
-Support URL (after backend deployment): https://maverick-1z64.onrender.com/mavdrive/support
+## Verified status
+- Version 1.0.0 build 13 is available for internal TestFlight testing. No App Store version is currently in review or publicly released.
+- The existing editable App Store version is 1.0; its downloaded title was MavDriver. The prepared store.config.json uses MAVDRIVE and preserves the existing version and release strategy.
+- Privacy and support pages are deployed at https://maverick-1z64.onrender.com/mavdrive/privacy and https://maverick-1z64.onrender.com/mavdrive/support.
+- The user reports successful GPS tests with the screen locked, another app open, network loss/recovery, STOP and sign-out. These are user-reported physical-device results, not independent testing of every build.
+- Backend authorization now blocks driver acceptance until the latest owner authorization is signed. Automated backend tests passed; the user confirmed receipt of the owner email.
+- Build 13 contains the MAVTRACK logo and owner-authorization UI from build 12.
 
-## Review notes
-Accounts are provisioned by fleet administrators; the app has no public sign-up. Supply a dedicated review driver account with sample loads and a truck assignment. Do not use a real driver's account. Load/profile features can be reviewed without starting location tracking. Location sharing starts with START TRACKING and ends with STOP TRACKING or sign-out. Background location supports the fleet's truck tracking workflow. Supply actual review credentials in App Store Connect; none are stored in this file.
+## Prepared metadata
+Localized English title, subtitle, description, keywords, support/privacy URLs and categories are in store.config.json and were synchronized to App Store Connect. Both public URLs returned HTTP 200 on October 30. Age rating is deliberately omitted from this config: Apple's API now requires socialMedia, which EAS's downloaded questionnaire did not contain. Complete the current questionnaire directly in App Store Connect; do not treat imported defaults as audited answers.
 
-## Release gates still requiring confirmation
-- Publish and verify both public URLs before testing the new privacy links.
-- Install the new build on a physical iPhone and test login, loads, acceptance/signature, decline, stop updates, document selection and profile saves.
-- Test START, screen lock/background, temporary network loss and recovery, STOP and sign-out; confirm tracking in MAVTRACK and no new tracking after STOP.
-- Assign a sample load and verify notification arrival and opening the exact load.
-- Capture current iPhone screenshots; complete age rating, distribution, copyright and contact fields.
-- Complete App Privacy using the actual service: review contact information, precise location, account/device identifiers, uploaded photos/documents and signatures; these records are associated with driver/fleet accounts.
-- Confirm retention/deletion practices and service-provider privacy protections match the published policy.
-- Select the tested build and submit for Apple review only after these gates are complete.
+## Review notes to enter
+MAVDRIVE is the driver app for MAVTRACK fleets. Accounts are provisioned by fleet administrators; there is no public sign-up. Sign in using the dedicated review credentials entered in App Store Connect. A sample truck and sample loads must be assigned to that account. Loads require owner authorization before the driver can accept and sign them; prepare an owner-approved sample load for review. Load and profile features can be reviewed without starting location tracking. START TRACKING begins location sharing with the fleet; STOP TRACKING or sign-out ends it. Background location supports the active truck-tracking workflow while the iPhone is locked or another app is open. Configure and test the app while parked.
+
+Do not commit reviewer passwords. Enter a dedicated review driver's credentials privately in App Store Connect, with valid review contact details.
+
+## Remaining release gates
+- In build 13, verify the complete flow: create load, receive owner email, block acceptance before approval, owner signs, driver accepts/signs, and both signatures open correctly in MAVTRACK.
+- Verify an assigned-load notification arrives with MAVDRIVE closed and opens the correct load; test while signed in with notifications enabled.
+- Capture current iPhone screenshots and upload the required display sizes. Use sample data.
+- Complete/verify App Privacy against actual backend and SDK behavior: account/contact information, precise location, identifiers and uploaded photos/documents/signatures. Confirm account linkage, uses, retention/deletion and service providers match the policy.
+- Complete/verify the current age-rating questionnaire, distribution, copyright/legal ownership and review contact. These are not confirmed by the metadata download.
+- Create and verify the dedicated review account and sample data. Do not use a real driver's account.
+- Select build 13 in the editable App Store version after those tests pass, resolve App Store Connect validation and submit for Apple review.
+
+## Commands
+Run from mobile on Windows using npx.cmd:
+- npx.cmd eas-cli@latest metadata:lint --profile production
+- npx.cmd eas-cli@latest metadata:push --profile production --non-interactive
+- npx.cmd eas-cli@latest submit:status --platform ios
+
+Metadata synchronization does not submit the app for review. Do not repeat metadata:pull over local edits without preserving them first.

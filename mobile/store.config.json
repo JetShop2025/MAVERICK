@@ -1,0 +1,32 @@
+{
+  "configVersion": 0,
+  "apple": {
+    "version": "1.0",
+    "release": {
+      "automaticRelease": true
+    },
+    "info": {
+      "en-US": {
+        "title": "MAVDRIVE",
+        "subtitle": "Fleet dispatch & GPS tracking",
+        "description": "MAVDRIVE connects drivers with their MAVTRACK fleet.\n\nView assigned loads, review pickup and delivery details, and update shipment stops. Accept loads after owner authorization, add your signature, and upload shipment photos and documents.\n\nShare your assigned truck's location with your fleet during an active tracking session, including while your iPhone is locked or you use another app. Start and stop location sharing from the app. Background location requires the appropriate location permissions.\n\nA driver account provided by your fleet administrator is required. Set up the app while parked and do not interact with it while driving.",
+        "keywords": [
+          "fleet",
+          "truck",
+          "driver",
+          "dispatch",
+          "loads",
+          "tracking",
+          "logistics",
+          "delivery"
+        ],
+        "supportUrl": "https://maverick-1z64.onrender.com/mavdrive/support",
+        "privacyPolicyUrl": "https://maverick-1z64.onrender.com/mavdrive/privacy"
+      }
+    },
+    "categories": [
+      "BUSINESS",
+      "PRODUCTIVITY"
+    ]
+  }
+}

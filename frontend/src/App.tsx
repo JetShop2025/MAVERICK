@@ -14150,9 +14150,6 @@ function App() {
                                     pickupName: location.customerName,
                                     pickupAddress: location.address,
                                     pickupPhone: formatDispatchPhone(location.phone || ''),
-                                    authorizedSignerEmail:
-                                      location.authorizedSignerEmail ||
-                                      current.authorizedSignerEmail,
                                     pickupLatitude: location.latitude ?? null,
                                     pickupLongitude: location.longitude ?? null
                                   }))
@@ -14824,9 +14821,6 @@ function App() {
                                     pickupName: location.customerName,
                                     pickupAddress: location.address,
                                     pickupPhone: formatDispatchPhone(location.phone || ''),
-                                    authorizedSignerEmail:
-                                      location.authorizedSignerEmail ||
-                                      current.authorizedSignerEmail,
                                     pickupLatitude: location.latitude ?? null,
                                     pickupLongitude: location.longitude ?? null
                                   }))

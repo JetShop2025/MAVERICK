@@ -8,6 +8,7 @@ import { registerMavdrivePublicPages } from './mavdrive-public-pages.js'
 import { loadTelemetryViews } from './telemetry-view.js'
 import { registerDispatchDocumentPacket } from './dispatch-document-packet.js'
 import { registerOwnerAuthorization, ownerApprovalSummary, ownerEmail, newOwnerApproval, emailOwnerApproval, requireSignedOwner, OwnerApprovalRequired, lockDispatch, ownerApprovalChanged } from './owner-authorization.js'
+import { loadAssignmentNotice } from './load-push.js'
 import cors from 'cors'
 import dotenv from 'dotenv'
 import bcrypt from 'bcryptjs'
@@ -429,6 +430,18 @@ async function sendLoadAssignmentPush({
   pickupName: string
   deliveryName: string
 }) {
+  const current = await prisma.dispatch.findUnique({
+    where: { id: dispatchId },
+    select: {
+      driverId: true, assignmentStatus: true, status: true, loadNumber: true,
+      authorizedSignerEmail: true, signatureRequests: ownerApprovalSummary
+    }
+  })
+  if (!current || current.driverId !== driverId || current.assignmentStatus !== 'PENDING' ||
+      ['DELIVERED', 'CANCELLED'].includes(current.status)) {
+    return { ok: true, skipped: true, sent: 0 }
+  }
+  const notice = loadAssignmentNotice(current)
   const pendingCount =
     await prisma.dispatch.count({
       where: {
@@ -445,14 +458,14 @@ async function sendLoadAssignmentPush({
 
   return sendExpoPushToUser({
     userId: driverId,
-    title: 'New Load Assigned',
-    body:
-      `Load ${loadNumber} is pending your acceptance. Tap to view details.`,
+    title: notice.title,
+    body: notice.body,
     badge: Math.max(1, pendingCount),
     data: {
       type: 'LOAD_ASSIGNMENT',
+      ownerAuthorizationStatus: notice.ownerAuthorizationStatus,
       dispatchId: String(dispatchId),
-      loadNumber
+      loadNumber: current.loadNumber
     }
   })
 }

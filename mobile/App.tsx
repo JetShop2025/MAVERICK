@@ -25,6 +25,7 @@ import * as DocumentPicker from "expo-document-picker";
 import * as FileSystem from "expo-file-system/legacy";
 import * as Notifications from "expo-notifications";
 import Constants from "expo-constants";
+import { requestJson, CONNECTION_MESSAGE } from "./network";
 import {
   nativeGpsAvailable,
   startNativeGps,
@@ -773,11 +774,14 @@ export default function App() {
     void loadAssignments();
 
     const interval = setInterval(
-      () => void loadAssignments(),
+      () => { if (AppState.currentState === "active") void loadAssignments(); },
       15000
     );
 
-    return () => clearInterval(interval);
+    const foreground = AppState.addEventListener("change", state => {
+      if (state === "active") { void loadDriver(); void loadAssignments(); }
+    });
+    return () => { clearInterval(interval); foreground.remove(); };
   }, [token]);
 
   useEffect(() => {
@@ -1083,7 +1087,7 @@ export default function App() {
       throw new Error("Not authenticated");
     }
 
-    const response = await fetch(
+    const { response, payload } = await requestJson(
       `${API_URL}${path}`,
       {
         ...options,
@@ -1094,14 +1098,6 @@ export default function App() {
         },
       }
     );
-
-    let payload: any = null;
-
-    try {
-      payload = await response.json();
-    } catch {
-      payload = null;
-    }
 
     if (response.status === 401) {
       await logout();
@@ -2680,6 +2676,18 @@ export default function App() {
           <Text style={styles.inlineErrorText}>
             {appError}
           </Text>
+          {appError === CONNECTION_MESSAGE ? (
+            <Pressable
+              accessibilityRole="button"
+              disabled={loadingLoads}
+              onPress={() => { void loadDriver(); void loadAssignments(); }}
+              style={{ paddingVertical: 12 }}
+            >
+              <Text style={[styles.inlineErrorText, { fontWeight: "800" }]}>
+                {loadingLoads ? "RETRYING..." : "RETRY"}
+              </Text>
+            </Pressable>
+          ) : null}
         </View>
       ) : null}
 

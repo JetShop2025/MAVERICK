@@ -13965,38 +13965,14 @@ function App() {
                                 }
                               >
                                 <option value="">Unassigned asset</option>
-                                {availableAssets.map((asset) => {
-                                  const item =
-                                    fleetTelemetry[
-                                      asset.deviceId
-                                    ]
-
-                                  const assetStatus =
-                                    assetTypeCode(asset) === 'TRK'
-                                      ? getDeviceStatusForTelemetry(
-                                          item
-                                        )
-                                      : null
-
-                                  const isCurrent =
-                                    String(asset.id) ===
-                                    newDispatchForm.assetId
-
-                                  return (
-                                    <option
-                                      key={asset.id}
-                                      value={asset.id}
-                                    >
-                                      {asset.groupName ? `[${asset.groupName}] ` : ''}{asset.name || asset.deviceId} ({asset.deviceId})
-                                      {assetTypeCode(asset) === 'TRK'
-                                        ? ` · ${String(
-                                            assetStatus ||
-                                            'offline'
-                                          ).toUpperCase()}${isCurrent ? ' · SELECTED' : ''}`
-                                        : ''}
-                                    </option>
-                                  )
-                                })}
+                                {availableAssets.map((asset) => (
+                                  <option
+                                    key={asset.id}
+                                    value={asset.id}
+                                  >
+                                    {asset.name?.trim() || asset.deviceId}
+                                  </option>
+                                ))}
                               </select>
 
                               {
@@ -14636,38 +14612,14 @@ function App() {
                                 }
                               >
                                 <option value="">Unassigned asset</option>
-                                {editableAssets.map((asset) => {
-                                  const isCurrent =
-                                    String(asset.id) ===
-                                    editDispatchForm.assetId
-
-                                  const item =
-                                    fleetTelemetry[
-                                      asset.deviceId
-                                    ]
-
-                                  const assetStatus =
-                                    assetTypeCode(asset) === 'TRK'
-                                      ? getDeviceStatusForTelemetry(
-                                          item
-                                        )
-                                      : null
-
-                                  return (
-                                    <option
-                                      key={asset.id}
-                                      value={asset.id}
-                                    >
-                                      {asset.groupName ? `[${asset.groupName}] ` : ''}{asset.name || asset.deviceId} ({asset.deviceId})
-                                      {assetTypeCode(asset) === 'TRK'
-                                        ? ` · ${String(
-                                            assetStatus ||
-                                            'offline'
-                                          ).toUpperCase()}${isCurrent ? ' · CURRENT' : ''}`
-                                        : ''}
-                                    </option>
-                                  )
-                                })}
+                                {editableAssets.map((asset) => (
+                                  <option
+                                    key={asset.id}
+                                    value={asset.id}
+                                  >
+                                    {asset.name?.trim() || asset.deviceId}
+                                  </option>
+                                ))}
                               </select>
 
                               {

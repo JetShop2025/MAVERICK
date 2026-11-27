@@ -6257,17 +6257,36 @@ function App() {
         const expectedMs =
           expectedIntervalSec * 1000
 
+        const backendMovement =
+          String(
+            item?.movementStatus || ''
+          ).toUpperCase()
+
+        const reeferPowerOn =
+          item?.reeferPower === true
+
+        let onlineMultiplier = 2.5
+        let delayedMultiplier = 5
+
+        if (backendMovement === 'PARKED') {
+          if (reeferPowerOn) {
+            // Default 5 min heartbeat:
+            // ONLINE < 12 min, DELAYED < 20 min.
+            onlineMultiplier = 2.4
+            delayedMultiplier = 4
+          } else {
+            // Default 30 min heartbeat:
+            // ONLINE < 40 min, DELAYED < 70 min.
+            onlineMultiplier = 4 / 3
+            delayedMultiplier = 7 / 3
+          }
+        }
+
         const onlineMaxAgeMs =
-          Math.max(
-            expectedMs * 1.25,
-            expectedMs + 60000
-          )
+          expectedMs * onlineMultiplier
 
         const delayedMaxAgeMs =
-          Math.max(
-            expectedMs * 2,
-            expectedMs + 180000
-          )
+          expectedMs * delayedMultiplier
 
         if (ageMs < onlineMaxAgeMs) {
           return 'online'

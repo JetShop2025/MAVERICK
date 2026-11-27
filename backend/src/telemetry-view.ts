@@ -2,11 +2,36 @@ import { Prisma, type PrismaClient, type Asset, type Telemetry } from './generat
 
 export function buildTelemetryView(
   asset: Pick<Asset, 'id' | 'deviceId' | 'trackingSource' | 'trackingActive' |
-    'trackingStartedAt' | 'trackingStoppedAt' | 'lastHeartbeatAt' | 'lastPhoneGpsAt'>,
+    'trackingStartedAt' | 'trackingStoppedAt' | 'lastHeartbeatAt' | 'lastPhoneGpsAt' |
+    'mav2LocationMovingSec' | 'mav2TemperatureMovingSec' |
+    'mav2LocationParkedOnSec' | 'mav2TemperatureParkedOnSec' |
+    'mav2LocationParkedOffSec' | 'mav2TemperatureParkedOffSec'>,
   latest: Telemetry | null,
   location: Telemetry | null,
   temperature: Telemetry | null
 ) {
+  const movement =
+    String(location?.movementStatus || '')
+      .toUpperCase()
+
+  const expectedTelemetryIntervalSec =
+    asset.trackingSource === 'MAV2'
+      ? movement === 'PARKED'
+        ? latest?.reeferPower === true
+          ? Math.min(
+              asset.mav2LocationParkedOnSec,
+              asset.mav2TemperatureParkedOnSec
+            )
+          : Math.min(
+              asset.mav2LocationParkedOffSec,
+              asset.mav2TemperatureParkedOffSec
+            )
+        : Math.min(
+            asset.mav2LocationMovingSec,
+            asset.mav2TemperatureMovingSec
+          )
+      : null
+
   return {
     ...latest,
     deviceId: asset.deviceId,
@@ -16,6 +41,7 @@ export function buildTelemetryView(
     trackingStoppedAt: asset.trackingStoppedAt,
     lastHeartbeatAt: asset.lastHeartbeatAt,
     lastPhoneGpsAt: asset.lastPhoneGpsAt,
+    expectedTelemetryIntervalSec,
     receivedAt: latest?.receivedAt ?? null,
     reeferPower: latest?.reeferPower ?? null,
     powerSource: latest?.powerSource ?? null,

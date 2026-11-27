@@ -3282,6 +3282,14 @@ app.get(
             temperatureMaxC: true,
             temperatureAlertsEnabled: true,
             temperatureAlertEmail: true,
+            mav2LocationMovingSec: true,
+            mav2TemperatureMovingSec: true,
+            mav2LocationParkedOnSec: true,
+            mav2TemperatureParkedOnSec: true,
+            mav2LocationParkedOffSec: true,
+            mav2TemperatureParkedOffSec: true,
+            mav2MovementCheckSec: true,
+            mav2ConfigVersion: true,
             cameras: {
               where: {
                 active: true
@@ -3767,6 +3775,14 @@ app.patch(
         temperatureMaxC?: number | null
         temperatureAlertsEnabled?: boolean
         temperatureAlertEmail?: string | null
+        mav2LocationMovingSec?: number
+        mav2TemperatureMovingSec?: number
+        mav2LocationParkedOnSec?: number
+        mav2TemperatureParkedOnSec?: number
+        mav2LocationParkedOffSec?: number
+        mav2TemperatureParkedOffSec?: number
+        mav2MovementCheckSec?: number
+        mav2ConfigVersion?: number
       } = {}
 
       // ---------------------------------
@@ -3943,6 +3959,63 @@ app.patch(
       }
 
       // ---------------------------------
+      // MAV2 REPORTING POLICY
+      // ---------------------------------
+
+      const mav2ReportingFields = [
+        ['mav2LocationMovingSec', 30, 86400],
+        ['mav2TemperatureMovingSec', 30, 86400],
+        ['mav2LocationParkedOnSec', 30, 86400],
+        ['mav2TemperatureParkedOnSec', 30, 86400],
+        ['mav2LocationParkedOffSec', 30, 86400],
+        ['mav2TemperatureParkedOffSec', 30, 86400],
+        ['mav2MovementCheckSec', 5, 300]
+      ] as const
+
+      let mav2ReportingChanged = false
+
+      for (const [field, minValue, maxValue] of mav2ReportingFields) {
+        if (req.body?.[field] === undefined) {
+          continue
+        }
+
+        const parsed = Number(req.body[field])
+
+        if (
+          !Number.isInteger(parsed) ||
+          parsed < minValue ||
+          parsed > maxValue
+        ) {
+          return res.status(400).json({
+            ok: false,
+            message:
+              field === 'mav2MovementCheckSec'
+                ? 'Movement check must be between 5 and 300 seconds'
+                : 'MAV2 reporting intervals must be between 30 seconds and 24 hours'
+          })
+        }
+
+        ;(data as any)[field] = parsed
+        mav2ReportingChanged = true
+      }
+
+      if (mav2ReportingChanged) {
+        if (
+          String(asset.trackingSource || '').toUpperCase() !==
+          'MAV2'
+        ) {
+          return res.status(400).json({
+            ok: false,
+            message:
+              'Reporting policy is only available for MAV2 assets'
+          })
+        }
+
+        data.mav2ConfigVersion =
+          asset.mav2ConfigVersion + 1
+      }
+
+      // ---------------------------------
       // VALIDAR LIMITES FINALES
       // ---------------------------------
 
@@ -4013,6 +4086,14 @@ app.patch(
             temperatureMaxC: true,
             temperatureAlertsEnabled: true,
             temperatureAlertEmail: true,
+            mav2LocationMovingSec: true,
+            mav2TemperatureMovingSec: true,
+            mav2LocationParkedOnSec: true,
+            mav2TemperatureParkedOnSec: true,
+            mav2LocationParkedOffSec: true,
+            mav2TemperatureParkedOffSec: true,
+            mav2MovementCheckSec: true,
+            mav2ConfigVersion: true,
             cameras: {
               where: {
                 active: true
@@ -8030,23 +8111,52 @@ app.get(
 
       const latestMovementStatus =
         String(
-          latestTelemetry?.movementStatus || ''
+          locationSource?.movementStatus || ''
         ).toUpperCase()
 
+      const trackedAsset =
+        share.dispatch.asset
+
+      const expectedTelemetryIntervalSec =
+        trackedAsset?.trackingSource === 'MAV2'
+          ? latestMovementStatus === 'PARKED'
+            ? latestTelemetry?.reeferPower === true
+              ? Math.min(
+                  trackedAsset.mav2LocationParkedOnSec,
+                  trackedAsset.mav2TemperatureParkedOnSec
+                )
+              : Math.min(
+                  trackedAsset.mav2LocationParkedOffSec,
+                  trackedAsset.mav2TemperatureParkedOffSec
+                )
+            : Math.min(
+                trackedAsset.mav2LocationMovingSec,
+                trackedAsset.mav2TemperatureMovingSec
+              )
+          : 120
+
+      const expectedTelemetryMs =
+        expectedTelemetryIntervalSec *
+        1000
+
+      const onlineMaxAgeMs =
+        Math.max(
+          expectedTelemetryMs * 1.25,
+          expectedTelemetryMs + 60000
+        )
+
+      const delayedMaxAgeMs =
+        Math.max(
+          expectedTelemetryMs * 2,
+          expectedTelemetryMs + 180000
+        )
+
       const deviceStatus =
-        latestMovementStatus === 'PARKED'
-          ? (
-              telemetryAgeMs < 35 * 60 * 1000
-                ? 'online'
-                : telemetryAgeMs < 60 * 60 * 1000
-                  ? 'delayed'
-                  : 'offline'
-            )
-          : telemetryAgeMs < 2 * 60 * 1000
-            ? 'online'
-            : telemetryAgeMs < 10 * 60 * 1000
-              ? 'delayed'
-              : 'offline'
+        telemetryAgeMs < onlineMaxAgeMs
+          ? 'online'
+          : telemetryAgeMs < delayedMaxAgeMs
+            ? 'delayed'
+            : 'offline'
 
       const driver =
         share.dispatch.driver
@@ -9264,7 +9374,31 @@ app.post(
       return res.json({
         ok: true,
         message:
-          'Telemetry received'
+          'Telemetry received',
+        mav2Config: {
+          version:
+            asset.mav2ConfigVersion,
+          locationMovingSec:
+            asset.mav2LocationMovingSec,
+          temperatureMovingSec:
+            asset.mav2TemperatureMovingSec,
+          locationParkedReeferOnSec:
+            asset.mav2LocationParkedOnSec,
+          temperatureParkedReeferOnSec:
+            asset.mav2TemperatureParkedOnSec,
+          locationParkedReeferOffSec:
+            asset.mav2LocationParkedOffSec,
+          temperatureParkedReeferOffSec:
+            asset.mav2TemperatureParkedOffSec,
+          movementCheckSec:
+            asset.mav2MovementCheckSec,
+          temperatureAlertsEnabled:
+            asset.temperatureAlertsEnabled,
+          temperatureMinC:
+            asset.temperatureMinC,
+          temperatureMaxC:
+            asset.temperatureMaxC
+        }
       })
 
     } catch (error) {

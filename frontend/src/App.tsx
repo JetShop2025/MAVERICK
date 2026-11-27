@@ -3545,6 +3545,33 @@ function App() {
   ] = useState('')
 
   const [
+    mav2ReportingOpen,
+    setMav2ReportingOpen
+  ] = useState(false)
+
+  const [
+    mav2ReportingSaving,
+    setMav2ReportingSaving
+  ] = useState(false)
+
+  const [
+    mav2ReportingError,
+    setMav2ReportingError
+  ] = useState('')
+
+  const [
+    mav2ReportingForm,
+    setMav2ReportingForm
+  ] = useState({
+    locationMovingMin: '1',
+    temperatureMovingMin: '1',
+    locationParkedOnMin: '30',
+    temperatureParkedOnMin: '5',
+    locationParkedOffMin: '30',
+    temperatureParkedOffMin: '30'
+  })
+
+  const [
     notificationsOpen,
     setNotificationsOpen
   ] = useState(false)
@@ -6216,20 +6243,37 @@ function App() {
           now - receivedAtMs
         )
 
-      const backendMovement =
-        String(
-          item?.movementStatus || ''
-        ).toUpperCase()
+      const expectedIntervalSec =
+        Number(
+          item?.expectedTelemetryIntervalSec
+        )
 
-      if (backendMovement === 'PARKED') {
-        // MAV2 reports every 30 minutes while parked. Keep the asset
-        // online through the normal parked interval, then allow a
-        // grace window before declaring it offline.
-        if (ageMs < 35 * 60 * 1000) {
+      if (
+        Number.isFinite(
+          expectedIntervalSec
+        ) &&
+        expectedIntervalSec > 0
+      ) {
+        const expectedMs =
+          expectedIntervalSec * 1000
+
+        const onlineMaxAgeMs =
+          Math.max(
+            expectedMs * 1.25,
+            expectedMs + 60000
+          )
+
+        const delayedMaxAgeMs =
+          Math.max(
+            expectedMs * 2,
+            expectedMs + 180000
+          )
+
+        if (ageMs < onlineMaxAgeMs) {
           return 'online'
         }
 
-        if (ageMs < 60 * 60 * 1000) {
+        if (ageMs < delayedMaxAgeMs) {
           return 'delayed'
         }
 
@@ -7138,7 +7182,8 @@ function App() {
     deviceStatus === 'online' &&
     !Boolean(
       telemetry?.hasCurrentGps
-    )
+    ) &&
+    !hasLocation
 
   const gpsStatusText =
     telemetry?.hasCurrentGps
@@ -7898,6 +7943,206 @@ function App() {
         )
       } finally {
         setAssetGroupSaving(false)
+      }
+    }
+
+  const openMav2Reporting = () => {
+    if (!selectedAsset) {
+      return
+    }
+
+    const toMinutes = (
+      value: unknown,
+      fallbackSeconds: number
+    ) => {
+      const seconds =
+        Number.isFinite(Number(value))
+          ? Number(value)
+          : fallbackSeconds
+
+      return String(
+        Math.max(
+          1,
+          Math.round(seconds / 60)
+        )
+      )
+    }
+
+    setMav2ReportingError('')
+    setMav2ReportingForm({
+      locationMovingMin:
+        toMinutes(
+          selectedAsset.mav2LocationMovingSec,
+          60
+        ),
+      temperatureMovingMin:
+        toMinutes(
+          selectedAsset.mav2TemperatureMovingSec,
+          60
+        ),
+      locationParkedOnMin:
+        toMinutes(
+          selectedAsset.mav2LocationParkedOnSec,
+          1800
+        ),
+      temperatureParkedOnMin:
+        toMinutes(
+          selectedAsset.mav2TemperatureParkedOnSec,
+          300
+        ),
+      locationParkedOffMin:
+        toMinutes(
+          selectedAsset.mav2LocationParkedOffSec,
+          1800
+        ),
+      temperatureParkedOffMin:
+        toMinutes(
+          selectedAsset.mav2TemperatureParkedOffSec,
+          1800
+        )
+    })
+    setMav2ReportingOpen(true)
+  }
+
+  const handleSaveMav2Reporting =
+    async () => {
+      const token =
+        localStorage.getItem(
+          'maverick_token'
+        )
+
+      if (!selectedAsset?.id || !token) {
+        setMav2ReportingError(
+          'Asset or session information is unavailable.'
+        )
+        return
+      }
+
+      if (
+        trackingSourceCode(selectedAsset) !==
+        'MAV2'
+      ) {
+        setMav2ReportingError(
+          'Reporting settings are only available for MAV2 assets.'
+        )
+        return
+      }
+
+      const entries = [
+        [
+          'locationMovingMin',
+          'Moving location'
+        ],
+        [
+          'temperatureMovingMin',
+          'Moving temperature'
+        ],
+        [
+          'locationParkedOnMin',
+          'Parked + reefer ON location'
+        ],
+        [
+          'temperatureParkedOnMin',
+          'Parked + reefer ON temperature'
+        ],
+        [
+          'locationParkedOffMin',
+          'Parked + reefer OFF location'
+        ],
+        [
+          'temperatureParkedOffMin',
+          'Parked + reefer OFF temperature'
+        ]
+      ] as const
+
+      const values: Record<string, number> = {}
+
+      for (const [key, label] of entries) {
+        const parsed =
+          Number(
+            mav2ReportingForm[key]
+          )
+
+        if (
+          !Number.isInteger(parsed) ||
+          parsed < 1 ||
+          parsed > 1440
+        ) {
+          setMav2ReportingError(
+            `${label} must be a whole number between 1 and 1440 minutes.`
+          )
+          return
+        }
+
+        values[key] = parsed
+      }
+
+      setMav2ReportingSaving(true)
+      setMav2ReportingError('')
+
+      try {
+        const res =
+          await fetch(
+            `${API_BASE}/api/assets/${selectedAsset.id}`,
+            {
+              method: 'PATCH',
+              headers: {
+                'Content-Type':
+                  'application/json',
+                Authorization:
+                  `Bearer ${token}`
+              },
+              body: JSON.stringify({
+                mav2LocationMovingSec:
+                  values.locationMovingMin * 60,
+                mav2TemperatureMovingSec:
+                  values.temperatureMovingMin * 60,
+                mav2LocationParkedOnSec:
+                  values.locationParkedOnMin * 60,
+                mav2TemperatureParkedOnSec:
+                  values.temperatureParkedOnMin * 60,
+                mav2LocationParkedOffSec:
+                  values.locationParkedOffMin * 60,
+                mav2TemperatureParkedOffSec:
+                  values.temperatureParkedOffMin * 60
+              })
+            }
+          )
+
+        const data =
+          await res.json()
+
+        if (res.status === 401) {
+          handleLogout()
+          return
+        }
+
+        if (!res.ok || !data.ok) {
+          setMav2ReportingError(
+            data.message ||
+            'Unable to save MAV2 reporting settings.'
+          )
+          return
+        }
+
+        setAssets(
+          (currentAssets) =>
+            currentAssets.map(
+              (asset) =>
+                asset.id ===
+                  data.asset.id
+                  ? data.asset
+                  : asset
+            )
+        )
+
+        setMav2ReportingOpen(false)
+      } catch {
+        setMav2ReportingError(
+          'Unable to connect to MAVTRACK.'
+        )
+      } finally {
+        setMav2ReportingSaving(false)
       }
     }
 
@@ -16412,6 +16657,22 @@ function App() {
                   </dd>
                 </div>
 
+                {
+                  trackingSourceCode(selectedAsset) === 'MAV2' && (
+                    <div>
+                      <dt>
+                        MAV2 Reporting
+                      </dt>
+
+                      <dd>
+                        {
+                          `Moving: GPS ${Math.round(Number(selectedAsset?.mav2LocationMovingSec ?? 60) / 60)}m / Temp ${Math.round(Number(selectedAsset?.mav2TemperatureMovingSec ?? 60) / 60)}m · Parked Reefer ON: GPS ${Math.round(Number(selectedAsset?.mav2LocationParkedOnSec ?? 1800) / 60)}m / Temp ${Math.round(Number(selectedAsset?.mav2TemperatureParkedOnSec ?? 300) / 60)}m · OFF: GPS ${Math.round(Number(selectedAsset?.mav2LocationParkedOffSec ?? 1800) / 60)}m / Temp ${Math.round(Number(selectedAsset?.mav2TemperatureParkedOffSec ?? 1800) / 60)}m`
+                        }
+                      </dd>
+                    </div>
+                  )
+                }
+
                 <div>
                   <dt>
                     Movement
@@ -16528,6 +16789,24 @@ function App() {
                   Temp Limits
                 </button>
 
+                {
+                  trackingSourceCode(selectedAsset) === 'MAV2' && (
+                    <button
+                      className="secondary-action"
+                      onClick={() => {
+                        setDetailsOpen(false)
+                        openMav2Reporting()
+                      }}
+                      type="button"
+                      disabled={
+                        !selectedAsset
+                      }
+                    >
+                      Reporting
+                    </button>
+                  )
+                }
+
                 <button
                   className="primary-action"
                   onClick={() => {
@@ -16542,6 +16821,283 @@ function App() {
                 </button>
               </div>
 
+            </section>
+          </div>
+        )
+      }
+
+      {/* ================================= */}
+      {/* MAV2 REPORTING SETTINGS MODAL */}
+      {/* ================================= */}
+
+      {
+        mav2ReportingOpen && (
+          <div
+            className="modal-backdrop"
+            onMouseDown={() => {
+              if (!mav2ReportingSaving) {
+                setMav2ReportingOpen(false)
+                setMav2ReportingError('')
+              }
+            }}
+          >
+            <section
+              className="details-modal"
+              onMouseDown={
+                (event) =>
+                  event.stopPropagation()
+              }
+            >
+              <div className="modal-header">
+                <div>
+                  <span className="page-kicker">
+                    MAV2 Reporting Settings
+                  </span>
+
+                  <h2>
+                    {selectedAssetName}
+                  </h2>
+
+                  <small className="modal-device-id">
+                    Changes are delivered to the M2 on its next successful telemetry response.
+                  </small>
+                </div>
+
+                <button
+                  className="modal-close"
+                  onClick={() => {
+                    setMav2ReportingOpen(false)
+                    setMav2ReportingError('')
+                  }}
+                  type="button"
+                  disabled={
+                    mav2ReportingSaving
+                  }
+                >
+                  ×
+                </button>
+              </div>
+
+              <div className="rename-form">
+                <div className="rename-help">
+                  <strong>Moving</strong>
+                  <span>
+                    Trailer is moving. Location and temperature can report independently.
+                  </span>
+                </div>
+
+                <div className="share-load-grid">
+                  <label>
+                    Location (minutes)
+                    <input
+                      type="number"
+                      min="1"
+                      max="1440"
+                      step="1"
+                      value={
+                        mav2ReportingForm.locationMovingMin
+                      }
+                      onChange={(event) =>
+                        setMav2ReportingForm(
+                          (current) => ({
+                            ...current,
+                            locationMovingMin:
+                              event.target.value
+                          })
+                        )
+                      }
+                    />
+                  </label>
+
+                  <label>
+                    Temperature (minutes)
+                    <input
+                      type="number"
+                      min="1"
+                      max="1440"
+                      step="1"
+                      value={
+                        mav2ReportingForm.temperatureMovingMin
+                      }
+                      onChange={(event) =>
+                        setMav2ReportingForm(
+                          (current) => ({
+                            ...current,
+                            temperatureMovingMin:
+                              event.target.value
+                          })
+                        )
+                      }
+                    />
+                  </label>
+                </div>
+
+                <div className="rename-help">
+                  <strong>Parked · Reefer Power ON</strong>
+                  <span>
+                    GPIO14 reports external reefer power present.
+                  </span>
+                </div>
+
+                <div className="share-load-grid">
+                  <label>
+                    Location (minutes)
+                    <input
+                      type="number"
+                      min="1"
+                      max="1440"
+                      step="1"
+                      value={
+                        mav2ReportingForm.locationParkedOnMin
+                      }
+                      onChange={(event) =>
+                        setMav2ReportingForm(
+                          (current) => ({
+                            ...current,
+                            locationParkedOnMin:
+                              event.target.value
+                          })
+                        )
+                      }
+                    />
+                  </label>
+
+                  <label>
+                    Temperature (minutes)
+                    <input
+                      type="number"
+                      min="1"
+                      max="1440"
+                      step="1"
+                      value={
+                        mav2ReportingForm.temperatureParkedOnMin
+                      }
+                      onChange={(event) =>
+                        setMav2ReportingForm(
+                          (current) => ({
+                            ...current,
+                            temperatureParkedOnMin:
+                              event.target.value
+                          })
+                        )
+                      }
+                    />
+                  </label>
+                </div>
+
+                <div className="rename-help">
+                  <strong>Parked · Reefer Power OFF</strong>
+                  <span>
+                    No external reefer power detected; MAV2 remains on its own battery.
+                  </span>
+                </div>
+
+                <div className="share-load-grid">
+                  <label>
+                    Location (minutes)
+                    <input
+                      type="number"
+                      min="1"
+                      max="1440"
+                      step="1"
+                      value={
+                        mav2ReportingForm.locationParkedOffMin
+                      }
+                      onChange={(event) =>
+                        setMav2ReportingForm(
+                          (current) => ({
+                            ...current,
+                            locationParkedOffMin:
+                              event.target.value
+                          })
+                        )
+                      }
+                    />
+                  </label>
+
+                  <label>
+                    Temperature (minutes)
+                    <input
+                      type="number"
+                      min="1"
+                      max="1440"
+                      step="1"
+                      value={
+                        mav2ReportingForm.temperatureParkedOffMin
+                      }
+                      onChange={(event) =>
+                        setMav2ReportingForm(
+                          (current) => ({
+                            ...current,
+                            temperatureParkedOffMin:
+                              event.target.value
+                          })
+                        )
+                      }
+                    />
+                  </label>
+                </div>
+
+                <div className="rename-help">
+                  <span>
+                    Movement is still checked locally every {
+                      Number(
+                        selectedAsset?.mav2MovementCheckSec ??
+                        15
+                      )
+                    } seconds. A PARKED → MOVING transition sends immediately.
+                  </span>
+                  <span>
+                    Current config version: {
+                      Number(
+                        selectedAsset?.mav2ConfigVersion ??
+                        1
+                      )
+                    }
+                  </span>
+                </div>
+
+                {
+                  mav2ReportingError && (
+                    <div className="rename-error">
+                      {mav2ReportingError}
+                    </div>
+                  )
+                }
+              </div>
+
+              <div className="modal-actions">
+                <button
+                  className="secondary-action"
+                  onClick={() => {
+                    setMav2ReportingOpen(false)
+                    setMav2ReportingError('')
+                  }}
+                  type="button"
+                  disabled={
+                    mav2ReportingSaving
+                  }
+                >
+                  Cancel
+                </button>
+
+                <button
+                  className="primary-action"
+                  onClick={() =>
+                    void handleSaveMav2Reporting()
+                  }
+                  type="button"
+                  disabled={
+                    mav2ReportingSaving
+                  }
+                >
+                  {
+                    mav2ReportingSaving
+                      ? 'Saving...'
+                      : 'Save Reporting'
+                  }
+                </button>
+              </div>
             </section>
           </div>
         )

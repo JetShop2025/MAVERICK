@@ -113,6 +113,16 @@ model Asset {
   temperatureAlertsEnabled Boolean @default(false)
   temperatureAlertEmail    String?
 
+  // MAV2 reporting policy. Values are seconds and can be changed from MAVTRACK.
+  mav2LocationMovingSec      Int @default(60)
+  mav2TemperatureMovingSec   Int @default(60)
+  mav2LocationParkedOnSec    Int @default(1800)
+  mav2TemperatureParkedOnSec Int @default(300)
+  mav2LocationParkedOffSec   Int @default(1800)
+  mav2TemperatureParkedOffSec Int @default(1800)
+  mav2MovementCheckSec       Int @default(15)
+  mav2ConfigVersion          Int @default(1)
+
   companyId Int
   company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
 

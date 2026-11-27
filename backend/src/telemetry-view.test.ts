@@ -7,7 +7,10 @@ const at = (minute: number) => new Date(Date.UTC(2026, 9, 1, 12, minute))
 const asset = {
   id: 1, deviceId: 'TRAILER-001', trackingSource: 'MAV2',
   trackingActive: false, trackingStartedAt: null, trackingStoppedAt: null,
-  lastHeartbeatAt: null, lastPhoneGpsAt: null
+  lastHeartbeatAt: null, lastPhoneGpsAt: null,
+  mav2LocationMovingSec: 60, mav2TemperatureMovingSec: 60,
+  mav2LocationParkedOnSec: 1800, mav2TemperatureParkedOnSec: 300,
+  mav2LocationParkedOffSec: 1800, mav2TemperatureParkedOffSec: 1800
 } as Asset
 const row = (changes: Partial<Telemetry> = {}): Telemetry => ({
   id: 1, assetId: 1, deviceId: asset.deviceId, source: 'MAV2',
@@ -56,6 +59,26 @@ test('missing sensor readings preserve the last temperature and its original tim
   const empty = buildTelemetryView(asset, latest, latest, null)
   assert.equal(empty.temperature, null)
   assert.equal(empty.temperatureRecordedAt, null)
+})
+
+test('MAV2 expected heartbeat follows movement and reefer reporting policy', () => {
+  const parked = row({ movementStatus: 'PARKED' })
+  const parkedOn = row({ id: 2, reeferPower: true, movementStatus: null })
+  const parkedOff = row({ id: 3, reeferPower: false, movementStatus: null })
+  const moving = row({ id: 4, movementStatus: 'MOVING' })
+
+  assert.equal(
+    buildTelemetryView(asset, parkedOn, parked, parkedOn).expectedTelemetryIntervalSec,
+    300
+  )
+  assert.equal(
+    buildTelemetryView(asset, parkedOff, parked, parkedOff).expectedTelemetryIntervalSec,
+    1800
+  )
+  assert.equal(
+    buildTelemetryView(asset, moving, moving, moving).expectedTelemetryIntervalSec,
+    60
+  )
 })
 
 test('phone heartbeat/session metadata remains available before the first GPS fix', () => {

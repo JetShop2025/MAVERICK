@@ -6505,7 +6505,14 @@ function App() {
       return 'offline'
     }
 
-    if (!Boolean(item?.hasCurrentGps)) {
+    const hasKnownLocation =
+      item?.latitude != null &&
+      item?.longitude != null
+
+    if (
+      !Boolean(item?.hasCurrentGps) &&
+      !hasKnownLocation
+    ) {
       return 'acquiring'
     }
 

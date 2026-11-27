@@ -8028,12 +8028,25 @@ app.get(
             ).getTime()
           : Number.POSITIVE_INFINITY
 
+      const latestMovementStatus =
+        String(
+          latestTelemetry?.movementStatus || ''
+        ).toUpperCase()
+
       const deviceStatus =
-        telemetryAgeMs < 2 * 60 * 1000
-          ? 'online'
-          : telemetryAgeMs < 10 * 60 * 1000
-            ? 'delayed'
-            : 'offline'
+        latestMovementStatus === 'PARKED'
+          ? (
+              telemetryAgeMs < 35 * 60 * 1000
+                ? 'online'
+                : telemetryAgeMs < 60 * 60 * 1000
+                  ? 'delayed'
+                  : 'offline'
+            )
+          : telemetryAgeMs < 2 * 60 * 1000
+            ? 'online'
+            : telemetryAgeMs < 10 * 60 * 1000
+              ? 'delayed'
+              : 'offline'
 
       const driver =
         share.dispatch.driver

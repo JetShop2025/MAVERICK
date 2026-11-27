@@ -6222,11 +6222,14 @@ function App() {
         ).toUpperCase()
 
       if (backendMovement === 'PARKED') {
-        if (ageMs < 240000) {
+        // MAV2 reports every 30 minutes while parked. Keep the asset
+        // online through the normal parked interval, then allow a
+        // grace window before declaring it offline.
+        if (ageMs < 35 * 60 * 1000) {
           return 'online'
         }
 
-        if (ageMs < 480000) {
+        if (ageMs < 60 * 60 * 1000) {
           return 'delayed'
         }
 

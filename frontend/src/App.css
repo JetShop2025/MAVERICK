@@ -13203,3 +13203,30 @@ button:disabled {
   }
   .packet-page:last-child { page-break-after: auto; break-after: auto; }
 }
+
+
+/* MAV2 ADMIN CONTROL */
+.mav2-admin-page { display:grid; gap:18px; }
+.mav2-admin-header-actions,.mav2-admin-inline-actions { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
+.mav2-admin-grid { display:grid; grid-template-columns:minmax(0,1.45fr) minmax(320px,.8fr); gap:18px; }
+.mav2-admin-card { padding:18px; }
+.mav2-admin-card-head { display:flex; align-items:flex-start; justify-content:space-between; gap:16px; margin-bottom:14px; }
+.mav2-admin-card-head h2 { margin:3px 0 0; }
+.mav2-admin-error { padding:12px 14px; border:1px solid #fca5a5; border-radius:10px; background:#fef2f2; color:#991b1b; font-weight:700; }
+.mav2-device-list,.mav2-firmware-table,.mav2-command-list { display:grid; gap:8px; }
+.mav2-device-row { display:grid; grid-template-columns:auto minmax(150px,1fr) minmax(190px,.8fr) auto; align-items:center; gap:12px; padding:12px; border:1px solid #e2e8f0; border-radius:10px; background:#fff; }
+.mav2-device-main,.mav2-device-meta,.mav2-firmware-row>div:first-child,.mav2-command-row>div:first-child { display:grid; gap:3px; min-width:0; }
+.mav2-device-main small,.mav2-device-meta,.mav2-firmware-row small,.mav2-command-row small { color:#64748b; font-size:.68rem; }
+.mav2-firmware-upload { display:grid; gap:12px; }
+.mav2-firmware-upload label { display:grid; gap:6px; color:#475569; font-size:.72rem; font-weight:800; }
+.mav2-firmware-upload input { min-height:40px; padding:8px 10px; border:1px solid #cbd5e1; border-radius:8px; background:#fff; }
+.mav2-admin-help { padding:10px 12px; border-radius:8px; background:#f8fafc; color:#64748b; font-size:.7rem; line-height:1.45; }
+.mav2-firmware-row { display:grid; grid-template-columns:minmax(150px,1.2fr) auto 80px 100px auto; align-items:center; gap:12px; padding:12px; border:1px solid #e2e8f0; border-radius:10px; }
+.mav2-build-status,.mav2-command-status { padding:5px 8px; border-radius:999px; background:#e2e8f0; color:#475569; font-size:.62rem; font-weight:900; letter-spacing:.04em; }
+.mav2-build-status.ready,.mav2-command-status.completed { background:#dcfce7; color:#166534; }
+.mav2-build-status.failed,.mav2-command-status.failed { background:#fee2e2; color:#991b1b; }
+.mav2-build-status.compiling,.mav2-build-status.queued,.mav2-command-status.pending,.mav2-command-status.installing { background:#dbeafe; color:#1d4ed8; }
+.mav2-compile-log { grid-column:1/-1; max-height:180px; overflow:auto; margin:0; padding:10px; border-radius:8px; background:#0f172a; color:#e2e8f0; font-size:.65rem; white-space:pre-wrap; }
+.mav2-command-row { display:grid; grid-template-columns:minmax(180px,1fr) auto minmax(180px,1fr); gap:12px; align-items:center; padding:10px 12px; border-bottom:1px solid #e2e8f0; }
+.mav2-admin-empty { padding:18px; color:#64748b; text-align:center; }
+@media (max-width:1000px) { .mav2-admin-grid{grid-template-columns:1fr;} .mav2-device-row,.mav2-firmware-row,.mav2-command-row{grid-template-columns:1fr;} }

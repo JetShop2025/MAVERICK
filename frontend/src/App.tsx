@@ -36,6 +36,7 @@ type ViewName =
   | 'operations'
   | 'monitors'
   | 'reports'
+  | 'admin'
 
 type DeviceStatus =
   | 'online'
@@ -3570,6 +3571,45 @@ function App() {
     locationParkedOffMin: '30',
     temperatureParkedOffMin: '30'
   })
+
+  const [
+    mav2AdminData,
+    setMav2AdminData
+  ] = useState<any>({
+    assets: [],
+    firmwares: [],
+    commands: []
+  })
+
+  const [
+    mav2AdminLoading,
+    setMav2AdminLoading
+  ] = useState(false)
+
+  const [
+    mav2AdminError,
+    setMav2AdminError
+  ] = useState('')
+
+  const [
+    mav2SelectedAssetIds,
+    setMav2SelectedAssetIds
+  ] = useState<number[]>([])
+
+  const [
+    mav2FirmwareVersion,
+    setMav2FirmwareVersion
+  ] = useState('')
+
+  const [
+    mav2FirmwareFile,
+    setMav2FirmwareFile
+  ] = useState<File | null>(null)
+
+  const [
+    mav2AdminAction,
+    setMav2AdminAction
+  ] = useState('')
 
   const [
     notificationsOpen,
@@ -7674,6 +7714,414 @@ function App() {
   const notificationBadgeCount =
     unreadNotificationCount(backendNotifications, readNotificationIds)
 
+  const isMav2Admin =
+    currentUser?.role ===
+      'company_admin' ||
+    currentUser?.role ===
+      'superadmin'
+
+  const loadMav2AdminControl =
+    useCallback(
+      async () => {
+        if (!isMav2Admin) {
+          return
+        }
+
+        const token =
+          localStorage.getItem(
+            'maverick_token'
+          )
+
+        if (!token) {
+          return
+        }
+
+        setMav2AdminLoading(true)
+
+        try {
+          const res =
+            await fetch(
+              `${API_BASE}/api/admin/mav2/control`,
+              {
+                headers: {
+                  Authorization:
+                    `Bearer ${token}`
+                }
+              }
+            )
+
+          const data =
+            await res.json()
+
+          if (!res.ok || !data.ok) {
+            throw new Error(
+              data.message ||
+              'Unable to load MAV2 control'
+            )
+          }
+
+          setMav2AdminData({
+            assets:
+              data.assets || [],
+            firmwares:
+              data.firmwares || [],
+            commands:
+              data.commands || []
+          })
+
+          setMav2AdminError('')
+        } catch (error) {
+          setMav2AdminError(
+            error instanceof Error
+              ? error.message
+              : 'Unable to load MAV2 control'
+          )
+        } finally {
+          setMav2AdminLoading(false)
+        }
+      },
+      [isMav2Admin]
+    )
+
+  useEffect(() => {
+    if (
+      activeView !== 'admin' ||
+      !isMav2Admin
+    ) {
+      return
+    }
+
+    void loadMav2AdminControl()
+
+    const timer =
+      window.setInterval(
+        () => {
+          void loadMav2AdminControl()
+        },
+        5000
+      )
+
+    return () =>
+      window.clearInterval(
+        timer
+      )
+  }, [
+    activeView,
+    isMav2Admin,
+    loadMav2AdminControl
+  ])
+
+  useEffect(() => {
+    if (
+      activeView === 'admin' &&
+      !isMav2Admin
+    ) {
+      setActiveView('map')
+    }
+  }, [
+    activeView,
+    isMav2Admin
+  ])
+
+  const toggleMav2AdminAsset =
+    (assetId: number) => {
+      setMav2SelectedAssetIds(
+        (current) =>
+          current.includes(
+            assetId
+          )
+            ? current.filter(
+                (id) =>
+                  id !== assetId
+              )
+            : [
+                ...current,
+                assetId
+              ]
+      )
+    }
+
+  const queueMav2Refresh =
+    async (
+      assetIds: number[],
+      all = false
+    ) => {
+      const token =
+        localStorage.getItem(
+          'maverick_token'
+        )
+
+      if (!token) {
+        return
+      }
+
+      setMav2AdminAction(
+        'refresh'
+      )
+      setMav2AdminError('')
+
+      try {
+        const res =
+          await fetch(
+            `${API_BASE}/api/admin/mav2/refresh`,
+            {
+              method: 'POST',
+              headers: {
+                'Content-Type':
+                  'application/json',
+                Authorization:
+                  `Bearer ${token}`
+              },
+              body: JSON.stringify({
+                assetIds,
+                all
+              })
+            }
+          )
+
+        const data =
+          await res.json()
+
+        if (!res.ok || !data.ok) {
+          throw new Error(
+            data.message ||
+            'Unable to queue refresh'
+          )
+        }
+
+        await loadMav2AdminControl()
+      } catch (error) {
+        setMav2AdminError(
+          error instanceof Error
+            ? error.message
+            : 'Unable to queue refresh'
+        )
+      } finally {
+        setMav2AdminAction('')
+      }
+    }
+
+  const uploadMav2Firmware =
+    async () => {
+      const token =
+        localStorage.getItem(
+          'maverick_token'
+        )
+
+      if (
+        !token ||
+        !mav2FirmwareFile ||
+        !mav2FirmwareVersion.trim()
+      ) {
+        setMav2AdminError(
+          'Choose an OTA-compatible .ino file and enter a version.'
+        )
+        return
+      }
+
+      setMav2AdminAction(
+        'upload'
+      )
+      setMav2AdminError('')
+
+      try {
+        const sketchSource =
+          await mav2FirmwareFile.text()
+
+        const res =
+          await fetch(
+            `${API_BASE}/api/admin/mav2/firmware`,
+            {
+              method: 'POST',
+              headers: {
+                'Content-Type':
+                  'application/json',
+                Authorization:
+                  `Bearer ${token}`
+              },
+              body: JSON.stringify({
+                version:
+                  mav2FirmwareVersion.trim(),
+                fileName:
+                  mav2FirmwareFile.name,
+                sketchSource
+              })
+            }
+          )
+
+        const data =
+          await res.json()
+
+        if (!res.ok || !data.ok) {
+          throw new Error(
+            data.message ||
+            'Unable to upload firmware'
+          )
+        }
+
+        setMav2FirmwareVersion('')
+        setMav2FirmwareFile(null)
+
+        const input =
+          document.getElementById(
+            'mav2-firmware-file'
+          ) as HTMLInputElement | null
+
+        if (input) {
+          input.value = ''
+        }
+
+        await loadMav2AdminControl()
+      } catch (error) {
+        setMav2AdminError(
+          error instanceof Error
+            ? error.message
+            : 'Unable to upload firmware'
+        )
+      } finally {
+        setMav2AdminAction('')
+      }
+    }
+
+  const retryMav2Firmware =
+    async (
+      firmwareId: number
+    ) => {
+      const token =
+        localStorage.getItem(
+          'maverick_token'
+        )
+
+      if (!token) {
+        return
+      }
+
+      setMav2AdminAction(
+        `compile-${firmwareId}`
+      )
+
+      try {
+        const res =
+          await fetch(
+            `${API_BASE}/api/admin/mav2/firmware/${firmwareId}/compile`,
+            {
+              method: 'POST',
+              headers: {
+                Authorization:
+                  `Bearer ${token}`
+              }
+            }
+          )
+
+        const data =
+          await res.json()
+
+        if (!res.ok || !data.ok) {
+          throw new Error(
+            data.message ||
+            'Unable to compile firmware'
+          )
+        }
+
+        await loadMav2AdminControl()
+      } catch (error) {
+        setMav2AdminError(
+          error instanceof Error
+            ? error.message
+            : 'Unable to compile firmware'
+        )
+      } finally {
+        setMav2AdminAction('')
+      }
+    }
+
+  const deployMav2Firmware =
+    async (
+      firmware: any
+    ) => {
+      if (
+        mav2SelectedAssetIds.length ===
+        0
+      ) {
+        setMav2AdminError(
+          'Select at least one OTA-enabled M2 first.'
+        )
+        return
+      }
+
+      const confirmed =
+        window.confirm(
+          `Deploy MAV2 firmware ${firmware.version} to ${mav2SelectedAssetIds.length} selected device(s)?`
+        )
+
+      if (!confirmed) {
+        return
+      }
+
+      const token =
+        localStorage.getItem(
+          'maverick_token'
+        )
+
+      if (!token) {
+        return
+      }
+
+      setMav2AdminAction(
+        `deploy-${firmware.id}`
+      )
+      setMav2AdminError('')
+
+      try {
+        const res =
+          await fetch(
+            `${API_BASE}/api/admin/mav2/firmware/${firmware.id}/deploy`,
+            {
+              method: 'POST',
+              headers: {
+                'Content-Type':
+                  'application/json',
+                Authorization:
+                  `Bearer ${token}`
+              },
+              body: JSON.stringify({
+                assetIds:
+                  mav2SelectedAssetIds
+              })
+            }
+          )
+
+        const data =
+          await res.json()
+
+        if (!res.ok || !data.ok) {
+          throw new Error(
+            data.message ||
+            'Unable to deploy firmware'
+          )
+        }
+
+        if (
+          data.targeted <
+          mav2SelectedAssetIds.length
+        ) {
+          setMav2AdminError(
+            'Some selected M2 units are not OTA-enabled yet. They need the bootstrap firmware installed by cable once.'
+          )
+        }
+
+        await loadMav2AdminControl()
+      } catch (error) {
+        setMav2AdminError(
+          error instanceof Error
+            ? error.message
+            : 'Unable to deploy firmware'
+        )
+      } finally {
+        setMav2AdminAction('')
+      }
+    }
+
   // =====================================================
   // ACTIONS
   // =====================================================
@@ -10145,6 +10593,25 @@ function App() {
           >
             Reports
           </button>
+          {
+            isMav2Admin && (
+              <button
+                className={
+                  activeView ===
+                    'admin'
+                    ? 'active'
+                    : ''
+                }
+                onClick={() =>
+                  setActiveView(
+                    'admin'
+                  )
+                }
+              >
+                Admin
+              </button>
+            )
+          }
         </nav>
 
         <div className="mav-header-actions">
@@ -16268,6 +16735,526 @@ function App() {
                 )
               }
 
+            </section>
+          )
+        }
+
+        {
+          activeView === 'admin' &&
+          isMav2Admin && (
+            <section className="workspace-page mav2-admin-page">
+              <div className="page-header">
+                <div>
+                  <span className="page-kicker">
+                    Admin only
+                  </span>
+                  <h1>
+                    MAV2 Control Center
+                  </h1>
+                  <p>
+                    Remote telemetry commands and OTA firmware management for ESP32-S3 MAV2 units.
+                  </p>
+                </div>
+
+                <div className="mav2-admin-header-actions">
+                  <button
+                    className="secondary-action"
+                    type="button"
+                    onClick={() =>
+                      void loadMav2AdminControl()
+                    }
+                    disabled={
+                      mav2AdminLoading
+                    }
+                  >
+                    {
+                      mav2AdminLoading
+                        ? 'Refreshing...'
+                        : 'Refresh Status'
+                    }
+                  </button>
+
+                  <button
+                    className="primary-action"
+                    type="button"
+                    onClick={() =>
+                      void queueMav2Refresh(
+                        [],
+                        true
+                      )
+                    }
+                    disabled={
+                      mav2AdminAction ===
+                      'refresh'
+                    }
+                  >
+                    Refresh All M2 Now
+                  </button>
+                </div>
+              </div>
+
+              {
+                mav2AdminError && (
+                  <div className="mav2-admin-error">
+                    {mav2AdminError}
+                  </div>
+                )
+              }
+
+              <div className="mav2-admin-grid">
+                <section className="page-card mav2-admin-card">
+                  <div className="mav2-admin-card-head">
+                    <div>
+                      <span className="page-kicker">
+                        Devices
+                      </span>
+                      <h2>
+                        MAV2 Fleet
+                      </h2>
+                    </div>
+
+                    <div className="mav2-admin-inline-actions">
+                      <button
+                        className="secondary-action"
+                        type="button"
+                        onClick={() =>
+                          setMav2SelectedAssetIds(
+                            (
+                              mav2AdminData.assets ||
+                              []
+                            )
+                              .filter(
+                                (asset: any) =>
+                                  Boolean(
+                                    asset.mav2FirmwareVersion
+                                  )
+                              )
+                              .map(
+                                (asset: any) =>
+                                  asset.id
+                              )
+                          )
+                        }
+                      >
+                        Select All
+                      </button>
+
+                      <button
+                        className="secondary-action"
+                        type="button"
+                        onClick={() =>
+                          setMav2SelectedAssetIds(
+                            []
+                          )
+                        }
+                      >
+                        Clear
+                      </button>
+
+                      <button
+                        className="primary-action"
+                        type="button"
+                        onClick={() =>
+                          void queueMav2Refresh(
+                            mav2SelectedAssetIds
+                          )
+                        }
+                        disabled={
+                          mav2SelectedAssetIds.length ===
+                            0 ||
+                          mav2AdminAction ===
+                            'refresh'
+                        }
+                      >
+                        Refresh Selected
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="mav2-device-list">
+                    {
+                      (
+                        mav2AdminData.assets ||
+                        []
+                      ).map(
+                        (asset: any) => (
+                          <label
+                            className="mav2-device-row"
+                            key={asset.id}
+                          >
+                            <input
+                              type="checkbox"
+                              checked={
+                                mav2SelectedAssetIds.includes(
+                                  asset.id
+                                )
+                              }
+                              onChange={() =>
+                                toggleMav2AdminAsset(
+                                  asset.id
+                                )
+                              }
+                              disabled={
+                                !asset.mav2FirmwareVersion
+                              }
+                            />
+
+                            <div className="mav2-device-main">
+                              <strong>
+                                {
+                                  asset.name ||
+                                  asset.deviceId
+                                }
+                              </strong>
+                              <small>
+                                {asset.deviceId}
+                                {
+                                  asset.groupName
+                                    ? ` · ${asset.groupName}`
+                                    : ''
+                                }
+                              </small>
+                            </div>
+
+                            <div className="mav2-device-meta">
+                              <span>
+                                Firmware:{' '}
+                                <strong>
+                                  {
+                                    asset.mav2FirmwareVersion ||
+                                    'Bootstrap required'
+                                  }
+                                </strong>
+                              </span>
+                              <span>
+                                Check-in:{' '}
+                                {
+                                  asset.mav2LastCheckInAt
+                                    ? formatAge(
+                                        asset.mav2LastCheckInAt
+                                      )
+                                    : 'Never'
+                                }
+                              </span>
+                            </div>
+
+                            <button
+                              className="secondary-action"
+                              type="button"
+                              onClick={(event) => {
+                                event.preventDefault()
+                                void queueMav2Refresh(
+                                  [asset.id]
+                                )
+                              }}
+                              disabled={
+                                !asset.mav2FirmwareVersion
+                              }
+                            >
+                              {
+                                asset.mav2FirmwareVersion
+                                  ? 'Refresh Now'
+                                  : 'Bootstrap First'
+                              }
+                            </button>
+                          </label>
+                        )
+                      )
+                    }
+                  </div>
+                </section>
+
+                <section className="page-card mav2-admin-card">
+                  <div className="mav2-admin-card-head">
+                    <div>
+                      <span className="page-kicker">
+                        Firmware
+                      </span>
+                      <h2>
+                        Upload Sketch
+                      </h2>
+                    </div>
+                  </div>
+
+                  <div className="mav2-firmware-upload">
+                    <label>
+                      Version
+                      <input
+                        type="text"
+                        placeholder="Example: 5.0.1"
+                        value={
+                          mav2FirmwareVersion
+                        }
+                        onChange={(event) =>
+                          setMav2FirmwareVersion(
+                            event.target.value
+                          )
+                        }
+                      />
+                    </label>
+
+                    <label>
+                      Arduino sketch (.ino)
+                      <input
+                        id="mav2-firmware-file"
+                        type="file"
+                        accept=".ino,text/plain"
+                        onChange={(event) =>
+                          setMav2FirmwareFile(
+                            event.target.files
+                              ?.[0] ||
+                            null
+                          )
+                        }
+                      />
+                    </label>
+
+                    <div className="mav2-admin-help">
+                      The sketch must use the MAVTRACK OTA template and contain the OTA compatibility marker. MAVTRACK compiles it for ESP32-S3 before it can be deployed.
+                    </div>
+
+                    <button
+                      className="primary-action"
+                      type="button"
+                      onClick={() =>
+                        void uploadMav2Firmware()
+                      }
+                      disabled={
+                        mav2AdminAction ===
+                          'upload' ||
+                        !mav2FirmwareFile ||
+                        !mav2FirmwareVersion.trim()
+                      }
+                    >
+                      {
+                        mav2AdminAction ===
+                        'upload'
+                          ? 'Uploading...'
+                          : 'Upload & Compile'
+                      }
+                    </button>
+                  </div>
+                </section>
+              </div>
+
+              <section className="page-card mav2-admin-card mav2-firmware-library">
+                <div className="mav2-admin-card-head">
+                  <div>
+                    <span className="page-kicker">
+                      OTA Library
+                    </span>
+                    <h2>
+                      Firmware Builds
+                    </h2>
+                  </div>
+
+                  <small>
+                    Deployments are only sent to devices that have already checked in with OTA-enabled firmware.
+                  </small>
+                </div>
+
+                <div className="mav2-firmware-table">
+                  {
+                    (
+                      mav2AdminData.firmwares ||
+                      []
+                    ).length > 0
+                      ? (
+                        mav2AdminData.firmwares ||
+                        []
+                      ).map(
+                        (firmware: any) => (
+                          <div
+                            className="mav2-firmware-row"
+                            key={firmware.id}
+                          >
+                            <div>
+                              <strong>
+                                v{firmware.version}
+                              </strong>
+                              <small>
+                                {firmware.fileName}
+                              </small>
+                            </div>
+
+                            <span
+                              className={
+                                `mav2-build-status ${String(
+                                  firmware.compileStatus ||
+                                  ''
+                                ).toLowerCase()}`
+                              }
+                            >
+                              {
+                                firmware.compileStatus
+                              }
+                            </span>
+
+                            <div className="mav2-firmware-size">
+                              {
+                                firmware.binarySize
+                                  ? `${Math.round(
+                                      firmware.binarySize /
+                                      1024
+                                    )} KB`
+                                  : '--'
+                              }
+                            </div>
+
+                            <div className="mav2-firmware-hash">
+                              {
+                                firmware.binarySha256
+                                  ? firmware.binarySha256
+                                      .slice(0, 12)
+                                  : 'No binary'
+                              }
+                            </div>
+
+                            <div className="mav2-admin-inline-actions">
+                              {
+                                firmware.compileStatus ===
+                                  'FAILED' && (
+                                  <button
+                                    className="secondary-action"
+                                    type="button"
+                                    onClick={() =>
+                                      void retryMav2Firmware(
+                                        firmware.id
+                                      )
+                                    }
+                                  >
+                                    Retry Compile
+                                  </button>
+                                )
+                              }
+
+                              <button
+                                className="primary-action"
+                                type="button"
+                                disabled={
+                                  firmware.compileStatus !==
+                                    'READY' ||
+                                  mav2SelectedAssetIds.length ===
+                                    0 ||
+                                  mav2AdminAction ===
+                                    `deploy-${firmware.id}`
+                                }
+                                onClick={() =>
+                                  void deployMav2Firmware(
+                                    firmware
+                                  )
+                                }
+                              >
+                                {
+                                  mav2AdminAction ===
+                                  `deploy-${firmware.id}`
+                                    ? 'Queuing...'
+                                    : 'Deploy to Selected'
+                                }
+                              </button>
+                            </div>
+
+                            {
+                              firmware.compileStatus ===
+                                'FAILED' &&
+                              firmware.compileLog && (
+                                <pre className="mav2-compile-log">
+                                  {
+                                    firmware.compileLog
+                                  }
+                                </pre>
+                              )
+                            }
+                          </div>
+                        )
+                      )
+                      : (
+                        <div className="mav2-admin-empty">
+                          No firmware builds uploaded yet.
+                        </div>
+                      )
+                  }
+                </div>
+              </section>
+
+              <section className="page-card mav2-admin-card">
+                <div className="mav2-admin-card-head">
+                  <div>
+                    <span className="page-kicker">
+                      Audit
+                    </span>
+                    <h2>
+                      Recent Remote Commands
+                    </h2>
+                  </div>
+                </div>
+
+                <div className="mav2-command-list">
+                  {
+                    (
+                      mav2AdminData.commands ||
+                      []
+                    ).slice(
+                      0,
+                      30
+                    ).map(
+                      (command: any) => (
+                        <div
+                          className="mav2-command-row"
+                          key={command.id}
+                        >
+                          <div>
+                            <strong>
+                              {
+                                command.type ===
+                                  'REFRESH_NOW'
+                                  ? 'Refresh telemetry'
+                                  : `Firmware ${command.firmware?.version || ''}`
+                              }
+                            </strong>
+                            <small>
+                              {
+                                command.asset?.name ||
+                                command.asset?.deviceId
+                              }
+                              {' · '}
+                              {
+                                formatDateTime(
+                                  command.createdAt
+                                )
+                              }
+                            </small>
+                          </div>
+
+                          <span
+                            className={
+                              `mav2-command-status ${String(
+                                command.status ||
+                                ''
+                              ).toLowerCase()}`
+                            }
+                          >
+                            {
+                              command.status
+                            }
+                          </span>
+
+                          <small>
+                            {
+                              command.resultMessage ||
+                              (
+                                command.deliveredAt
+                                  ? 'Delivered to device'
+                                  : 'Waiting for device check-in'
+                              )
+                            }
+                          </small>
+                        </div>
+                      )
+                    )
+                  }
+                </div>
+              </section>
             </section>
           )
         }

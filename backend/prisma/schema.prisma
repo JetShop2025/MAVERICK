@@ -21,6 +21,8 @@ model Company {
   dispatches        Dispatch[]
   customerLocations CustomerLocation[]
   notifications     NotificationEvent[]
+  mav2Firmwares     Mav2Firmware[]
+  mav2Commands      Mav2Command[]
 }
 
 model User {
@@ -114,14 +116,14 @@ model Asset {
   temperatureAlertEmail    String?
 
   // MAV2 reporting policy. Values are seconds and can be changed from MAVTRACK.
-  mav2LocationMovingSec      Int @default(60)
-  mav2TemperatureMovingSec   Int @default(60)
-  mav2LocationParkedOnSec    Int @default(1800)
-  mav2TemperatureParkedOnSec Int @default(300)
-  mav2LocationParkedOffSec   Int @default(1800)
+  mav2LocationMovingSec       Int @default(60)
+  mav2TemperatureMovingSec    Int @default(60)
+  mav2LocationParkedOnSec     Int @default(1800)
+  mav2TemperatureParkedOnSec  Int @default(300)
+  mav2LocationParkedOffSec    Int @default(1800)
   mav2TemperatureParkedOffSec Int @default(1800)
-  mav2MovementCheckSec       Int @default(15)
-  mav2ConfigVersion          Int @default(1)
+  mav2MovementCheckSec        Int @default(15)
+  mav2ConfigVersion           Int @default(1)
 
   companyId Int
   company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
@@ -130,6 +132,10 @@ model Asset {
   dispatches    Dispatch[]
   notifications NotificationEvent[]
   cameras       Camera[]
+  mav2Commands  Mav2Command[]
+
+  mav2FirmwareVersion String?
+  mav2LastCheckInAt   DateTime?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -137,6 +143,48 @@ model Asset {
   @@index([companyId])
   @@index([companyId, assetType])
   @@index([companyId, groupName])
+}
+
+model Mav2Firmware {
+  id             Int           @id @default(autoincrement())
+  version        String
+  fileName       String
+  sketchSource   String
+  binary         Bytes?
+  binarySha256   String?
+  binarySize     Int?
+  compileStatus  String        @default("PENDING")
+  compileLog     String?
+  createdByEmail String
+  companyId      Int
+  company        Company       @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  commands       Mav2Command[]
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+
+  @@unique([companyId, version])
+  @@index([companyId, createdAt])
+}
+
+model Mav2Command {
+  id               Int           @id @default(autoincrement())
+  type             String
+  status           String        @default("PENDING")
+  payload          Json?
+  requestedByEmail String
+  resultMessage    String?
+  companyId        Int
+  company          Company       @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  assetId          Int
+  asset            Asset         @relation(fields: [assetId], references: [id], onDelete: Cascade)
+  firmwareId       Int?
+  firmware         Mav2Firmware? @relation(fields: [firmwareId], references: [id], onDelete: SetNull)
+  createdAt        DateTime      @default(now())
+  deliveredAt      DateTime?
+  completedAt      DateTime?
+
+  @@index([assetId, status, createdAt])
+  @@index([companyId, createdAt])
 }
 
 model Camera {

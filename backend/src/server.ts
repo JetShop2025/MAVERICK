@@ -9,6 +9,10 @@ import { loadTelemetryViews } from './telemetry-view.js'
 import { registerDispatchDocumentPacket } from './dispatch-document-packet.js'
 import { registerOwnerAuthorization, ownerApprovalSummary, ownerEmail, newOwnerApproval, emailOwnerApproval, requireSignedOwner, OwnerApprovalRequired, lockDispatch, ownerApprovalChanged } from './owner-authorization.js'
 import { loadAssignmentNotice } from './load-push.js'
+import {
+  deliverPendingMav2Command,
+  registerMav2RemoteControl
+} from './mav2-remote-control.js'
 import cors from 'cors'
 import dotenv from 'dotenv'
 import bcrypt from 'bcryptjs'
@@ -803,6 +807,14 @@ async function requireAuth(
     })
   }
 }
+
+registerMav2RemoteControl({
+  app,
+  prisma,
+  requireAuth,
+  mav2TelemetryKey:
+    MAV2_TELEMETRY_KEY
+})
 
 // =====================================================
 // CREAR PRIMER USUARIO ADMIN
@@ -8958,6 +8970,7 @@ app.post(
       }
       const {
         deviceId,
+        firmwareVersion,
         temperature,
         latitude,
         longitude,
@@ -8989,6 +9002,14 @@ app.post(
 
       const normalizedDeviceId =
         deviceId.trim()
+
+      const safeFirmwareVersion =
+        typeof firmwareVersion === 'string' &&
+        firmwareVersion.trim().length > 0
+          ? firmwareVersion
+              .trim()
+              .slice(0, 64)
+          : null
 
       const safeTemperature =
         typeof temperature === 'number' &&
@@ -9233,6 +9254,69 @@ app.post(
         return res.status(409).json({ ok: false, message: 'Asset does not use MAV2 tracking' })
       }
 
+      if (safeFirmwareVersion) {
+        asset =
+          await prisma.asset.update({
+            where: {
+              id: asset.id
+            },
+            data: {
+              mav2FirmwareVersion:
+                safeFirmwareVersion,
+              mav2LastCheckInAt:
+                new Date()
+            }
+          })
+
+        const completedFirmwareCommands =
+          await prisma.mav2Command.findMany({
+            where: {
+              assetId:
+                asset.id,
+              type:
+                'FIRMWARE_UPDATE',
+              status: {
+                in: [
+                  'PENDING',
+                  'INSTALLING'
+                ]
+              },
+              firmware: {
+                version:
+                  safeFirmwareVersion
+              }
+            },
+            select: {
+              id: true
+            }
+          })
+
+        if (
+          completedFirmwareCommands.length >
+          0
+        ) {
+          await prisma.mav2Command.updateMany({
+            where: {
+              id: {
+                in:
+                  completedFirmwareCommands.map(
+                    (command) =>
+                      command.id
+                  )
+              }
+            },
+            data: {
+              status:
+                'COMPLETED',
+              completedAt:
+                new Date(),
+              resultMessage:
+                `Device reported firmware ${safeFirmwareVersion}`
+            }
+          })
+        }
+      }
+
       const previousLiveTelemetry =
         (
           asset &&
@@ -9387,10 +9471,18 @@ app.post(
         }
       )
 
+      const remoteCommand =
+        await deliverPendingMav2Command(
+          prisma,
+          asset.id
+        )
+
       return res.json({
         ok: true,
         message:
           'Telemetry received',
+        command:
+          remoteCommand,
         mav2Config: {
           version:
             asset.mav2ConfigVersion,

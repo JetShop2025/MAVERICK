@@ -273,9 +273,8 @@ async function ensureArduinoCompiler() {
           [
             'set -e',
             `mkdir -p "${binDir}"`,
-            'curl -fsSL https://raw.githubusercontent.com/arduino/arduino-cli/master/install.sh',
-            `| BINDIR="${binDir}" sh -s 1.6.0`
-          ].join(' ')
+            `curl -fsSL https://raw.githubusercontent.com/arduino/arduino-cli/master/install.sh | BINDIR="${binDir}" sh -s 1.6.0`
+          ].join('; ')
 
         await runCommand(
           'sh',

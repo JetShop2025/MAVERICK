@@ -292,6 +292,9 @@ async function ensureArduinoCompiler() {
       await writeFile(
         configPath,
         [
+          'board_manager:',
+          '  additional_urls:',
+          '    - https://espressif.github.io/arduino-esp32/package_esp32_index.json',
           'directories:',
           `  data: "${dataDir.replace(/\\/g, '/')}"`,
           `  downloads: "${downloadsDir.replace(/\\/g, '/')}"`,

@@ -269,11 +269,47 @@ async function ensureArduinoCompiler() {
           )
         }
 
+        const release =
+          process.arch === 'arm64'
+            ? {
+                file:
+                  'arduino-cli_1.6.0_Linux_ARM64.tar.gz',
+                sha256:
+                  '2ed4e1436bb3be1265966af8eba95dd25e28f3a9f92d0a58d371ed14dbaf550f'
+              }
+            : process.arch === 'x64'
+              ? {
+                  file:
+                    'arduino-cli_1.6.0_Linux_64bit.tar.gz',
+                  sha256:
+                    '321ee249f44c78053234fec0f36101092bc6021bf24939e15e0cc2449c5ed250'
+                }
+              : null
+
+        if (!release) {
+          throw new Error(
+            `Unsupported server architecture for Arduino CLI: ${process.arch}`
+          )
+        }
+
+        const archivePath =
+          path.join(
+            root,
+            release.file
+          )
+
+        const downloadUrl =
+          `https://github.com/arduino/arduino-cli/releases/download/v1.6.0/${release.file}`
+
         const installScript =
           [
             'set -e',
             `mkdir -p "${binDir}"`,
-            `curl -fsSL https://raw.githubusercontent.com/arduino/arduino-cli/master/install.sh | BINDIR="${binDir}" sh -s 1.6.0`
+            `curl -fL --retry 3 --connect-timeout 20 -o "${archivePath}" "${downloadUrl}"`,
+            `echo "${release.sha256}  ${archivePath}" | sha256sum -c -`,
+            `tar -xzf "${archivePath}" -C "${binDir}" arduino-cli`,
+            `chmod +x "${cliPath}"`,
+            `test -x "${cliPath}"`
           ].join('; ')
 
         await runCommand(
@@ -283,6 +319,16 @@ async function ensureArduinoCompiler() {
             installScript
           ]
         )
+
+        if (
+          !await fileExists(
+            cliPath
+          )
+        ) {
+          throw new Error(
+            'Arduino CLI installation completed without creating the executable'
+          )
+        }
       }
 
       const configPath =

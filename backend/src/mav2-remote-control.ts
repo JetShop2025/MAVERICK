@@ -988,11 +988,6 @@ export function registerMav2RemoteControl(
               }
             })
 
-        void compileFirmware(
-          prisma,
-          firmware.id
-        )
-
         return res.status(202).json({
           ok: true,
           firmware
@@ -1075,11 +1070,6 @@ export function registerMav2RemoteControl(
         }
       })
 
-      void compileFirmware(
-        prisma,
-        firmware.id
-      )
-
       return res
         .status(202)
         .json({
@@ -1087,6 +1077,323 @@ export function registerMav2RemoteControl(
           firmwareId:
             firmware.id
         })
+    }
+  )
+
+  app.get(
+    '/api/mav2/compiler/jobs/next',
+    requireAuth,
+    requireMav2Admin,
+    async (
+      req: AuthenticatedRequest,
+      res
+    ) => {
+      const companyId =
+        req.user!.companyId
+
+      const staleBefore =
+        new Date(
+          Date.now() -
+          15 * 60 * 1000
+        )
+
+      await prisma.mav2Firmware
+        .updateMany({
+          where: {
+            companyId,
+            compileStatus:
+              'COMPILING',
+            binary: null,
+            updatedAt: {
+              lt: staleBefore
+            }
+          },
+          data: {
+            compileStatus:
+              'QUEUED',
+            compileLog:
+              'Requeued after stale compiler claim'
+          }
+        })
+
+      const firmware =
+        await prisma.mav2Firmware
+          .findFirst({
+            where: {
+              companyId,
+              compileStatus:
+                'QUEUED'
+            },
+            orderBy: {
+              createdAt: 'asc'
+            },
+            select: {
+              id: true,
+              version: true,
+              fileName: true,
+              sketchSource: true
+            }
+          })
+
+      if (!firmware) {
+        return res.json({
+          ok: true,
+          job: null
+        })
+      }
+
+      const claimed =
+        await prisma.mav2Firmware
+          .updateMany({
+            where: {
+              id: firmware.id,
+              companyId,
+              compileStatus:
+                'QUEUED'
+            },
+            data: {
+              compileStatus:
+                'COMPILING',
+              compileLog:
+                'Claimed by MAV2 Compiler Agent'
+            }
+          })
+
+      if (claimed.count !== 1) {
+        return res.json({
+          ok: true,
+          job: null
+        })
+      }
+
+      return res.json({
+        ok: true,
+        job: {
+          id: firmware.id,
+          version:
+            firmware.version,
+          fileName:
+            firmware.fileName,
+          sketchSource:
+            firmware.sketchSource,
+          fqbn:
+            'esp32:esp32:esp32s3'
+        }
+      })
+    }
+  )
+
+  app.post(
+    '/api/mav2/compiler/jobs/:id/result',
+    requireAuth,
+    requireMav2Admin,
+    async (
+      req: AuthenticatedRequest,
+      res
+    ) => {
+      const companyId =
+        req.user!.companyId
+
+      const firmwareId =
+        Number(req.params.id)
+
+      if (
+        !Number.isInteger(
+          firmwareId
+        )
+      ) {
+        return res
+          .status(400)
+          .json({
+            ok: false,
+            message:
+              'Invalid firmware build id'
+          })
+      }
+
+      const status =
+        String(
+          req.body?.status ||
+          ''
+        ).toUpperCase()
+
+      const compileLog =
+        typeof req.body
+          ?.compileLog ===
+        'string'
+          ? req.body.compileLog
+              .slice(-12000)
+          : null
+
+      if (status === 'FAILED') {
+        await prisma.mav2Firmware
+          .updateMany({
+            where: {
+              id: firmwareId,
+              companyId,
+              compileStatus: {
+                in: [
+                  'QUEUED',
+                  'COMPILING'
+                ]
+              }
+            },
+            data: {
+              compileStatus:
+                'FAILED',
+              compileLog:
+                compileLog ||
+                'Compiler agent reported a failure',
+              binary: null,
+              binarySha256: null,
+              binarySize: null
+            }
+          })
+
+        return res.json({
+          ok: true
+        })
+      }
+
+      if (status !== 'READY') {
+        return res
+          .status(400)
+          .json({
+            ok: false,
+            message:
+              'Compiler result status must be READY or FAILED'
+          })
+      }
+
+      const binaryBase64 =
+        typeof req.body
+          ?.binaryBase64 ===
+        'string'
+          ? req.body.binaryBase64
+          : ''
+
+      let binary:
+        Buffer
+
+      try {
+        binary =
+          Buffer.from(
+            binaryBase64,
+            'base64'
+          )
+      } catch {
+        return res
+          .status(400)
+          .json({
+            ok: false,
+            message:
+              'Invalid firmware binary'
+          })
+      }
+
+      if (
+        binary.length <
+          10000 ||
+        binary.length >
+          4 * 1024 * 1024
+      ) {
+        return res
+          .status(400)
+          .json({
+            ok: false,
+            message:
+              'Firmware binary size is invalid'
+          })
+      }
+
+      if (
+        binary[0] !== 0xE9
+      ) {
+        return res
+          .status(400)
+          .json({
+            ok: false,
+            message:
+              'Firmware binary does not look like an ESP32 application image'
+          })
+      }
+
+      const computedSha256 =
+        createHash('sha256')
+          .update(binary)
+          .digest('hex')
+
+      const suppliedSha256 =
+        typeof req.body
+          ?.sha256 ===
+        'string'
+          ? req.body.sha256
+              .trim()
+              .toLowerCase()
+          : ''
+
+      if (
+        suppliedSha256 &&
+        suppliedSha256 !==
+          computedSha256
+      ) {
+        return res
+          .status(400)
+          .json({
+            ok: false,
+            message:
+              'Firmware SHA-256 mismatch'
+          })
+      }
+
+      const updated =
+        await prisma.mav2Firmware
+          .updateMany({
+            where: {
+              id: firmwareId,
+              companyId,
+              compileStatus: {
+                in: [
+                  'QUEUED',
+                  'COMPILING'
+                ]
+              }
+            },
+            data: {
+              compileStatus:
+                'READY',
+              compileLog:
+                compileLog ||
+                'Compiled successfully by MAV2 Compiler Agent',
+              binary:
+                new Uint8Array(
+                  binary
+                ),
+              binarySha256:
+                computedSha256,
+              binarySize:
+                binary.length
+            }
+          })
+
+      if (updated.count !== 1) {
+        return res
+          .status(409)
+          .json({
+            ok: false,
+            message:
+              'Firmware build is no longer waiting for a compiler result'
+          })
+      }
+
+      return res.json({
+        ok: true,
+        firmwareId,
+        binarySize:
+          binary.length,
+        sha256:
+          computedSha256
+      })
     }
   )
 
